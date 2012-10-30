@@ -890,6 +890,7 @@ static struct frame_range findHandler(void)
         bases.func = info.start_ip;
         unw_word_t ip;
         unw_get_reg(&cursor, UNW_REG_IP, &ip);
+        ip -= 1;
         uintptr_t try_start;
         uintptr_t try_end;
         if ( isObjCExceptionCatcher(info.lsda, ip, &bases, &try_start, &try_end) ) {

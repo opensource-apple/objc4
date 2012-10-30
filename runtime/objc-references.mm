@@ -27,6 +27,7 @@
 
 #include "objc-private.h"
 #include <objc/message.h>
+#include <map>
 
 
 // wrap all the murky C++ details in a namespace to get them out of the way.
@@ -37,14 +38,13 @@ namespace objc_references_support {
             return p1 == p2;
         }
     };
-    
-    struct ObjcPointerClear {
-        void operator() (void *pointer) {
-            void **location = (void **)pointer;
-            *location = NULL;
-        }
-    };
 
+    struct ObjectPointerLess {
+      bool operator()(const void *p1, const void *p2) const {
+        return p1 < p2;
+      }
+    };
+    
     struct ObjcPointerHash {
         uintptr_t operator()(void *p) const {
             uintptr_t k = (uintptr_t)p;
@@ -144,15 +144,16 @@ namespace objc_references_support {
         ObjcAssociation() : policy(0), value(0) { }
     };
 
-    // typedef vector<void *, ObjcAllocator<void *> > PtrVector;
-    // typedef hash_set<void *, ObjcPointerHash, ObjcPointerEqual, ObjcAllocator<void *> > PtrHashSet;
-    // typedef hash_map<void *, void *, ObjcPointerHash, ObjcPointerEqual, ObjcAllocator<void *> > PtrPtrHashMap;
 #if TARGET_OS_WIN32
-    typedef hash_map<void *, ObjcAssociation> ObjectAssocationHashMap;
-    typedef hash_map<void *, ObjectAssocationHashMap> AssocationsHashMap;
+    typedef hash_map<void *, ObjcAssociation> ObjectAssociationMap;
+    typedef hash_map<void *, ObjectAssociationMap *> AssociationsHashMap;
 #else
-    typedef hash_map<void *, ObjcAssociation, ObjcPointerHash, ObjcPointerEqual, ObjcAllocator<void *> > ObjectAssocationHashMap;
-    typedef hash_map<void *, ObjectAssocationHashMap, ObjcPointerHash, ObjcPointerEqual, ObjcAllocator<void *> > AssocationsHashMap;
+    class ObjectAssociationMap : public std::map<void *, ObjcAssociation, ObjectPointerLess, ObjcAllocator<std::pair<void * const, ObjcAssociation> > > {
+    public:
+        void *operator new(size_t n) { return ::_malloc_internal(n); }
+        void operator delete(void *ptr) { ::_free_internal(ptr); }
+    };
+    typedef hash_map<void *, ObjectAssociationMap *, ObjcPointerHash, ObjcPointerEqual, ObjcAllocator<void *> > AssociationsHashMap;
 #endif
 }
 
@@ -164,20 +165,20 @@ using namespace objc_references_support;
 
 class AssociationsManager {
     static OSSpinLock _lock;
-    static AssocationsHashMap *_map;               // associative references:  object pointer -> PtrPtrHashMap.
+    static AssociationsHashMap *_map;               // associative references:  object pointer -> PtrPtrHashMap.
 public:
     AssociationsManager()   { OSSpinLockLock(&_lock); }
     ~AssociationsManager()  { OSSpinLockUnlock(&_lock); }
     
-    AssocationsHashMap &associations() {
+    AssociationsHashMap &associations() {
         if (_map == NULL)
-            _map = new(::_malloc_internal(sizeof(AssocationsHashMap))) AssocationsHashMap();
+            _map = new(::_malloc_internal(sizeof(AssociationsHashMap))) AssociationsHashMap();
         return *_map;
     }
 };
 
 OSSpinLock AssociationsManager::_lock = OS_SPINLOCK_INIT;
-AssocationsHashMap *AssociationsManager::_map = NULL;
+AssociationsHashMap *AssociationsManager::_map = NULL;
 
 // expanded policy bits.
 
@@ -195,12 +196,12 @@ __private_extern__ id _object_get_associative_reference(id object, void *key) {
     uintptr_t policy = OBJC_ASSOCIATION_ASSIGN;
     {
         AssociationsManager manager;
-        AssocationsHashMap &associations(manager.associations());
-        AssocationsHashMap::iterator i = associations.find(object);
+        AssociationsHashMap &associations(manager.associations());
+        AssociationsHashMap::iterator i = associations.find(object);
         if (i != associations.end()) {
-            ObjectAssocationHashMap &refs = i->second;
-            ObjectAssocationHashMap::iterator j = refs.find(key);
-            if (j != refs.end()) {
+            ObjectAssociationMap *refs = i->second;
+            ObjectAssociationMap::iterator j = refs->find(key);
+            if (j != refs->end()) {
                 ObjcAssociation &entry = j->second;
                 value = (id)entry.value;
                 policy = entry.policy;
@@ -242,39 +243,41 @@ __private_extern__ void _object_set_associative_reference(id object, void *key, 
     id new_value = value ? acquireValue(value, policy) : nil, old_value = nil;
     {
         AssociationsManager manager;
-        AssocationsHashMap &associations(manager.associations());
+        AssociationsHashMap &associations(manager.associations());
         if (new_value) {
             // break any existing association.
-            AssocationsHashMap::iterator i = associations.find(object);
+            AssociationsHashMap::iterator i = associations.find(object);
             if (i != associations.end()) {
                 // secondary table exists
-                ObjectAssocationHashMap &refs = i->second;
-                ObjectAssocationHashMap::iterator j = refs.find(key);
-                if (j != refs.end()) {
+                ObjectAssociationMap *refs = i->second;
+                ObjectAssociationMap::iterator j = refs->find(key);
+                if (j != refs->end()) {
                     ObjcAssociation &old_entry = j->second;
                     old_policy = old_entry.policy;
                     old_value = old_entry.value;
                     old_entry.policy = policy;
                     old_entry.value = new_value;
                 } else {
-                    refs[key] = ObjcAssociation(policy, new_value);
+                    (*refs)[key] = ObjcAssociation(policy, new_value);
                 }
             } else {
                 // create the new association (first time).
-                associations[object][key] = ObjcAssociation(policy, new_value);
+                ObjectAssociationMap *refs = new ObjectAssociationMap;
+                associations[object] = refs;
+                (*refs)[key] = ObjcAssociation(policy, new_value);
                 _class_assertInstancesHaveAssociatedObjects(object->isa);
             }
         } else {
             // setting the association to nil breaks the association.
-            AssocationsHashMap::iterator i = associations.find(object);
+            AssociationsHashMap::iterator i = associations.find(object);
             if (i !=  associations.end()) {
-                ObjectAssocationHashMap &refs = i->second;
-                ObjectAssocationHashMap::iterator j = refs.find(key);
-                if (j != refs.end()) {
+                ObjectAssociationMap *refs = i->second;
+                ObjectAssociationMap::iterator j = refs->find(key);
+                if (j != refs->end()) {
                     ObjcAssociation &old_entry = j->second;
                     old_policy = old_entry.policy;
                     old_value = (id) old_entry.value;
-                    refs.erase(j);
+                    refs->erase(j);
                 }
             }
         }
@@ -287,16 +290,17 @@ __private_extern__ void _object_remove_assocations(id object) {
     vector<ObjcAssociation> elements;
     {
         AssociationsManager manager;
-        AssocationsHashMap &associations(manager.associations());
+        AssociationsHashMap &associations(manager.associations());
         if (associations.size() == 0) return;
-        AssocationsHashMap::iterator i = associations.find(object);
+        AssociationsHashMap::iterator i = associations.find(object);
         if (i != associations.end()) {
             // copy all of the associations that need to be removed.
-            ObjectAssocationHashMap &refs = i->second;
-            for (ObjectAssocationHashMap::iterator j = refs.begin(); j != refs.end(); ++j) {
+            ObjectAssociationMap *refs = i->second;
+            for (ObjectAssociationMap::iterator j = refs->begin(), end = refs->end(); j != end; ++j) {
                 elements.push_back(j->second);
             }
             // remove the secondary table.
+            delete refs;
             associations.erase(i);
         }
     }
