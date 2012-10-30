@@ -1,4 +1,4 @@
-// TEST_CFLAGS -framework Foundation
+// TEST_CONFIG
 
 #include "test.h"
 
@@ -6,7 +6,7 @@
 #include <pthread.h>
 #include <objc/runtime.h>
 #include <objc/objc-sync.h>
-#include <Foundation/Foundation.h>
+#include <Foundation/NSObject.h>
 
 // synchronized stress test
 // 2-D grid of counters and locks. 

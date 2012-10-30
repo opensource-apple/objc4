@@ -21,16 +21,16 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#import "objc-auto.h"
+#include "objc-auto.h"
 
 #ifndef OBJC_NO_GC
 
-#import <auto_zone.h>
-#import <objc/objc.h>
-#import <objc/runtime.h>
-#import "objc-auto-dump.h"
-#import "objc-private.h"
-#import <strings.h>
+#include <auto_zone.h>
+#include <objc/objc.h>
+#include <objc/runtime.h>
+#include "objc-auto-dump.h"
+#include "objc-private.h"
+#include <strings.h>
 
 /*
  * Utilities
@@ -106,7 +106,7 @@ static void pointer_set_dispose(pointer_set_t *set) {
 /*
    Quickly dump heap to a named file in a pretty raw format.
  */
-PRIVATE_EXTERN BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) {
+BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) {
     // just write interesting info to disk
     int fd = secure_open(filename, O_WRONLY|O_CREAT, geteuid());
     if (fd < 0) return NO;
@@ -116,8 +116,8 @@ PRIVATE_EXTERN BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) {
     }
     
     fwrite(HEADER, strlen(HEADER), 1, fp);
-    char type = myType();
-    fwrite(&type, 1, 1, fp);
+    char type2 = myType();
+    fwrite(&type2, 1, 1, fp);
     
     // for each thread...
     

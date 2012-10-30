@@ -1,12 +1,12 @@
-// TEST_CFLAGS -framework Foundation
+// TEST_CONFIG MEM=mrc,gc
 
 #include "test.h"
 
-#import <Foundation/Foundation.h>
+#import <Foundation/NSObject.h>
 
 @interface Sub : NSObject { } @end
 @implementation Sub 
-+allocWithZone:(NSZone *)zone { 
++(id)allocWithZone:(NSZone *)zone { 
     testprintf("in +[Sub alloc]\n");
     return [super allocWithZone:zone];
     }
@@ -18,9 +18,9 @@
 
 int main()
 {
-    NSAutoreleasePool *pool = [NSAutoreleasePool new];
-    [[Sub new] autorelease];
-    [pool release];
+    PUSH_POOL {
+        [[Sub new] autorelease];
+    } POP_POOL;
 
     succeed(__FILE__);
 }

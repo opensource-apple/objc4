@@ -26,6 +26,12 @@
 
 __BEGIN_DECLS
 
+// We cannot store flags in the low bits of the 'data' field until we work with
+// the 'leaks' team to not think that objc is leaking memory. See radar 8955342
+// for more info.
+#define CLASS_FAST_FLAGS_VIA_RW_DATA 0
+
+
 // Values for class_ro_t->flags
 // These are emitted by the compiler and are part of the ABI. 
 // class is a metaclass
@@ -42,7 +48,7 @@ __BEGIN_DECLS
 #define RO_EXCEPTION          (1<<5)
 // this bit is available for reassignment
 // #define RO_REUSE_ME           (1<<6) 
-// class compiled with -fobjc-arr (automatic retain/release)
+// class compiled with -fobjc-arc (automatic retain/release)
 #define RO_IS_ARR             (1<<7)
 
 // class is in an unloadable bundle - must never be set by compiler
@@ -81,10 +87,18 @@ __BEGIN_DECLS
 #define RW_HAS_CXX_STRUCTORS  (1<<20)
 // class has instance-specific GC layout
 #define RW_HAS_INSTANCE_SPECIFIC_LAYOUT (1 << 19)
-// class or superclass has non-trivial .release_ivars implementation
-#define RW_HAS_IVAR_RELEASER  (1<<18)
-// class or superclass has custom retain/release/autorelease/retainCount impl
-#define RW_HAS_CUSTOM_RR      (1<<17)
+// class's method list is an array of method lists
+#define RW_METHOD_ARRAY       (1<<18)
+
+#if !CLASS_FAST_FLAGS_VIA_RW_DATA
+    // class or superclass has custom retain/release/autorelease/retainCount
+#   define RW_HAS_CUSTOM_RR      (1<<17)
+    // class or superclass has custom allocWithZone: implementation
+#   define RW_HAS_CUSTOM_AWZ     (1<<16)
+#endif
+
+// classref_t is unremapped class_t*
+typedef struct classref * classref_t;
 
 struct method_t {
     SEL name;
@@ -137,21 +151,21 @@ typedef struct method_list_t {
             , method(&mlist.get(start))
         { }
 
-        const method_iterator& operator += (ptrdiff_t count) {
-            method = (method_t*)((uint8_t *)method + count*entsize);
-            index += (int32_t)count;
+        const method_iterator& operator += (ptrdiff_t delta) {
+            method = (method_t*)((uint8_t *)method + delta*entsize);
+            index += (int32_t)delta;
             return *this;
         }
-        const method_iterator& operator -= (ptrdiff_t count) {
-            method = (method_t*)((uint8_t *)method - count*entsize);
-            index -= (int32_t)count;
+        const method_iterator& operator -= (ptrdiff_t delta) {
+            method = (method_t*)((uint8_t *)method - delta*entsize);
+            index -= (int32_t)delta;
             return *this;
         }
-        const method_iterator operator + (ptrdiff_t count) const {
-            return method_iterator(*this) += count;
+        const method_iterator operator + (ptrdiff_t delta) const {
+            return method_iterator(*this) += delta;
         }
-        const method_iterator operator - (ptrdiff_t count) const {
-            return method_iterator(*this) -= count;
+        const method_iterator operator - (ptrdiff_t delta) const {
+            return method_iterator(*this) -= delta;
         }
 
         method_iterator& operator ++ () { *this += 1; return *this; }
@@ -231,6 +245,17 @@ typedef struct protocol_t {
     method_list_t *optionalInstanceMethods;
     method_list_t *optionalClassMethods;
     property_list_t *instanceProperties;
+    uint32_t size;   // sizeof(protocol_t)
+    uint32_t flags;
+    const char **extendedMethodTypes;
+
+    bool hasExtendedMethodTypesField() const {
+        return size >= (offsetof(protocol_t, extendedMethodTypes) 
+                        + sizeof(extendedMethodTypes));
+    }
+    bool hasExtendedMethodTypes() const {
+        return hasExtendedMethodTypesField() && extendedMethodTypes;
+    }
 } protocol_t;
 
 typedef struct protocol_list_t {
@@ -263,8 +288,11 @@ typedef struct class_rw_t {
     uint32_t version;
 
     const class_ro_t *ro;
-    
-    method_list_t **methods;
+
+    union {
+        method_list_t **method_lists;  // RW_METHOD_ARRAY == 1
+        method_list_t *method_list;    // RW_METHOD_ARRAY == 0
+    };
     struct chained_property_list *properties;
     const protocol_list_t ** protocols;
 
@@ -272,48 +300,38 @@ typedef struct class_rw_t {
     struct class_t *nextSiblingClass;
 } class_rw_t;
 
-// We cannot store flags in the low bits of the 'data' field until we work with
-// the 'leaks' team to not think that objc is leaking memory. See radar 8955342
-// for more info.
-#define CLASS_FAST_FLAGS_VIA_RW_DATA 0
-
 typedef struct class_t {
     struct class_t *isa;
     struct class_t *superclass;
     Cache cache;
     IMP *vtable;
-    uintptr_t data_NEVER_USE;  // class_rw_t * plus flags
+    uintptr_t data_NEVER_USE;  // class_rw_t * plus custom rr/alloc flags
 
     class_rw_t *data() const { 
-#if CLASS_FAST_FLAGS_VIA_RW_DATA
-        return (class_rw_t *)(data_NEVER_USE & ~3UL); 
-#else
-        return (class_rw_t *)data_NEVER_USE;
-#endif
+        return (class_rw_t *)(data_NEVER_USE & ~(uintptr_t)3); 
     }
     void setData(class_rw_t *newData) {
-#if CLASS_FAST_FLAGS_VIA_RW_DATA
-        uintptr_t flags = (uintptr_t)data_NEVER_USE & 3UL;
+        uintptr_t flags = (uintptr_t)data_NEVER_USE & (uintptr_t)3;
         data_NEVER_USE = (uintptr_t)newData | flags;
-#else
-        data_NEVER_USE = (uintptr_t)newData;
-#endif
     }
 
     bool hasCustomRR() const {
 #if CLASS_FAST_FLAGS_VIA_RW_DATA
-	return data_NEVER_USE & 1UL;
+        return data_NEVER_USE & (uintptr_t)1;
 #else
-        return (data()->flags & RW_HAS_CUSTOM_RR);
+        return data()->flags & RW_HAS_CUSTOM_RR;
 #endif
     }
-    void setHasCustomRR();
-    void unsetHasCustomRR();
+    void setHasCustomRR(bool inherited = false);
 
-    bool hasIvarReleaser() const {
-        return (data()->flags & RW_HAS_IVAR_RELEASER);
+    bool hasCustomAWZ() const {
+#if CLASS_FAST_FLAGS_VIA_RW_DATA
+        return data_NEVER_USE & (uintptr_t)2;
+#else
+        return data()->flags & RW_HAS_CUSTOM_AWZ;
+#endif
     }
-    void setHasIvarReleaser();
+    void setHasCustomAWZ(bool inherited = false);
 
     bool isRootClass() const {
         return superclass == NULL;
@@ -325,7 +343,7 @@ typedef struct class_t {
 
 typedef struct category_t {
     const char *name;
-    struct class_t *cls;
+    classref_t cls;
     struct method_list_t *instanceMethods;
     struct method_list_t *classMethods;
     struct protocol_list_t *protocols;

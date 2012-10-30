@@ -1,19 +1,14 @@
 // TEST_CONFIG
 
 #include "test.h"
-#include <objc/objc-runtime.h>
-
-@interface Super { id isa; } @end
-@implementation Super 
-+class { return self; }
-+(void)initialize { }
-@end
+#include "testroot.i"
+#include <objc/runtime.h>
 
 int main()
 {
-    Class cls = [Super class];
+    Class cls = [TestRoot class];
     testassert(class_getVersion(cls) == 0);
-    testassert(class_getVersion(cls->isa) > 5);
+    testassert(class_getVersion(object_getClass(cls)) > 5);
     class_setVersion(cls, 100);
     testassert(class_getVersion(cls) == 100);
 

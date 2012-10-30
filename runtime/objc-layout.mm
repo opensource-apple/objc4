@@ -64,7 +64,8 @@ compress_layout(const uint8_t *bits, size_t bitmap_bits, BOOL weak)
     unsigned char *result;
 
     // overallocate a lot; reallocate at correct size later
-    unsigned char * const layout = _calloc_internal(bitmap_bits + 1, 1);
+    unsigned char * const layout = (unsigned char *)
+        _calloc_internal(bitmap_bits + 1, 1);
     unsigned char *l = layout;
 
     size_t i = 0;
@@ -211,7 +212,7 @@ static void decompress_layout(const unsigned char *layout_string, layout_bitmap 
 *   spans an instance size of layoutStringSize); the rest is zero-filled.
 * The returned bitmap must be freed with layout_bitmap_free().
 **********************************************************************/
-PRIVATE_EXTERN layout_bitmap 
+layout_bitmap 
 layout_bitmap_create(const unsigned char *layout_string,
                      size_t layoutStringInstanceSize, 
                      size_t instanceSize, BOOL weak)
@@ -222,7 +223,7 @@ layout_bitmap_create(const unsigned char *layout_string,
     result.weak = weak;
     result.bitCount = words;
     result.bitsAllocated = words;
-    result.bits = _calloc_internal((words+7)/8, 1);
+    result.bits = (uint8_t *)_calloc_internal((words+7)/8, 1);
 
     if (!layout_string) {
         if (!weak) {
@@ -247,7 +248,7 @@ layout_bitmap_create(const unsigned char *layout_string,
  * The bitmap is empty, to represent an object whose ivars are completely unscanned.
  * The returned bitmap must be freed with layout_bitmap_free().
  **********************************************************************/
-PRIVATE_EXTERN layout_bitmap
+layout_bitmap
 layout_bitmap_create_empty(size_t instanceSize, BOOL weak)
 {
     layout_bitmap result;
@@ -256,18 +257,18 @@ layout_bitmap_create_empty(size_t instanceSize, BOOL weak)
     result.weak = weak;
     result.bitCount = words;
     result.bitsAllocated = words;
-    result.bits = _calloc_internal((words+7)/8, 1);
+    result.bits = (uint8_t *)_calloc_internal((words+7)/8, 1);
 
     return result;
 }
 
-PRIVATE_EXTERN void 
+void 
 layout_bitmap_free(layout_bitmap bits)
 {
     if (bits.bits) _free_internal(bits.bits);
 }
 
-PRIVATE_EXTERN const unsigned char * 
+const unsigned char * 
 layout_string_create(layout_bitmap bits)
 {
     const unsigned char *result =
@@ -292,7 +293,7 @@ layout_string_create(layout_bitmap bits)
 }
 
 
-PRIVATE_EXTERN void
+void
 layout_bitmap_set_ivar(layout_bitmap bits, const char *type, size_t offset)
 {
     // fixme only handles some types
@@ -325,7 +326,7 @@ layout_bitmap_set_ivar(layout_bitmap bits, const char *type, size_t offset)
 * Expand a layout bitmap to span newCount bits. 
 * The new bits are undefined.
 **********************************************************************/
-PRIVATE_EXTERN void 
+void 
 layout_bitmap_grow(layout_bitmap *bits, size_t newCount)
 {
     if (bits->bitCount >= newCount) return;
@@ -333,7 +334,8 @@ layout_bitmap_grow(layout_bitmap *bits, size_t newCount)
     if (bits->bitsAllocated < newCount) {
         size_t newAllocated = bits->bitsAllocated * 2;
         if (newAllocated < newCount) newAllocated = newCount;
-        bits->bits = _realloc_internal(bits->bits, (newAllocated+7) / 8);
+        bits->bits = (uint8_t *)
+            _realloc_internal(bits->bits, (newAllocated+7) / 8);
         bits->bitsAllocated = newAllocated;
     }
     assert(bits->bitsAllocated >= bits->bitCount);
@@ -349,7 +351,7 @@ layout_bitmap_grow(layout_bitmap *bits, size_t newCount)
 * The bitmap is expanded and bitCount updated if necessary.
 * newPos >= oldPos.
 **********************************************************************/
-PRIVATE_EXTERN void
+void
 layout_bitmap_slide(layout_bitmap *bits, size_t oldPos, size_t newPos)
 {
     size_t shift;
@@ -372,7 +374,7 @@ layout_bitmap_slide(layout_bitmap *bits, size_t oldPos, size_t newPos)
 * Like layout_bitmap_slide, but can slide backwards too.
 * The end of the bitmap is truncated.
 **********************************************************************/
-PRIVATE_EXTERN void
+void
 layout_bitmap_slide_anywhere(layout_bitmap *bits, size_t oldPos, size_t newPos)
 {
     size_t shift;
@@ -399,7 +401,7 @@ layout_bitmap_slide_anywhere(layout_bitmap *bits, size_t oldPos, size_t newPos)
 * dst must be at least as long as src.
 * Returns YES if any of dst's bits were changed.
 **********************************************************************/
-PRIVATE_EXTERN BOOL
+BOOL
 layout_bitmap_splat(layout_bitmap dst, layout_bitmap src, 
                     size_t oldSrcInstanceSize)
 {
@@ -438,7 +440,7 @@ layout_bitmap_splat(layout_bitmap dst, layout_bitmap src,
 * dst must be at least as long as src.
 * Returns YES if any of dst's bits were changed.
 **********************************************************************/
-PRIVATE_EXTERN BOOL
+BOOL
 layout_bitmap_or(layout_bitmap dst, layout_bitmap src, const char *msg)
 {
     BOOL changed = NO;
@@ -469,7 +471,7 @@ layout_bitmap_or(layout_bitmap dst, layout_bitmap src, const char *msg)
 * dst must be at least as long as src.
 * Returns YES if any of dst's bits were changed.
 **********************************************************************/
-PRIVATE_EXTERN BOOL
+BOOL
 layout_bitmap_clear(layout_bitmap dst, layout_bitmap src, const char *msg)
 {
     BOOL changed = NO;
@@ -494,7 +496,7 @@ layout_bitmap_clear(layout_bitmap dst, layout_bitmap src, const char *msg)
 }
 
 
-PRIVATE_EXTERN void
+void
 layout_bitmap_print(layout_bitmap bits)
 {
     size_t i;

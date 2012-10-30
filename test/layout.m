@@ -1,4 +1,4 @@
-// TEST_CONFIG GC=1 SDK=macos
+// TEST_CONFIG MEM=gc SDK=macos
 
 #include "test.h"
 #include <string.h>

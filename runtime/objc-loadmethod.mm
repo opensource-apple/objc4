@@ -29,6 +29,8 @@
 #include "objc-loadmethod.h"
 #include "objc-private.h"
 
+typedef void(*load_method_t)(id, SEL);
+
 struct loadable_class {
     Class cls;  // may be NULL
     IMP method;
@@ -57,7 +59,7 @@ static int loadable_categories_allocated = 0;
 * Class cls has just become connected. Schedule it for +load if
 * it implements a +load method.
 **********************************************************************/
-PRIVATE_EXTERN void add_class_to_loadable_list(Class cls)
+void add_class_to_loadable_list(Class cls)
 {
     IMP method;
 
@@ -72,7 +74,7 @@ PRIVATE_EXTERN void add_class_to_loadable_list(Class cls)
     
     if (loadable_classes_used == loadable_classes_allocated) {
         loadable_classes_allocated = loadable_classes_allocated*2 + 16;
-        loadable_classes =
+        loadable_classes = (struct loadable_class *)
             _realloc_internal(loadable_classes,
                               loadable_classes_allocated *
                               sizeof(struct loadable_class));
@@ -90,7 +92,7 @@ PRIVATE_EXTERN void add_class_to_loadable_list(Class cls)
 * to its class. Schedule this category for +load after its parent class
 * becomes connected and has its own +load method called.
 **********************************************************************/
-PRIVATE_EXTERN void add_category_to_loadable_list(Category cat)
+void add_category_to_loadable_list(Category cat)
 {
     IMP method;
 
@@ -108,7 +110,7 @@ PRIVATE_EXTERN void add_category_to_loadable_list(Category cat)
     
     if (loadable_categories_used == loadable_categories_allocated) {
         loadable_categories_allocated = loadable_categories_allocated*2 + 16;
-        loadable_categories =
+        loadable_categories = (struct loadable_category *)
             _realloc_internal(loadable_categories,
                               loadable_categories_allocated *
                               sizeof(struct loadable_category));
@@ -125,7 +127,7 @@ PRIVATE_EXTERN void add_category_to_loadable_list(Category cat)
 * Class cls may have been loadable before, but it is now no longer 
 * loadable (because its image is being unmapped). 
 **********************************************************************/
-PRIVATE_EXTERN void remove_class_from_loadable_list(Class cls)
+void remove_class_from_loadable_list(Class cls)
 {
     recursive_mutex_assert_locked(&loadMethodLock);
 
@@ -149,7 +151,7 @@ PRIVATE_EXTERN void remove_class_from_loadable_list(Class cls)
 * Category cat may have been loadable before, but it is now no longer 
 * loadable (because its image is being unmapped). 
 **********************************************************************/
-PRIVATE_EXTERN void remove_category_from_loadable_list(Category cat)
+void remove_category_from_loadable_list(Category cat)
 {
     recursive_mutex_assert_locked(&loadMethodLock);
 
@@ -191,13 +193,13 @@ static void call_class_loads(void)
     // Call all +loads for the detached list.
     for (i = 0; i < used; i++) {
         Class cls = classes[i].cls;
-        IMP load_method = classes[i].method;
+        load_method_t load_method = (load_method_t)classes[i].method;
         if (!cls) continue; 
 
         if (PrintLoading) {
             _objc_inform("LOAD: +[%s load]\n", _class_getName(cls));
         }
-        (*load_method) ((id) cls, SEL_load);
+        (*load_method)(cls, SEL_load);
     }
     
     // Destroy the detached list.
@@ -233,7 +235,7 @@ static BOOL call_category_loads(void)
     // Call all +loads for the detached list.
     for (i = 0; i < used; i++) {
         Category cat = cats[i].cat;
-        IMP load_method = cats[i].method;
+        load_method_t load_method = (load_method_t)cats[i].method;
         Class cls;
         if (!cat) continue;
 
@@ -244,7 +246,7 @@ static BOOL call_category_loads(void)
                              _class_getName(cls), 
                              _category_getName(cat));
             }
-            (*load_method) ((id) cls, SEL_load);
+            (*load_method)(cls, SEL_load);
             cats[i].cat = NULL;
         }
     }
@@ -265,8 +267,9 @@ static BOOL call_category_loads(void)
     for (i = 0; i < loadable_categories_used; i++) {
         if (used == allocated) {
             allocated = allocated*2 + 16;
-            cats = _realloc_internal(cats, allocated * 
-                                     sizeof(struct loadable_category));
+            cats = (struct loadable_category *)
+                _realloc_internal(cats, allocated *
+                                  sizeof(struct loadable_category));
         }
         cats[used++] = loadable_categories[i];
     }
@@ -329,7 +332,7 @@ static BOOL call_category_loads(void)
 * Locking: loadMethodLock must be held by the caller 
 *   All other locks must not be held.
 **********************************************************************/
-PRIVATE_EXTERN void call_load_methods(void)
+void call_load_methods(void)
 {
     static BOOL loading = NO;
     BOOL more_categories;
@@ -339,6 +342,8 @@ PRIVATE_EXTERN void call_load_methods(void)
     // Re-entrant calls do nothing; the outermost call will finish the job.
     if (loading) return;
     loading = YES;
+
+    void *pool = objc_autoreleasePoolPush();
 
     do {
         // 1. Repeatedly call class +loads until there aren't any more
@@ -351,6 +356,8 @@ PRIVATE_EXTERN void call_load_methods(void)
 
         // 3. Run more +loads if there are classes OR more untried categories
     } while (loadable_classes_used > 0  ||  more_categories);
+
+    objc_autoreleasePoolPop(pool);
 
     loading = NO;
 }

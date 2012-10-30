@@ -1,6 +1,8 @@
 // TEST_CFLAGS -Wno-deprecated-declarations
 
 #include "test.h"
+
+#include "testroot.i"
 #include <objc/runtime.h>
 #include <string.h>
 #ifndef OBJC_NO_GC
@@ -34,15 +36,12 @@
 
 static int super_initialize;
 
-@interface Super { @public id isa; } 
+@interface Super : TestRoot
 @property int superProp;
 @end
 @implementation Super 
 @dynamic superProp;
 +(void)initialize { super_initialize++; } 
-+class { return self; }
-+(id) new { return class_createInstance(self, 0); }
--(void) free { object_dispose(self); }
 
 +(void) classMethod { fail("+[Super classMethod] called"); }
 +(void) classMethod2 { fail("+[Super classMethod2] called"); }
@@ -57,13 +56,13 @@ static int state;
 
 static void instance_fn(id self, SEL _cmd __attribute__((unused)))
 {
-    testassert(!class_isMetaClass(self->isa));
+    testassert(!class_isMetaClass(object_getClass(self)));
     state++;
 }
 
 static void class_fn(id self, SEL _cmd __attribute__((unused)))
 {
-    testassert(class_isMetaClass(self->isa));
+    testassert(class_isMetaClass(object_getClass(self)));
     state++;
 }
 
@@ -71,6 +70,7 @@ static void fail_fn(id self __attribute__((unused)), SEL _cmd)
 {
     fail("fail_fn '%s' called", sel_getName(_cmd));
 }
+
 
 static void cycle(void)
 {    
@@ -88,18 +88,18 @@ static void cycle(void)
     testassert(cls);
 #ifndef OBJC_NO_GC
     if (objc_collectingEnabled()) {
-        testassert(auto_zone_size(objc_collectableZone(), cls));
-        testassert(auto_zone_size(objc_collectableZone(), cls->isa));
+        testassert(auto_zone_size(objc_collectableZone(), objc_unretainedPointer(cls)));
+        testassert(auto_zone_size(objc_collectableZone(), objc_unretainedPointer(object_getClass(cls))));
     }
 #endif
     
     class_addMethod(cls, @selector(instanceMethod), 
                     (IMP)&instance_fn, "v@:");
-    class_addMethod(cls->isa, @selector(classMethod), 
+    class_addMethod(object_getClass(cls), @selector(classMethod), 
                     (IMP)&class_fn, "v@:");
-    class_addMethod(cls->isa, @selector(initialize), 
+    class_addMethod(object_getClass(cls), @selector(initialize), 
                     (IMP)&class_fn, "v@:");
-    class_addMethod(cls->isa, @selector(load), 
+    class_addMethod(object_getClass(cls), @selector(load), 
                     (IMP)&fail_fn, "v@:");
 
     ok = class_addProtocol(cls, @protocol(Proto));
@@ -160,15 +160,17 @@ static void cycle(void)
 
     ok = class_addIvar(cls, "ivar", 4, 2, "i");
     testassert(!ok);
-    ok = class_addIvar(cls->isa, "classvar", 4, 2, "i");
+    ok = class_addIvar(object_getClass(cls), "classvar", 4, 2, "i");
     testassert(!ok);
 
     objc_registerClassPair(cls);
 
     // should call cls's +initialize, not super's
+    // Provoke +initialize using class_getMethodImplementation(class method)
+    //   in order to test getNonMetaClass's slow case
     super_initialize = 0;
     state = 0;
-    [cls class];
+    class_getMethodImplementation(object_getClass(cls), @selector(class));
     testassert(super_initialize == 0);
     testassert(state == 1);
 
@@ -176,10 +178,10 @@ static void cycle(void)
     testassert(cls == objc_getClass("Sub"));
 
     testassert(!class_isMetaClass(cls));
-    testassert(class_isMetaClass(cls->isa));
+    testassert(class_isMetaClass(object_getClass(cls)));
 
     testassert(class_getSuperclass(cls) == [Super class]);
-    testassert(class_getSuperclass(cls->isa) == [Super class]->isa);
+    testassert(class_getSuperclass(object_getClass(cls)) == object_getClass([Super class]));
 
     testassert(class_getInstanceSize(cls) >= sizeof(Class) + 4 + 3*size);
     testassert(class_conformsToProtocol(cls, @protocol(Proto)));
@@ -191,12 +193,12 @@ static void cycle(void)
 
     class_addMethod(cls, @selector(instanceMethod2), 
                     (IMP)&instance_fn, "v@:");
-    class_addMethod(cls->isa, @selector(classMethod2), 
+    class_addMethod(object_getClass(cls), @selector(classMethod2), 
                     (IMP)&class_fn, "v@:");
 
     ok = class_addIvar(cls, "ivar2", 4, 4, "i");
     testassert(!ok);
-    ok = class_addIvar(cls->isa, "classvar2", 4, 4, "i");
+    ok = class_addIvar(object_getClass(cls), "classvar2", 4, 4, "i");
     testassert(!ok);
 
     ok = class_addProtocol(cls, @protocol(Proto2));
@@ -240,12 +242,16 @@ static void cycle(void)
     [cls classMethod2];
     testassert(state == 2);
 
-    id obj = [cls new];
-    state = 0;
-    [obj instanceMethod];
-    [obj instanceMethod2];
-    testassert(state == 2);
-    [obj free];
+    // put instance tests on a separate thread so they 
+    // are reliably GC'd before class destruction
+    testonthread(^{
+        id obj = [cls new];
+        state = 0;
+        [obj instanceMethod];
+        [obj instanceMethod2];
+        testassert(state == 2);
+        RELEASE_VAR(obj);
+    });
 
     // Test ivar layouts of sub-subclass
     Class cls2 = objc_allocateClassPair(cls, "SubSub", 0);
@@ -287,8 +293,8 @@ static void cycle(void)
     testassert(ivar_getOffset(class_getInstanceVariable(cls2, "c")) == 
                ivar_getOffset(class_getInstanceVariable(cls2, "b")) + 1);
 
+    testcollect();  // GC: finalize "obj" above before disposing its class
     objc_disposeClassPair(cls2);
-    
     objc_disposeClassPair(cls);
     
     testassert(!objc_getClass("Sub"));
@@ -348,13 +354,16 @@ static void cycle(void)
 
 int main()
 {
-    int count = 1000;
     cycle();
+    cycle();
+
+    int count = 1000;
     leak_mark();
     while (count--) {
-        cycle();
+        testonthread(^{ cycle(); });
     }
-    leak_check(0);
+    leak_check(256);  // fixme should be 0
 
     succeed(__FILE__);
 }
+

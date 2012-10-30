@@ -8,6 +8,8 @@
 #define _OBJC_PRIVATE_H_
 #include <objc/objc-gdb.h>
 
+#warning this test needs to be augmented for the side table machienery
+
 @interface Super { id isa; } @end
 
 @implementation Super

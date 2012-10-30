@@ -39,12 +39,13 @@ testname:
 
 options:
     ARCH=<arch>
-    GC=0|1
     SDK=<sdk name>
     ROOT=/path/to/project.roots/
-    
+
     CC=<compiler name>
 
+    MEM=mrc,arc,gc
+    STDLIB=libc++,libstdc++
     GUARDMALLOC=0|1
 
     BUILD=0|1
@@ -56,8 +57,8 @@ examples:
     test installed library, x86_64, no gc
     $0
 
-    test buildit-built root, i386 and x86_64, gc and no gc, clang compiler
-    $0 ARCH=i386,x86_64 ROOT=/tmp/libclosure.roots GC=1,0 CC=clang
+    test buildit-built root, i386 and x86_64, MRC and ARC and GC, clang compiler
+    $0 ARCH=i386,x86_64 ROOT=/tmp/libclosure.roots MEM=mrc,arc,gc CC=clang
 
     test buildit-built root with iOS simulator
     $0 ARCH=i386 ROOT=/tmp/libclosure.roots SDK=iphonesimulator
@@ -84,7 +85,8 @@ my %ALL_TESTS;
 # SDK=system,macosx,iphoneos,iphonesimulator
 # LANGUAGE=c,c++,objective-c,objective-c++
 # CC=clang,gcc-4.2,llvm-gcc-4.2
-# GC=0,1
+# MEM=mrc,arc,gc
+# STDLIB=libc++,libstdc++
 # GUARDMALLOC=0,1
 
 # things you can set once on the command line
@@ -104,7 +106,9 @@ my $crashcatch = <<'END';
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
-#include <mach-o/dyld-interposing.h>
+
+// from dyld-interposing.h
+#define DYLD_INTERPOSE(_replacement,_replacee) __attribute__((used)) static struct{ const void* replacement; const void* replacee; } _interpose_##_replacee __attribute__ ((section ("__DATA,__interpose"))) = { (const void*)(unsigned long)&_replacement, (const void*)(unsigned long)&_replacee };
 
 static void catchcrash(int sig) 
 {
@@ -244,12 +248,16 @@ sub cplusplus {
 }
 
 # Returns an array of all sdks from `xcodebuild -showsdks`
+my @sdks_memo;
 sub getsdks {
-    return ("system", `xcodebuild -showsdks` =~ /-sdk (.+)$/mg);
+    if (!@sdks_memo) {
+        @sdks_memo = ("system", `xcodebuild -showsdks` =~ /-sdk (.+)$/mg);
+    }
+    return @sdks_memo;
 }
 
-# Returns whether the given sdk supports GC
-sub supportsgc {
+# Returns whether the given sdk supports -lauto
+sub supportslibauto {
     my ($sdk) = @_;
     return 1 if $sdk eq "system";
     return 1 if $sdk =~ /^macosx/;
@@ -362,12 +370,12 @@ sub filter_expected
     my $name = shift;
 
     my %T = %{$C{"TEST_$name"}};
-    my $check = $T{TEST_RUN_OUTPUT}  ||  return "";
+    my $runerror = $T{TEST_RUN_OUTPUT}  ||  return "";
 
     my $bad = "";
 
     my $output = join("\n", @$outputref) . "\n";
-    if ($output !~ /$check/s) {
+    if ($output !~ /$runerror/) {
 	$bad = "(run output does not match TEST_RUN_OUTPUT)";
 	@$outputref = ("FAIL: $name");
     } else {
@@ -478,18 +486,19 @@ sub filter_guardmalloc
     my $errors = 0;
 
     my @new_output;
+    my $count = 0;
     for my $line (@$outputref) {
-	if ($line =~ /^GuardMalloc: /) {
-	    # guardmalloc prologue
-	    next;
-	}
 	if ($line !~ /^GuardMalloc\[[^\]]+\]: /) {
 	    # not guardmalloc output
 	    push @new_output, $line;
 	    next;
 	}
 
-	$errors = 1;
+        # Ignore 4 lines of guardmalloc prologue.
+        # Anything further is a guardmalloc error.
+        if (++$count > 4) {
+            $errors = 1;
+        }
     }
 
     @$outputref = @new_output;
@@ -533,7 +542,7 @@ sub gather_simple {
     return 0 if !$test_h && !$disabled && !$crashes && !defined($conditionstring) && !defined($envstring) && !defined($cflags) && !defined($buildcmd) && !defined($builderror) && !defined($runerror);
 
     if ($disabled) {
-        print "${yellow}SKIP: $name (disabled by TEST_DISABLED)$def\n";
+        print "${yellow}SKIP: $name    (disabled by TEST_DISABLED)$def\n";
         return 0;
     }
 
@@ -591,7 +600,7 @@ sub gather_simple {
 
         if (!$ok) {
             my $plural = (@condvalues > 1) ? "one of: " : "";
-            print "SKIP: $name ($condkey=$testvalue, but test requires $plural", join(' ', @condvalues), ")\n";
+            print "SKIP: $name    ($condkey=$testvalue, but test requires $plural", join(' ', @condvalues), ")\n";
             return 0;
         }
     }
@@ -644,7 +653,7 @@ sub build_simple {
     my $ok;
     if (my $builderror = $T{TEST_BUILD_OUTPUT}) {
         # check for expected output and ignore $?
-        if ($output =~ /$builderror/s) {
+        if ($output =~ /$builderror/) {
             $ok = 1;
         } else {
             print "${red}FAIL: /// test '$name' \\\\\\$def\n";
@@ -711,13 +720,13 @@ sub run_simple {
         $env =~ s/DYLD_LIBRARY_PATH=\S+//;
         $env =~ s/DYLD_ROOT_PATH=\S+//;
 
-        my $cmd = "ssh iphone 'cd $remotedir && $remotedyld $env ./$name.out'";
+        my $cmd = "ssh iphone 'cd $remotedir && env $env $remotedyld ./$name.out'";
         $output = make("$cmd");
     }
     else {
         # run locally
 
-        my $cmd = "$env ./$name.out";
+        my $cmd = "env $env ./$name.out";
         $output = make("sh -c '$cmd 2>&1' 2>&1");
         # need extra sh level to capture "sh: Illegal instruction" after crash
         # fixme fail if $? except tests that expect to crash
@@ -727,11 +736,38 @@ sub run_simple {
 }
 
 
+my %compiler_memo;
+sub find_compiler {
+    my ($cc, $sdk, $sdk_path) = @_;
+
+    # memoize
+    my $key = $cc . ':' . $sdk;
+    my $result = $compiler_memo{$key};
+    return $result if defined $result;
+    
+    if (-e $cc) {
+        $result = $cc;
+    } elsif (-e "$sdk_path/$cc") {
+        $result = "$sdk_path/$cc";
+    } elsif ($sdk eq "system"  &&  -e "/usr/bin/$cc") {
+        $result = "/usr/bin/$cc";
+    } elsif ($sdk eq "system") {
+        $result  = `xcrun -find $cc 2>/dev/null`;
+    } else {
+        $result  = `xcrun -sdk $sdk -find $cc 2>/dev/null`;
+    }
+
+    chomp $result;
+    $compiler_memo{$key} = $result;
+    return $result;
+}
+
 sub make_one_config {
     my $configref = shift;
     my $root = shift;
     my %C = %{$configref};
 
+    # Aliases
     $C{LANGUAGE} = "objective-c"  if $C{LANGUAGE} eq "objc";
     $C{LANGUAGE} = "objective-c++"  if $C{LANGUAGE} eq "objc++";
     
@@ -762,10 +798,10 @@ sub make_one_config {
     # but before adding other settings
     my $configname = config_name(%C);
     die if ($configname =~ /'/);
-    die if ($configname =~ /\//);
     die if ($configname =~ / /);
-    $C{DIR} = "$BUILDDIR/$configname";
     ($C{NAME} = $configname) =~ s/~/ /g;
+    (my $configdir = $configname) =~ s#/##g;
+    $C{DIR} = "$BUILDDIR/$configdir";
 
     $C{SDK_PATH} = "/";
     if ($C{SDK} ne "system") {
@@ -785,47 +821,29 @@ sub make_one_config {
     } elsif (-e "$root/$TESTLIBNAME") {
         $C{TESTLIB} = "$root/$TESTLIBNAME";
     } else {
-        die "No $TESTLIBNAME in root '$root' and sdk '$C{SDK_PATH}'\n";
+        die "No $TESTLIBNAME in root '$root' for sdk '$C{SDK_PATH}'\n";
+    }
+
+    if ($VERBOSE) {
+        my @uuids = `/usr/bin/dwarfdump -u '$C{TESTLIB}'`;
+        while (my $uuid = shift @uuids) {
+            print "note: $uuid";
+        }
     }
 
     # Look up compilers
-    $C{CXX} = cplusplus($C{CC});
-    if ($BUILD) {
-        my $oldcc = $C{CC};
-        my $oldcxx = $C{CXX};
+    my $cc = $C{CC};
+    my $cxx = cplusplus($C{CC});
+    if (! $BUILD) {
+        $C{CC} = $cc;
+        $C{CXX} = $cxx;
+    } else {
+        $C{CC} = find_compiler($cc, $C{SDK}, $C{SDK_PATH});
+        $C{CXX} = find_compiler($cxx, $C{SDK}, $C{SDK_PATH});
 
-        if (-e $C{CC}) {
-            # use it
-        } elsif (-e "$C{SDK_PATH}/$C{CC}") {
-            $C{CC} = "$C{SDK_PATH}/$C{CC}";
-        } elsif ($C{SDK} eq "system"  &&  -e "/usr/bin/$C{CC}") {
-            $C{CC} = "/usr/bin/$C{CC}";
-        } elsif ($C{SDK} eq "system") {
-            $C{CC}  = `xcrun -find $C{CC} 2>/dev/null`;
-            chomp $C{CC};
-        } else {
-            $C{CC}  = `xcrun -sdk $C{SDK} -find $C{CC} 2>/dev/null`;
-            chomp $C{CC};
-        }
-
-        if (-e $C{CXX}) {
-            # use it
-        } elsif (-e "$C{SDK_PATH}/$C{CXX}") {
-            $C{CXX} = "$C{SDK_PATH}/$C{CXX}";
-        } elsif ($C{SDK} eq "system"  &&  -e "/usr/bin/$C{CXX}") {
-            $C{CXX} = "/usr/bin/$C{CXX}";
-        } elsif ($C{SDK} eq "system") {
-            $C{CXX}  = `xcrun -find $C{CXX} 2>/dev/null`;
-            chomp $C{CXX};
-        } else {
-            $C{CXX}  = `xcrun -sdk $C{SDK} -find $C{CXX} 2>/dev/null`;
-            chomp $C{CXX};
-        }
-
-        die "No compiler '$oldcc' in SDK '$C{SDK}'\n" if ! -e $C{CC};
-        die "No compiler '$oldcxx' '$C{CXX}' in SDK '$C{SDK}'\n" if ! -e $C{CXX};
-    }
-    
+        die "No compiler '$cc' ('$C{CC}') in SDK '$C{SDK}'\n" if !-e $C{CC};
+        die "No compiler '$cxx' ('$C{CXX}') in SDK '$C{SDK}'\n" if !-e $C{CXX};
+    }    
     
     # Populate cflags
 
@@ -865,17 +883,30 @@ sub make_one_config {
 
     if ($C{CC} =~ /clang/) {
         $cflags .= " -Qunused-arguments -fno-caret-diagnostics";
+        $cflags .= " -stdlib=$C{STDLIB} -fno-objc-link-runtime";
     }
+
     
     # Populate objcflags
     
     $objcflags .= " -lobjc";
-    if ($C{GC}) {
+    if ($C{MEM} eq "gc") {
         $objcflags .= " -fobjc-gc";
     }
-    if (supportsgc($C{SDK})) {
+    elsif ($C{MEM} eq "arc") {
+        $objcflags .= " -fobjc-arc";
+    }
+    elsif ($C{MEM} eq "mrc") {
+        # nothing
+    }
+    else {
+        die "unrecognized MEM '$C{MEM}'\n";
+    }
+
+    if (supportslibauto($C{SDK})) {
+        # do this even for non-GC tests
         $objcflags .= " -lauto";
-    }    
+    }
     
     # Populate ENV_PREFIX
     $C{ENV} = "LANG=C";
@@ -902,10 +933,10 @@ sub make_one_config {
     }
 
     # Populate compiler commands
-    $C{COMPILE_C}   = "LANG=C '$C{CC}'  $cflags -x c -std=gnu99";
-    $C{COMPILE_CXX} = "LANG=C '$C{CXX}' $cflags -x c++";
-    $C{COMPILE_M}   = "LANG=C '$C{CC}'  $cflags $objcflags -x objective-c -std=gnu99";
-    $C{COMPILE_MM}  = "LANG=C '$C{CXX}' $cflags $objcflags -x objective-c++";
+    $C{COMPILE_C}   = "env LANG=C '$C{CC}'  $cflags -x c -std=gnu99";
+    $C{COMPILE_CXX} = "env LANG=C '$C{CXX}' $cflags -x c++";
+    $C{COMPILE_M}   = "env LANG=C '$C{CC}'  $cflags $objcflags -x objective-c -std=gnu99";
+    $C{COMPILE_MM}  = "env LANG=C '$C{CXX}' $cflags $objcflags -x objective-c++";
     
     $C{COMPILE} = $C{COMPILE_C}    if $C{LANGUAGE} eq "c";
     $C{COMPILE} = $C{COMPILE_CXX}  if $C{LANGUAGE} eq "c++";
@@ -913,7 +944,37 @@ sub make_one_config {
     $C{COMPILE} = $C{COMPILE_MM}   if $C{LANGUAGE} eq "objective-c++";
     die "unknown language '$C{LANGUAGE}'\n" if !defined $C{COMPILE};
 
-    ($C{COMPILE_NOGC} = $C{COMPILE}) =~ s/-fobjc-gc\S*//;
+    ($C{COMPILE_NOMEM} = $C{COMPILE}) =~ s/ -fobjc-(?:gc|arc)\S*//g;
+    ($C{COMPILE_NOLINK} = $C{COMPILE}) =~ s/ '?-(?:Wl,|l)\S*//g;
+    ($C{COMPILE_NOLINK_NOMEM} = $C{COMPILE_NOMEM}) =~ s/ '?-(?:Wl,|l)\S*//g;
+
+
+    # Reject some self-inconsistent configurations
+    if ($C{MEM} !~ /^(mrc|arc|gc)$/) {
+        die "unknown MEM=$C{MEM} (expected one of mrc arc gc)\n";
+    }
+
+    if ($C{MEM} eq "gc"  &&  $C{SDK} =~ /^iphone/) {
+        print "note: skipping configuration $C{NAME}\n";
+        print "note:   because SDK=$C{SDK} does not support MEM=$C{MEM}\n";
+        return 0;
+    }
+    if ($C{MEM} eq "arc"  &&  $C{SDK} !~ /^iphone/  &&  $C{ARCH} eq "i386") {
+        print "note: skipping configuration $C{NAME}\n";
+        print "note:   because 32-bit Mac does not support MEM=$C{MEM}\n";
+        return 0;
+    }
+    if ($C{MEM} eq "arc"  &&  $C{CC} !~ /clang/) {
+        print "note: skipping configuration $C{NAME}\n";
+        print "note:   because CC=$C{CC} does not support MEM=$C{MEM}\n";
+        return 0;
+    }
+
+    if ($C{STDLIB} ne "libstdc++"  &&  $C{CC} !~ /clang/) {
+        print "note: skipping configuration $C{NAME}\n";
+        print "note:   because CC=$C{CC} does not support STDLIB=$C{STDLIB}\n";
+        return 0;
+    }
 
     %$configref = %C;
 }    
@@ -937,11 +998,14 @@ sub make_configs {
         @results = @newresults;
     }
 
+    my @newresults;
     for my $configref(@results) {
-        make_one_config($configref, $root);
+        if (make_one_config($configref, $root)) {
+            push @newresults, $configref;
+        }
     }
 
-    return @results;
+    return @newresults;
 }
 
 sub config_name {
@@ -1090,10 +1154,11 @@ $args{ARCH} = getargs("ARCHS", $default_arch)  if !@{$args{ARCH}}[0];
 
 $args{SDK} = getargs("SDK", "system");
 
-$args{GC} = getbools("GC", 0);
+$args{MEM} = getargs("MEM", "mrc");
 $args{LANGUAGE} = [ map { lc($_) } @{getargs("LANGUAGE", "objective-c")} ];
+$args{STDLIB} = getargs("STDLIB", "libstdc++");
 
-$args{CC} = getargs("CC", "llvm-gcc-4.2");
+$args{CC} = getargs("CC", "clang");
 
 $args{GUARDMALLOC} = getbools("GUARDMALLOC", 0);
 

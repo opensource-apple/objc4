@@ -1,8 +1,8 @@
-// TEST_CFLAGS -framework Foundation
+// TEST_CONFIG
 
 #include "test.h"
 
-#include <Foundation/Foundation.h>
+#include <Foundation/NSObject.h>
 #include <mach/mach.h>
 #include <pthread.h>
 #include <sys/time.h>

@@ -1,5 +1,5 @@
 // TEST_CFLAGS -framework Foundation
-// TEST_CONFIG GC=0
+// TEST_CONFIG MEM=mrc
 
 #define FOUNDATION 1
 #define NAME "rr-nsautorelease"

@@ -1,8 +1,15 @@
-// TEST_CFLAGS -framework Foundation
-// TEST_CONFIG GC=0
+// TEST_CONFIG MEM=mrc
+// TEST_CRASHES
+/*
+TEST_RUN_OUTPUT
+objc\[\d+\]: cannot form weak reference to instance \(0x[0-9a-f]+\) of class Crash
+CRASHED: SIG(ILL|TRAP)
+END
+*/
 
 #include "test.h"
-#include <Foundation/Foundation.h>
+
+#include <Foundation/NSObject.h>
 
 static id weak;
 static id weak2;
@@ -14,17 +21,25 @@ static bool did_dealloc;
     testassert(weak == self);
     testassert(weak2 == self);
 
-    testprintf("Weak store fails while deallocating\n");
-    id result = objc_storeWeak(&weak, self);
-    testassert(result == NULL);
-    testassert(weak == NULL);
-
     testprintf("Weak references clear during super dealloc\n");
     testassert(weak2 != NULL);
     [super dealloc];
     testassert(weak2 == NULL);
 
     did_dealloc = true;
+}
+@end
+
+@interface Crash : NSObject @end
+@implementation Crash
+-(void)dealloc {
+    testassert(weak == self);
+    testassert(weak2 == self);
+
+    testprintf("Weak store crashes while deallocating\n");
+    objc_storeWeak(&weak, self);
+    fail("objc_storeWeak of deallocating value should have crashed");
+    [super dealloc];
 }
 @end
 
@@ -70,5 +85,15 @@ int main()
     testassert(weak == NULL);
     testassert(weak2 == NULL);
 
-    succeed(__FILE__);
+    Crash *obj3 = [Crash new];
+    result = objc_storeWeak(&weak, obj3);
+    testassert(result == obj3);
+    testassert(weak == obj3);
+
+    result = objc_storeWeak(&weak2, obj3);
+    testassert(result == obj3);
+    testassert(weak2 == obj3);
+
+    [obj3 release];
+    fail("should have crashed in -[Crash dealloc]");
 }

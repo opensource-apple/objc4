@@ -17,7 +17,6 @@ void nop(void) { }
 __END_DECLS
 
 asm(
-    ".globl L_category \n"
     ".section __DATA,__objc_data \n"
     ".align 3 \n"
     "L_category: \n"
@@ -64,6 +63,7 @@ asm(
     PTR "L_category \n"
 #endif
 
+    ".text \n"
     );
 
 // __OBJC2__

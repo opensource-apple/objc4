@@ -136,7 +136,8 @@ static _objc_initializing_classes *_fetchInitializingClassList(BOOL create)
         if (!create) {
             return NULL;
         } else {
-            list = _calloc_internal(1, sizeof(_objc_initializing_classes));
+            list = (_objc_initializing_classes *)
+                _calloc_internal(1, sizeof(_objc_initializing_classes));
             data->initializingClasses = list;
         }
     }
@@ -147,7 +148,8 @@ static _objc_initializing_classes *_fetchInitializingClassList(BOOL create)
         // even if create == NO.
         // Allow 4 simultaneous class inits on this thread before realloc.
         list->classesAllocated = 4;
-        classes = _calloc_internal(list->classesAllocated, sizeof(Class));
+        classes = (Class *)
+            _calloc_internal(list->classesAllocated, sizeof(Class));
         list->metaclasses = classes;
     }
     return list;
@@ -160,7 +162,7 @@ static _objc_initializing_classes *_fetchInitializingClassList(BOOL create)
 * Any part of the list may be NULL.
 * Called from _objc_pthread_destroyspecific().
 **********************************************************************/
-PRIVATE_EXTERN 
+
 void _destroyInitializingClassList(struct _objc_initializing_classes *list)
 {
     if (list != NULL) {
@@ -222,7 +224,9 @@ static void _setThisThreadIsInitializingClass(Class cls)
 
     // class list is full - reallocate
     list->classesAllocated = list->classesAllocated * 2 + 1;
-    list->metaclasses = _realloc_internal(list->metaclasses, list->classesAllocated * sizeof(Class));
+    list->metaclasses = (Class *) 
+        _realloc_internal(list->metaclasses,
+                          list->classesAllocated * sizeof(Class));
     // zero out the new entries
     list->metaclasses[i++] = cls;
     for ( ; i < list->classesAllocated; i++) {
@@ -292,7 +296,7 @@ static void _finishInitializing(Class cls, Class supercls)
     
     // mark any subclasses that were merely waiting for this class
     if (!pendingInitializeMap) return;
-    pending = NXMapGet(pendingInitializeMap, cls);
+    pending = (PendingInitialize *)NXMapGet(pendingInitializeMap, cls);
     if (!pending) return;
 
     NXMapRemove(pendingInitializeMap, cls);
@@ -335,9 +339,10 @@ static void _finishInitializingAfter(Class cls, Class supercls)
         // fixme pre-size this table for CF/NSObject +initialize
     }
 
-    pending = _malloc_internal(sizeof(*pending));
+    pending = (PendingInitialize *)_malloc_internal(sizeof(*pending));
     pending->subclass = cls;
-    pending->next = NXMapGet(pendingInitializeMap, supercls);
+    pending->next = (PendingInitialize *)
+        NXMapGet(pendingInitializeMap, supercls);
     NXMapInsert(pendingInitializeMap, supercls, pending);
 }
 
@@ -348,14 +353,12 @@ static void _finishInitializingAfter(Class cls, Class supercls)
 *
 * Called only from _class_lookupMethodAndLoadCache (or itself).
 **********************************************************************/
-PRIVATE_EXTERN void _class_initialize(Class cls)
+void _class_initialize(Class cls)
 {
+    assert(!_class_isMetaClass(cls));
+
     Class supercls;
     BOOL reallyInitialize = NO;
-
-    // Get the real class from the metaclass. The superclass chain 
-    // hangs off the real class only.
-    cls = _class_getNonMetaClass(cls);
 
     // Make sure super is done initializing BEFORE beginning to initialize cls.
     // See note about deadlock above.

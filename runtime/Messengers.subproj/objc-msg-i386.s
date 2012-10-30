@@ -381,13 +381,13 @@ LMsgSendMissInstrumentDone_$0_$1_$2:
 .if $1 == MSG_SEND			// MSG_SEND
 	popl	%esi			//  restore callers register
 	popl	%edi			//  restore callers register
-	movl	self(%esp), %eax	//  get messaged object
-	movl	isa(%eax), %eax		//  get objects class
+	movl	self(%esp), %edx	//  get messaged object
+	movl	isa(%edx), %eax		//  get objects class
 .elseif $1 == MSG_SENDSUPER		// MSG_SENDSUPER
 	// replace "super" arg with "receiver"
 	movl	super+8(%esp), %edi	//  get super structure
-	movl	receiver(%edi), %esi	//  get messaged object
-	movl	%esi, super+8(%esp)	//  make it the first argument
+	movl	receiver(%edi), %edx	//  get messaged object
+	movl	%edx, super+8(%esp)	//  make it the first argument
 	movl	class(%edi), %eax	//  get messaged class
 	popl	%esi			//  restore callers register
 	popl	%edi			//  restore callers register
@@ -399,13 +399,13 @@ LMsgSendMissInstrumentDone_$0_$1_$2:
 .if $1 == MSG_SEND			// MSG_SEND (stret)
 	popl	%esi			//  restore callers register
 	popl	%edi			//  restore callers register
-	movl	self_stret(%esp), %eax	//  get messaged object
-	movl	isa(%eax), %eax		//  get objects class
+	movl	self_stret(%esp), %edx	//  get messaged object
+	movl	isa(%edx), %eax		//  get objects class
 .elseif $1 == MSG_SENDSUPER		// MSG_SENDSUPER (stret)
 	// replace "super" arg with "receiver"
 	movl	super_stret+8(%esp), %edi//  get super structure
-	movl	receiver(%edi), %esi	//  get messaged object
-	movl	%esi, super_stret+8(%esp)//  make it the first argument
+	movl	receiver(%edi), %edx	//  get messaged object
+	movl	%edx, super_stret+8(%esp)//  make it the first argument
 	movl	class(%edi), %eax	//  get messaged class
 	popl	%esi			//  restore callers register
 	popl	%edi			//  restore callers register
@@ -414,6 +414,9 @@ LMsgSendMissInstrumentDone_$0_$1_$2:
 .endif
 .endif
 
+					// edx = receiver
+					// ecx = selector
+					// eax = class
 	jmp	$2			// go to callers handler
 
 // eax points to matching cache entry
@@ -496,21 +499,25 @@ LMsgSendHitInstrumentDone_$0_$1_$2:
 // 	  MSG_SEND	(first parameter is receiver)
 //	  MSG_SENDSUPER	(first parameter is address of objc_super structure)
 //
+//	  edx = receiver
+// 	  ecx = selector
+// 	  eax = class
+//        (all set by CacheLookup's miss case)
+// 
 // Stack must be at 0xXXXXXXXc on entrance.
 //
-// On exit: Register parameters restored from CacheLookup
-//	  imp in eax
+// On exit:  esp unchanged
+//           imp in eax
 //
 /////////////////////////////////////////////////////////////////////
 
 .macro MethodTableLookup
-
-	subl    $$4, %esp		// 16-byte align the stack
-	// push args (class, selector)
-	pushl	%ecx
-	pushl	%eax
-	call	__class_lookupMethodAndLoadCache
-	addl    $$12, %esp		// pop parameters and alignment
+	// stack is already aligned
+	pushl	%eax			// class
+	pushl	%ecx			// selector
+	pushl	%edx			// receiver
+	call	__class_lookupMethodAndLoadCache3
+	addl    $$12, %esp		// pop parameters
 .endmacro
 
 
@@ -1015,7 +1022,7 @@ _FwdSel: .long 0
 
 	.cstring
 	.align 2
-LUnkSelStr: .ascii "Does not recognize selector %s\0"
+LUnkSelStr: .ascii "Does not recognize selector %s (while forwarding %s)\0"
 
 	.data
 	.align 2
@@ -1082,8 +1089,9 @@ L__objc_msgForward$pic_base:
 	ret
 
 LMsgForwardError:
-	// Call __objc_error(receiver, "unknown selector %s", "forward::")
-	subl    $12, %esp		// 16-byte align the stack
+	// Call __objc_error(receiver, "unknown selector %s %s", "forward::", forwardedSel)
+	subl    $8, %esp		// 16-byte align the stack
+	pushl	(selector+4+4)(%ebp)	// the forwarded selector
 	movl	_FwdSel-L__objc_msgForward$pic_base(%edx),%eax
 	pushl 	%eax
 	leal	LUnkSelStr-L__objc_msgForward$pic_base(%edx),%eax
@@ -1135,8 +1143,9 @@ L__objc_msgForwardStret$pic_base:
 	ret	$4			// pop struct return address (#2995932)
 
 LMsgForwardStretError:
-	// Call __objc_error(receiver, "unknown selector %s", "forward::")
-	subl    $12, %esp		// 16-byte align the stack
+	// Call __objc_error(receiver, "unknown selector %s %s", "forward::", forwardedSelector)
+	subl    $8, %esp		// 16-byte align the stack
+	pushl	(selector_stret+4+4)(%ebp)	// the forwarded selector
 	leal	_FwdSel-L__objc_msgForwardStret$pic_base(%edx),%eax
 	pushl 	%eax
 	leal	LUnkSelStr-L__objc_msgForwardStret$pic_base(%edx),%eax

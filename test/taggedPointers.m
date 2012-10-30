@@ -1,47 +1,67 @@
-// TEST_CFLAGS -framework Foundation
+// TEST_CONFIG
 
 #include "test.h"
 #include <objc/runtime.h>
 #include <objc/objc-internal.h>
-#import <Foundation/Foundation.h>
+#import <Foundation/NSObject.h>
+
+#if __has_feature(objc_arc)
+
+int main()
+{
+    testwarn("rdar://11368528 confused by Foundation");
+    succeed(__FILE__);
+}
+
+#else
 
 #if __OBJC2__ && __LP64__
-/*
- gcc -o taggedPointers.out taggedPointers.m -L/tmp/bbum-products/Release/ -lobjc -undefined dynamic_lookup -framework Foundation -gdwarf-2
- env DYLD_LIBRARY_PATH=/tmp/bbum-products/Release/ DYLD_FRAMEWORK_PATH=/tmp/bbum-products/Release gdb ./taggedPointers.out
- env DYLD_LIBRARY_PATH=/tmp/bbum-products/Debug/ DYLD_FRAMEWORK_PATH=/tmp/bbum-products/Debug gdb ./taggedPointers.out
- */
 
 static BOOL didIt;
 
-#define TAG_VALUE(tagSlot, value) ((id)(1UL | (((uintptr_t)(tagSlot)) << 1) | (((uintptr_t)(value)) << 4)))
+#define TAG_VALUE(tagSlot, value) (objc_unretainedObject((void*)(1UL | (((uintptr_t)(tagSlot)) << 1) | (((uintptr_t)(value)) << 4))))
+
+@interface WeakContainer : NSObject
+{
+  @public
+    __weak id weaks[10000];
+}
+@end
+@implementation WeakContainer
+-(void) dealloc {
+    for (unsigned int i = 0; i < sizeof(weaks)/sizeof(weaks[0]); i++) {
+        testassert(weaks[i] == nil);
+    }
+    SUPER_DEALLOC();
+}
+-(void) finalize {
+    for (unsigned int i = 0; i < sizeof(weaks)/sizeof(weaks[0]); i++) {
+        testassert(weaks[i] == nil);
+    }
+    [super finalize];
+}
+@end
 
 @interface TaggedBaseClass
 @end
 
 @implementation TaggedBaseClass
-+ (void) initialize
-{
-    ;
++ (void) initialize {
 }
 
-- (void) instanceMethod
-{
+- (void) instanceMethod {
     didIt = YES;
 }
 
-- (uintptr_t) taggedValue
-{
-    return (uintptr_t) self >> 4;
+- (uintptr_t) taggedValue {
+    return (uintptr_t)objc_unretainedPointer(self) >> 4;
 }
 
-- (NSRect) stret: (NSRect) aRect
-{
-    return aRect;
+- (struct stret) stret: (struct stret) aStruct {
+    return aStruct;
 }
 
-- (long double) fpret: (long double) aValue
-{
+- (long double) fpret: (long double) aValue {
     return aValue;
 }
 
@@ -50,49 +70,57 @@ static BOOL didIt;
     fail("TaggedBaseClass dealloc called!");
 }
 
--(id) retain {
-    return _objc_rootRetain(self);
+static void *
+retain_fn(void *self, SEL _cmd __unused) {
+    void * (*fn)(void *) = (typeof(fn))_objc_rootRetain;
+    return fn(self); 
 }
 
--(void) release {
-    return _objc_rootRelease(self);
+static void 
+release_fn(void *self, SEL _cmd __unused) {
+    void (*fn)(void *) = (typeof(fn))_objc_rootRelease;
+    fn(self); 
 }
 
--(id) autorelease {
-    return _objc_rootAutorelease(self);
+static void *
+autorelease_fn(void *self, SEL _cmd __unused) { 
+    void * (*fn)(void *) = (typeof(fn))_objc_rootAutorelease;
+    return fn(self); 
 }
 
--(uintptr_t) retainCount {
-    return _objc_rootRetainCount(self);
+static unsigned long 
+retaincount_fn(void *self, SEL _cmd __unused) { 
+    unsigned long (*fn)(void *) = (typeof(fn))_objc_rootRetainCount;
+    return fn(self); 
 }
+
++(void) load {
+    class_addMethod(self, sel_registerName("retain"), (IMP)retain_fn, "");
+    class_addMethod(self, sel_registerName("release"), (IMP)release_fn, "");
+    class_addMethod(self, sel_registerName("autorelease"), (IMP)autorelease_fn, "");
+    class_addMethod(self, sel_registerName("retainCount"), (IMP)retaincount_fn, "");    
+}
+
 @end
 
 @interface TaggedSubclass: TaggedBaseClass
 @end
 
 @implementation TaggedSubclass
-+ (void) initialize
-{
-    ;
-}
 
-- (void) instanceMethod
-{
+- (void) instanceMethod {
     return [super instanceMethod];
 }
 
-- (uintptr_t) taggedValue
-{
+- (uintptr_t) taggedValue {
     return [super taggedValue];
 }
 
-- (NSRect) stret: (NSRect) aRect
-{
-    return [super stret: aRect];
+- (struct stret) stret: (struct stret) aStruct {
+    return [super stret: aStruct];
 }
 
-- (long double) fpret: (long double) aValue
-{
+- (long double) fpret: (long double) aValue {
     return [super fpret: aValue];
 }
 @end
@@ -101,122 +129,28 @@ static BOOL didIt;
 @end
 
 @implementation TaggedNSObjectSubclass
-+ autorelease {
-    abort();
-}
-- autorelease {
-    didIt = YES;
-    return self;
-}
-- retain {
-    didIt = YES;
-    return self;
-}
-- (oneway void) release {
-    didIt = YES;
-}
 
 - (void) instanceMethod {
     didIt = YES;
 }
 
-- (uintptr_t) taggedValue
-{
-    return (uintptr_t) self >> 4;
+- (uintptr_t) taggedValue {
+    return (uintptr_t)objc_unretainedPointer(self) >> 4;
 }
 
-- (NSRect) stret: (NSRect) aRect
-{
-    return aRect;
+- (struct stret) stret: (struct stret) aStruct {
+    return aStruct;
 }
 
-- (long double) fpret: (long double) aValue
-{
+- (long double) fpret: (long double) aValue {
     return aValue;
 }
 @end
 
-/*
-
-This class was used prior to integration of tagged numbers into CF.
-Now that CF has tagged numbers, the test assumes their presence.
-  
-@interface TestTaggedNumber:NSNumber
-@end
-@implementation TestTaggedNumber
-+(void) load
-{
-    _objc_insert_tagged_isa(4, self);
-}
-
-+ taggedNumberWithInt: (int) arg
-{
-    uint64_t value = (uint64_t) arg;
-    id returnValue = (id) (((uint64_t) 0x9) | (value << 4));
-    return returnValue;
-}
-
-- (void)getValue:(void *)value
-{
-    *(uint64_t *)value = ((uint64_t)self) >> 4;
-}
-
-- (const char *)objCType
-{
-    return "i";
-}
-
-- (int)intValue
-{
-    return (int) (((uint64_t)self) >> 4);
-}
-@end
-*/
-
-void testTaggedNumber()
-{
-    NSNumber *taggedPointer = [NSNumber numberWithInt: 1234];
-    int result;
-    
-    testassert( CFGetTypeID(taggedPointer) == CFNumberGetTypeID() );
-    
-    CFNumberGetValue((CFNumberRef) taggedPointer, kCFNumberIntType, &result);
-    testassert(result == 1234);
-
-    testassert(((uintptr_t)taggedPointer) & 0x1); // make sure it is really tagged
-
-    // do some generic object-y things to the taggedPointer instance
-    CFRetain(taggedPointer);
-    CFRelease(taggedPointer);
-    
-    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
-    [dict setObject: taggedPointer forKey: @"fred"];
-    testassert(taggedPointer == [dict objectForKey: @"fred"]);
-    [dict setObject: @"bob" forKey: taggedPointer];
-    testassert([@"bob" isEqualToString: [dict objectForKey: taggedPointer]]);
-    
-    NSNumber *i12345 = [NSNumber numberWithInt: 12345];
-    NSNumber *i12346 = [NSNumber numberWithInt: 12346];
-    NSNumber *i12347 = [NSNumber numberWithInt: 12347];
-    
-    NSArray *anArray = [NSArray arrayWithObjects: i12345, i12346, i12347, nil];
-    testassert([anArray count] == 3);
-    testassert([anArray indexOfObject: i12346] == 1);
-    
-    NSSet *aSet = [NSSet setWithObjects: i12345, i12346, i12347, nil];
-    testassert([aSet count] == 3);
-    testassert([aSet containsObject: i12346]);
-    
-    [taggedPointer performSelector: @selector(intValue)];
-    testassert(![taggedPointer isProxy]);
-    testassert([taggedPointer isKindOfClass: [NSNumber class]]);
-    testassert([taggedPointer respondsToSelector: @selector(intValue)]);
-    
-    [taggedPointer description];
-}
-
 void testGenericTaggedPointer(uint8_t tagSlot, const char *classname)
 {
+    testprintf("%s\n", classname);
+
     Class cls = objc_getClass(classname);
     testassert(cls);
 
@@ -228,50 +162,91 @@ void testGenericTaggedPointer(uint8_t tagSlot, const char *classname)
     [taggedPointer instanceMethod];
     testassert(didIt);    
     
-    NSRect originalRect = NSMakeRect(1.0, 2.0, 3.0, 4.0);
-    testassert(NSEqualRects(originalRect, [taggedPointer stret: originalRect]));
+    struct stret orig = STRET_RESULT;
+    testassert(stret_equal(orig, [taggedPointer stret: orig]));
     
     long double value = 3.14156789;
     testassert(value == [taggedPointer fpret: value]);
 
-    if (!objc_collectingEnabled()) {
-        // Tagged pointers should bypass refcount tables and autorelease pools
-        leak_mark();
-        for (uintptr_t i = 0; i < 10000; i++) {
-            id o = TAG_VALUE(tagSlot, i);
-            testassert(object_getClass(o) == cls);
-
-            [o release];  testassert([o retainCount] != 0);
-            [o release];  testassert([o retainCount] != 0);
-            CFRelease(o);  testassert([o retainCount] != 0);
-            CFRelease(o);  testassert([o retainCount] != 0);
-            [o retain];
-            [o retain];
-            [o retain];
-            CFRetain(o);
-            CFRetain(o);
-            CFRetain(o);
-            [o autorelease];
+    // Tagged pointers should bypass refcount tables and autorelease pools
+    // and weak reference tables
+    WeakContainer *w = [WeakContainer new];
+    leak_mark();
+    for (uintptr_t i = 0; i < sizeof(w->weaks)/sizeof(w->weaks[0]); i++) {
+        id o = TAG_VALUE(tagSlot, i);
+        testassert(object_getClass(o) == cls);
+        
+        id result = WEAK_STORE(w->weaks[i], o);
+        testassert(result == o);
+        testassert(w->weaks[i] == o);
+        
+        result = WEAK_LOAD(w->weaks[i]);
+        testassert(result == o);
+        
+        if (!objc_collectingEnabled()) {
+            uintptr_t rc = _objc_rootRetainCount(o);
+            testassert(rc != 0);
+            _objc_rootRelease(o);  testassert(_objc_rootRetainCount(o) == rc);
+            _objc_rootRelease(o);  testassert(_objc_rootRetainCount(o) == rc);
+            _objc_rootRetain(o);   testassert(_objc_rootRetainCount(o) == rc);
+            _objc_rootRetain(o);   testassert(_objc_rootRetainCount(o) == rc);
+            _objc_rootRetain(o);   testassert(_objc_rootRetainCount(o) == rc);
+#if !__has_feature(objc_arc)
+            [o release];  testassert(_objc_rootRetainCount(o) == rc);
+            [o release];  testassert(_objc_rootRetainCount(o) == rc);
+            [o retain];   testassert(_objc_rootRetainCount(o) == rc);
+            [o retain];   testassert(_objc_rootRetainCount(o) == rc);
+            [o retain];   testassert(_objc_rootRetainCount(o) == rc);
+            objc_release(o);  testassert(_objc_rootRetainCount(o) == rc);
+            objc_release(o);  testassert(_objc_rootRetainCount(o) == rc);
+            objc_retain(o);   testassert(_objc_rootRetainCount(o) == rc);
+            objc_retain(o);   testassert(_objc_rootRetainCount(o) == rc);
+            objc_retain(o);   testassert(_objc_rootRetainCount(o) == rc);
+#endif
+            PUSH_POOL {
+                testassert(_objc_rootRetainCount(o) == rc);
+                _objc_rootAutorelease(o);
+                testassert(_objc_rootRetainCount(o) == rc);
+#if !__has_feature(objc_arc)
+                [o autorelease];
+                testassert(_objc_rootRetainCount(o) == rc);
+                objc_autorelease(o);
+                testassert(_objc_rootRetainCount(o) == rc);
+                objc_retainAutorelease(o);
+                testassert(_objc_rootRetainCount(o) == rc);
+                objc_autoreleaseReturnValue(o);
+                testassert(_objc_rootRetainCount(o) == rc);
+                objc_retainAutoreleaseReturnValue(o);
+                testassert(_objc_rootRetainCount(o) == rc);
+                objc_retainAutoreleasedReturnValue(o);
+                testassert(_objc_rootRetainCount(o) == rc);
+#endif
+            } POP_POOL;
+            testassert(_objc_rootRetainCount(o) == rc);
         }
-        leak_check(0);
     }
+    leak_check(0);
+    for (uintptr_t i = 0; i < 10000; i++) {
+        testassert(w->weaks[i] != NULL);
+        WEAK_STORE(w->weaks[i], NULL);
+        testassert(w->weaks[i] == NULL);
+        testassert(WEAK_LOAD(w->weaks[i]) == NULL);
+    }
+    RELEASE_VAR(w);
 }
 
 int main()
 {
-    NSAutoreleasePool *p = [[NSAutoreleasePool alloc] init];
-    
-    _objc_insert_tagged_isa(5, objc_getClass("TaggedBaseClass"));
-    testGenericTaggedPointer(5, "TaggedBaseClass");
-    
-    _objc_insert_tagged_isa(2, objc_getClass("TaggedSubclass"));
-    testGenericTaggedPointer(2, "TaggedSubclass");
-    
-    _objc_insert_tagged_isa(3, objc_getClass("TaggedNSObjectSubclass"));
-    testGenericTaggedPointer(3, "TaggedNSObjectSubclass");
-    
-    testTaggedNumber(); // should be tested by CF... our tests are wrong, wrong, wrong.
-    [p release];
+    PUSH_POOL {    
+        _objc_insert_tagged_isa(5, objc_getClass("TaggedBaseClass"));
+        testGenericTaggedPointer(5, "TaggedBaseClass");
+        
+        _objc_insert_tagged_isa(2, objc_getClass("TaggedSubclass"));
+        testGenericTaggedPointer(2, "TaggedSubclass");
+        
+        _objc_insert_tagged_isa(3, objc_getClass("TaggedNSObjectSubclass"));
+        testGenericTaggedPointer(3, "TaggedNSObjectSubclass");
+    } POP_POOL;
 
     succeed(__FILE__);
 }
@@ -280,15 +255,13 @@ int main()
 #else
 // not (OBJC2 && __LP64__)
 
-    // Tagged pointers not supported. Crash if an NSNumber actually 
-    // is a tagged pointer (which means this test is out of date).
+    // Tagged pointers not supported.
 
-int main() {
-    NSAutoreleasePool *p = [[NSAutoreleasePool alloc] init];
-    testassert(*(id *)[NSNumber numberWithInt:1234]);
-    [p release];
-    
+int main() 
+{
     succeed(__FILE__);
 }
+
+#endif
 
 #endif

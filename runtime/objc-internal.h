@@ -44,14 +44,6 @@
 
 __BEGIN_DECLS
 
-// In-place construction of an Objective-C instance.
-OBJC_EXPORT id objc_constructInstance(Class cls, void *bytes) 
-    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_0)
-    OBJC_ARC_UNAVAILABLE;
-OBJC_EXPORT void *objc_destructInstance(id obj) 
-    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_0)
-    OBJC_ARC_UNAVAILABLE;
-
 // In-place construction of an Objective-C class.
 OBJC_EXPORT Class objc_initializeClassPair(Class superclass_gen, const char *name, Class cls_gen, Class meta_gen) 
     __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_0);
@@ -91,6 +83,12 @@ OBJC_EXPORT BOOL objc_isAuto(id object)
 OBJC_EXPORT void instrumentObjcMessageSends(BOOL flag)
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 
+// Initializer called by libSystem
+#if __OBJC2__
+OBJC_EXPORT void _objc_init(void)
+    __OSX_AVAILABLE_STARTING(__MAC_10_8, __IPHONE_6_0);
+#endif
+
 // GC startup callback from Foundation
 OBJC_EXPORT malloc_zone_t *objc_collect_init(int (*callback)(void))
     __OSX_AVAILABLE_STARTING(__MAC_10_4, __IPHONE_NA);
@@ -107,6 +105,11 @@ OBJC_EXPORT id objc_assign_ivar_generic(id value, id dest, ptrdiff_t offset)
 
 // Install missing-class callback. Used by the late unlamented ZeroLink.
 OBJC_EXPORT void _objc_setClassLoader(BOOL (*newClassLoader)(const char *))  OBJC2_UNAVAILABLE;
+
+// Install handler for allocation failures. 
+// Handler may abort, or throw, or provide an object to return.
+OBJC_EXPORT void _objc_setBadAllocHandler(id (*newHandler)(Class isa))
+     __OSX_AVAILABLE_STARTING(__MAC_10_8, __IPHONE_6_0);
 
 // This can go away when AppKit stops calling it (rdar://7811851)
 #if __OBJC2__
@@ -150,6 +153,28 @@ OBJC_EXPORT const uint8_t *_object_getIvarLayout(Class cls_gen, id object)
 
 OBJC_EXPORT BOOL _class_usesAutomaticRetainRelease(Class cls)
     __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_5_0);
+
+// Obsolete ARC conversions. 
+
+// hack - remove and reinstate objc.h's definitions
+#undef objc_retainedObject
+#undef objc_unretainedObject
+#undef objc_unretainedPointer
+OBJC_EXPORT id objc_retainedObject(objc_objectptr_t pointer)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_5_0);
+OBJC_EXPORT id objc_unretainedObject(objc_objectptr_t pointer)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_5_0);
+OBJC_EXPORT objc_objectptr_t objc_unretainedPointer(id object)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_5_0);
+#if __has_feature(objc_arc)
+#   define objc_retainedObject(o) ((__bridge_transfer id)(objc_objectptr_t)(o))
+#   define objc_unretainedObject(o) ((__bridge id)(objc_objectptr_t)(o))
+#   define objc_unretainedPointer(o) ((__bridge objc_objectptr_t)(id)(o))
+#else
+#   define objc_retainedObject(o) ((id)(objc_objectptr_t)(o))
+#   define objc_unretainedObject(o) ((id)(objc_objectptr_t)(o))
+#   define objc_unretainedPointer(o) ((objc_objectptr_t)(id)(o))
+#endif
 
 // API to only be called by root classes like NSObject or NSProxy
 
@@ -329,6 +354,10 @@ _objc_autoreleasePoolPop(void *context)
     __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_5_0);
 
 
+// Extra @encode data for XPC, or NULL
+OBJC_EXPORT const char *_protocol_getMethodTypeEncoding(Protocol *p, SEL sel, BOOL isRequiredMethod, BOOL isInstanceMethod)
+    __OSX_AVAILABLE_STARTING(__MAC_10_8, __IPHONE_6_0);
+
 
 // API to only be called by classes that provide their own reference count storage
 
@@ -337,58 +366,101 @@ void
 _objc_deallocOnMainThreadHelper(void *context)
     __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_5_0);
 
-#define _OBJC_SUPPORTED_INLINE_REFCNT_LOGIC(_rc_ivar, _dealloc2main)    \
-    -(id)retain {                                                       \
-        /* this will fail to compile if _rc_ivar is an unsigned type */ \
+// On async versus sync deallocation and the _dealloc2main flag
+//
+// Theory:
+//
+// If order matters, then code must always: [self dealloc].
+// If order doesn't matter, then always async should be safe.
+//
+// Practice:
+//
+// The _dealloc2main bit is set for GUI objects that may be retained by other
+// threads. Once deallocation begins on the main thread, doing more async
+// deallocation will at best cause extra UI latency and at worst cause
+// use-after-free bugs in unretained delegate style patterns. Yes, this is
+// extremely fragile. Yes, in the long run, developers should switch to weak
+// references.
+//
+// Note is NOT safe to do any equality check against the result of
+// dispatch_get_current_queue(). The main thread can and does drain more than
+// one dispatch queue. That is why we call pthread_main_np().
+//
+
+typedef enum {
+    _OBJC_RESURRECT_OBJECT = -1,        /* _logicBlock has called -retain, and scheduled a -release for later. */
+    _OBJC_DEALLOC_OBJECT_NOW = 1,       /* call [self dealloc] immediately. */
+    _OBJC_DEALLOC_OBJECT_LATER = 2      /* call [self dealloc] on the main queue. */
+} _objc_object_disposition_t;
+
+#define _OBJC_SUPPORTED_INLINE_REFCNT_LOGIC_BLOCK(_rc_ivar, _logicBlock)        \
+    -(id)retain {                                                               \
+        /* this will fail to compile if _rc_ivar is an unsigned type */         \
         int _retain_count_ivar_must_not_be_unsigned[0L - (__typeof__(_rc_ivar))-1] __attribute__((unused)); \
-        __typeof__(_rc_ivar) _prev = __sync_fetch_and_add(&_rc_ivar, 2); \
-        if (_prev < 0) {                                                \
-            __builtin_trap(); /* BUG: retain of dealloc'ed ref */       \
-        }                                                               \
-        return self;                                                    \
-    }                                                                   \
-    -(oneway void)release {                                             \
-        __typeof__(_rc_ivar) _prev = __sync_fetch_and_sub(&_rc_ivar, 2); \
-        if (_prev == 0) {                                               \
-            if (__sync_bool_compare_and_swap(&_rc_ivar, -2, 1)) {       \
-                if (_dealloc2main) {                                    \
-                    dispatch_barrier_async_f(dispatch_get_main_queue(), \
-                                             self, _objc_deallocOnMainThreadHelper); \
-                } else {                                                \
-                    [self dealloc];                                     \
-                }                                                       \
-            } else {                                                    \
-                __builtin_trap(); /* BUG: dangling ref did a retain */  \
-            }                                                           \
-        } else if (_prev < 0) {                                         \
-            __builtin_trap(); /* BUG: over-release */                   \
-        }                                                               \
-    }                                                                   \
-    -(NSUInteger)retainCount {                                          \
-        return (_rc_ivar + 2) >> 1;                                     \
-    }                                                                   \
-    -(BOOL)_tryRetain {                                                   \
-        __typeof__(_rc_ivar) _prev;                                     \
-        do {                                                            \
-            _prev = _rc_ivar;                                           \
-            if (_prev & 1) {                                            \
-                return 0;                                             \
-            } else if (_prev == -2) {                                   \
-                return 0;                                             \
-            } else if (_prev < -2) {                                    \
-                __builtin_trap(); /* BUG: over-release elsewhere */     \
-            }                                                           \
+        __typeof__(_rc_ivar) _prev = __sync_fetch_and_add(&_rc_ivar, 2);        \
+        if (_prev < -2) { /* specifically allow resurrection from logical 0. */ \
+            __builtin_trap(); /* BUG: retain of over-released ref */            \
+        }                                                                       \
+        return self;                                                            \
+    }                                                                           \
+    -(oneway void)release {                                                     \
+        __typeof__(_rc_ivar) _prev = __sync_fetch_and_sub(&_rc_ivar, 2);        \
+        if (_prev > 0) {                                                        \
+            return;                                                             \
+        } else if (_prev < 0) {                                                 \
+            __builtin_trap(); /* BUG: over-release */                           \
+        }                                                                       \
+        _objc_object_disposition_t fate = _logicBlock(self);                    \
+        if (fate == _OBJC_RESURRECT_OBJECT) {                                   \
+            return;                                                             \
+        }                                                                       \
+        /* mark the object as deallocating. */                                  \
+        if (!__sync_bool_compare_and_swap(&_rc_ivar, -2, 1)) {                  \
+            __builtin_trap(); /* BUG: dangling ref did a retain */              \
+        }                                                                       \
+        if (fate == _OBJC_DEALLOC_OBJECT_NOW) {                                 \
+            [self dealloc];                                                     \
+        } else if (fate == _OBJC_DEALLOC_OBJECT_LATER) {                        \
+            dispatch_barrier_async_f(dispatch_get_main_queue(), self,           \
+                _objc_deallocOnMainThreadHelper);                               \
+        } else {                                                                \
+            __builtin_trap(); /* BUG: bogus fate value */                       \
+        }                                                                       \
+    }                                                                           \
+    -(NSUInteger)retainCount {                                                  \
+        return (_rc_ivar + 2) >> 1;                                             \
+    }                                                                           \
+    -(BOOL)_tryRetain {                                                         \
+        __typeof__(_rc_ivar) _prev;                                             \
+        do {                                                                    \
+            _prev = _rc_ivar;                                                   \
+            if (_prev & 1) {                                                    \
+                return 0;                                                       \
+            } else if (_prev == -2) {                                           \
+                return 0;                                                       \
+            } else if (_prev < -2) {                                            \
+                __builtin_trap(); /* BUG: over-release elsewhere */             \
+            }                                                                   \
         } while ( ! __sync_bool_compare_and_swap(&_rc_ivar, _prev, _prev + 2)); \
-        return 1;                                                    \
-    }                                                                   \
-    -(BOOL)_isDeallocating {                                            \
-        if (_rc_ivar == -2) {                                           \
-            return 1;                                                   \
-        } else if (_rc_ivar < -2) {                                     \
-            __builtin_trap(); /* BUG: over-release elsewhere */         \
-        }                                                               \
-        return _rc_ivar & 1;                                            \
+        return 1;                                                               \
+    }                                                                           \
+    -(BOOL)_isDeallocating {                                                    \
+        if (_rc_ivar == -2) {                                                   \
+            return 1;                                                           \
+        } else if (_rc_ivar < -2) {                                             \
+            __builtin_trap(); /* BUG: over-release elsewhere */                 \
+        }                                                                       \
+        return _rc_ivar & 1;                                                    \
     }
+
+#define _OBJC_SUPPORTED_INLINE_REFCNT_LOGIC(_rc_ivar, _dealloc2main)            \
+    _OBJC_SUPPORTED_INLINE_REFCNT_LOGIC_BLOCK(_rc_ivar, (^(id _self_ __attribute__((unused))) { \
+        if (_dealloc2main && !pthread_main_np()) {                              \
+            return _OBJC_DEALLOC_OBJECT_LATER;                                  \
+        } else {                                                                \
+            return _OBJC_DEALLOC_OBJECT_NOW;                                    \
+        }                                                                       \
+    }))
 
 #define _OBJC_SUPPORTED_INLINE_REFCNT(_rc_ivar) _OBJC_SUPPORTED_INLINE_REFCNT_LOGIC(_rc_ivar, 0)
 #define _OBJC_SUPPORTED_INLINE_REFCNT_WITH_DEALLOC2MAIN(_rc_ivar) _OBJC_SUPPORTED_INLINE_REFCNT_LOGIC(_rc_ivar, 1)

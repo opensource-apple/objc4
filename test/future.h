@@ -1,15 +1,11 @@
 #include "test.h"
 
-@interface Super { id isa; } 
-+class;
-@end
-
-@interface Sub1 : Super
+@interface Sub1 : TestRoot
 +(int)method;
 +(Class)classref;
 @end
 
-@interface Sub2 : Super
+@interface Sub2 : TestRoot
 +(int)method;
 +(Class)classref;
 @end

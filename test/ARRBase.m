@@ -11,7 +11,7 @@
 #if 1
 @interface ARRBase () {
 @private
-    double number;
+    long number;
     id object;
     void *pointer;
     __weak id delegate;

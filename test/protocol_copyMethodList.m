@@ -1,4 +1,7 @@
-// TEST_CONFIG
+// TEST_CFLAGS -framework Foundation
+// need Foundation to get NSObject compatibility additions for class Protocol
+// because ARC calls [protocol retain]
+
 
 #include "test.h"
 #include <malloc/malloc.h>

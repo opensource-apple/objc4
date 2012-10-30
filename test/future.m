@@ -7,7 +7,19 @@ END
 */
 
 #include "test.h"
-#include <objc/objc-runtime.h>
+
+#if __has_feature(objc_arc)
+
+int main()
+{
+    testwarn("rdar://10041403 future class API is not ARC-compatible");
+    succeed(__FILE__);
+}
+
+
+#else
+
+#include <objc/runtime.h>
 #include <malloc/malloc.h>
 #include <string.h>
 #include <dlfcn.h>
@@ -30,7 +42,7 @@ END
 
 int main()
 {
-    Class oldSuper;
+    Class oldTestRoot;
     Class oldSub1;
     Class newSub1;
 #if !__OBJC2__
@@ -40,13 +52,13 @@ int main()
 #endif
 
     // objc_getFutureClass with existing class
-    oldSuper = objc_getFutureClass("Super");
-    testassert(oldSuper == [Super class]);
+    oldTestRoot = objc_getFutureClass("TestRoot");
+    testassert(oldTestRoot == [TestRoot class]);
 
     // objc_getFutureClass with missing class
     oldSub1 = objc_getFutureClass("Sub1");
     testassert(oldSub1);
-    testassert(malloc_size(oldSub1) > 0);
+    testassert(malloc_size(objc_unretainedPointer(oldSub1)) > 0);
     testassert(objc_getClass("Sub1") == Nil);
 
     // objc_getFutureClass a second time
@@ -92,3 +104,5 @@ int main()
 
     succeed(__FILE__);
 }
+
+#endif

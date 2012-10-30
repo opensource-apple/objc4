@@ -1,20 +1,11 @@
-// TEST_CONFIG
+// TEST_CFLAGS -Wl,-no_objc_category_merging
 
 #include "test.h"
+#include "testroot.i"
 #include <malloc/malloc.h>
-#include <objc/objc-runtime.h>
+#include <objc/runtime.h>
 
-#if __OBJC2__
-// methods added by the runtime: +initialize
-#   define MC 1  // class methods
-#   define MI 0  // instance methods
-#else
-// no magic
-#   define MC 0
-#   define MI 0
-#endif
-
-@interface SuperMethods { } @end
+@interface SuperMethods : TestRoot { } @end
 @implementation SuperMethods
 +(BOOL)SuperMethodClass { return NO; } 
 +(BOOL)SuperMethodClass2 { return NO; } 
@@ -22,7 +13,7 @@
 -(BOOL)SuperMethodInstance2 { return NO; } 
 @end
 
-@interface SubMethods { } @end
+@interface SubMethods : SuperMethods { } @end
 @implementation SubMethods
 +(BOOL)SubMethodClass { return NO; } 
 +(BOOL)SubMethodClass2 { return NO; } 
@@ -47,7 +38,7 @@
 @end
 
 
-@interface FourMethods @end
+@interface FourMethods : TestRoot @end
 @implementation FourMethods
 -(void)one { }
 -(void)two { }
@@ -55,7 +46,7 @@
 -(void)four { }
 @end
 
-@interface NoMethods @end
+@interface NoMethods : TestRoot @end
 @implementation NoMethods @end
 
 static void checkReplacement(Method *list, const char *name)
@@ -99,9 +90,9 @@ int main()
     count = 100;
     methods = class_copyMethodList(cls, &count);
     testassert(methods);
-    testassert(count == 4+MI);
+    testassert(count == 4);
     // methods[] should be null-terminated
-    testassert(methods[4+MI] == NULL);
+    testassert(methods[4] == NULL);
     // Class and category methods may be mixed in the method list thanks 
     // to linker / shared cache sorting, but a category's replacement should
     // always precede the class's implementation.
@@ -112,11 +103,11 @@ int main()
     testprintf("calling class_copyMethodList(SubMethods(meta)) (should be unmethodized)\n");
 
     count = 100;
-    methods = class_copyMethodList(cls->isa, &count);
+    methods = class_copyMethodList(object_getClass(cls), &count);
     testassert(methods);
-    testassert(count == 4+MC);
+    testassert(count == 4);
     // methods[] should be null-terminated
-    testassert(methods[4+MC] == NULL);
+    testassert(methods[4] == NULL);
     // Class and category methods may be mixed in the method list thanks 
     // to linker / shared cache sorting, but a category's replacement should
     // always precede the class's implementation.
@@ -130,17 +121,17 @@ int main()
     cls = objc_getClass("FourMethods");
     methods = class_copyMethodList(cls, &count);
     testassert(methods);
-    testassert(count == 4+MI);
-    testassert(malloc_size(methods) >= (4+MI+1) * sizeof(Method));
-    testassert(methods[3+MI] != NULL);
-    testassert(methods[4+MI] == NULL);
+    testassert(count == 4);
+    testassert(malloc_size(methods) >= (4+1) * sizeof(Method));
+    testassert(methods[3] != NULL);
+    testassert(methods[4] == NULL);
     free(methods);
 
     // Check NULL count parameter
     methods = class_copyMethodList(cls, NULL);
     testassert(methods);
-    testassert(methods[4+MI] == NULL);
-    testassert(methods[3+MI] != NULL);
+    testassert(methods[4] == NULL);
+    testassert(methods[3] != NULL);
     free(methods);
 
     // Check NULL class parameter
@@ -157,15 +148,8 @@ int main()
     count = 100;
     cls = objc_getClass("NoMethods");
     methods = class_copyMethodList(cls, &count);
-    if (MI == 0) {
-        testassert(!methods);
-        testassert(count == 0);
-    } else {
-        testassert(methods);
-        testassert(count == MI);
-        testassert(methods[MI] == NULL);
-        testassert(methods[MI-1] != NULL);
-    }
+    testassert(!methods);
+    testassert(count == 0);
 
     succeed(__FILE__);
 }

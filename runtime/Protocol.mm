@@ -31,15 +31,17 @@
 #include <mach-o/dyld.h>
 #include <mach-o/ldsyms.h>
 
-#import "Protocol.h"
-#import "objc-private.h"
-#import "objc-runtime-old.h"
+#include "Protocol.h"
+#include "objc-private.h"
+#include "objc-runtime-old.h"
 
-PRIVATE_EXTERN
-@interface __IncompleteProtocol { id isa; } @end
+#if __OBJC2__
+@interface __IncompleteProtocol : NSObject @end
 @implementation __IncompleteProtocol 
-+(void) initialize { } 
+// fixme hack - make __IncompleteProtocol a non-lazy class
++ (void) load { } 
 @end
+#endif
 
 @implementation Protocol 
 
@@ -63,9 +65,11 @@ typedef struct {
 {
 #if !__OBJC2__
     return lookup_protocol_method((struct old_protocol *)self, aSel, 
-                                  YES/*required*/, YES/*instance*/);
+                                  YES/*required*/, YES/*instance*/, 
+                                  YES/*recursive*/);
 #else
-    return method_getDescription(_protocol_getMethod(self, aSel, YES, YES));
+    return method_getDescription(_protocol_getMethod(self, aSel, 
+                                                     YES, YES, YES));
 #endif
 }
 
@@ -73,9 +77,11 @@ typedef struct {
 {
 #if !__OBJC2__
     return lookup_protocol_method((struct old_protocol *)self, aSel, 
-                                  YES/*required*/, NO/*instance*/);
+                                  YES/*required*/, NO/*instance*/, 
+                                  YES/*recursive*/);
 #else
-    return method_getDescription(_protocol_getMethod(self, aSel, YES, NO));
+    return method_getDescription(_protocol_getMethod(self, aSel, 
+                                                     YES, NO, YES));
 #endif
 }
 
@@ -90,7 +96,7 @@ typedef struct {
     // check isKindOf:
     Class cls;
     Class protoClass = objc_getClass("Protocol");
-    for (cls = other->isa; cls; cls = class_getSuperclass(cls)) {
+    for (cls = object_getClass(other); cls; cls = class_getSuperclass(cls)) {
         if (cls == protoClass) break;
     }
     if (!cls) return NO;
@@ -101,9 +107,16 @@ typedef struct {
 #endif
 }
 
-- (unsigned int)hash
+#if __OBJC2__
+- (NSUInteger)hash
 {
     return 23;
 }
+#else
+- (unsigned)hash
+{
+    return 23;
+}
+#endif
 
 @end

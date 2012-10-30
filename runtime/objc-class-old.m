@@ -44,7 +44,9 @@ static const struct old_class freedObjectClass =
     NULL,				// ivars
     NULL,				// methodLists
     (Cache) &_objc_empty_cache,		// cache
-    NULL				// protocols
+    NULL,				// protocols
+    NULL,			// ivar_layout;
+    NULL			// ext
 };
 
 
@@ -116,7 +118,7 @@ static inline struct old_method *_findNamedMethodInList(struct old_method_list *
 static void *fixed_up_method_list = OBJC_FIXED_UP;
 
 // sel_init() decided that selectors in the dyld shared cache are untrustworthy
-PRIVATE_EXTERN void disableSharedCacheOptimizations(void)
+void disableSharedCacheOptimizations(void)
 {
     fixed_up_method_list = OBJC_FIXED_UP_outside_dyld;
 }
@@ -304,7 +306,7 @@ static inline struct old_method * _getMethod(struct old_class *cls, SEL sel) {
 
 
 // fixme for gc debugging temporary use
-PRIVATE_EXTERN IMP findIMPInClass(struct old_class *cls, SEL sel)
+IMP findIMPInClass(struct old_class *cls, SEL sel)
 {
     struct old_method *m = _findMethodInClass(cls, sel);
     if (m) return m->method_imp;
@@ -325,15 +327,15 @@ static void _freedHandler(id obj, SEL sel)
 /***********************************************************************
 * ABI-specific lookUpMethod helpers.
 **********************************************************************/
-PRIVATE_EXTERN void lockForMethodLookup(void)
+void lockForMethodLookup(void)
 {
     mutex_lock(&methodListLock);
 }
-PRIVATE_EXTERN void unlockForMethodLookup(void)
+void unlockForMethodLookup(void)
 {
     mutex_unlock(&methodListLock);
 }
-PRIVATE_EXTERN IMP prepareForMethodLookup(Class cls, SEL sel, BOOL init)
+IMP prepareForMethodLookup(Class cls, SEL sel, BOOL init, id obj)
 {
     mutex_assert_unlocked(&methodListLock);
 
@@ -342,7 +344,7 @@ PRIVATE_EXTERN IMP prepareForMethodLookup(Class cls, SEL sel, BOOL init)
         return (IMP) _freedHandler;
 
     if (init  &&  !_class_isInitialized(cls)) {
-        _class_initialize (cls);
+        _class_initialize (_class_getNonMetaClass(cls, obj));
         // If sel == initialize, _class_initialize will send +initialize and 
         // then the messenger will send +initialize again after this 
         // procedure finishes. Of course, if this is not being called 
@@ -356,7 +358,7 @@ PRIVATE_EXTERN IMP prepareForMethodLookup(Class cls, SEL sel, BOOL init)
 /***********************************************************************
 * class_getVariable.  Return the named instance variable.
 **********************************************************************/
-PRIVATE_EXTERN 
+
 Ivar _class_getVariable(Class cls_gen, const char *name, Class *memberOf)
 {
     struct old_class *cls = oldcls(cls_gen);
@@ -384,13 +386,13 @@ Ivar _class_getVariable(Class cls_gen, const char *name, Class *memberOf)
 }
 
 
-PRIVATE_EXTERN struct old_property * 
+struct old_property * 
 property_list_nth(const struct old_property_list *plist, uint32_t i)
 {
     return (struct old_property *)(i*plist->entsize + (char *)&plist->first);
 }
 
-PRIVATE_EXTERN struct old_property **
+struct old_property **
 copyPropertyList(struct old_property_list *plist, unsigned int *outCount)
 {
     struct old_property **result = NULL;
@@ -554,7 +556,7 @@ void class_setWeakIvarLayout(Class cls_gen, const uint8_t *layout)
 * Atomically sets and clears some bits in cls's info field.
 * set and clear must not overlap.
 **********************************************************************/
-PRIVATE_EXTERN void _class_changeInfo(Class cls, long set, long clear)
+void _class_changeInfo(Class cls, long set, long clear)
 {
     struct old_class *old = oldcls(cls);
     long newinfo;
@@ -570,7 +572,7 @@ PRIVATE_EXTERN void _class_changeInfo(Class cls, long set, long clear)
 * _class_getInfo
 * Returns YES iff all set bits in get are also set in cls's info field.
 **********************************************************************/
-PRIVATE_EXTERN BOOL _class_getInfo(Class cls, int get)
+BOOL _class_getInfo(Class cls, int get)
 {
     struct old_class *old = oldcls(cls);
     return ((old->info & get) == get) ? YES : NO;
@@ -581,7 +583,7 @@ PRIVATE_EXTERN BOOL _class_getInfo(Class cls, int get)
 * _class_setInfo
 * Atomically sets some bits in cls's info field.
 **********************************************************************/
-PRIVATE_EXTERN void _class_setInfo(Class cls, long set)
+void _class_setInfo(Class cls, long set)
 {
     _class_changeInfo(cls, set, 0);
 }
@@ -591,7 +593,7 @@ PRIVATE_EXTERN void _class_setInfo(Class cls, long set)
 * _class_clearInfo
 * Atomically clears some bits in cls's info field.
 **********************************************************************/
-PRIVATE_EXTERN void _class_clearInfo(Class cls, long clear)
+void _class_clearInfo(Class cls, long clear)
 {
     _class_changeInfo(cls, 0, clear);
 }
@@ -602,7 +604,7 @@ PRIVATE_EXTERN void _class_clearInfo(Class cls, long clear)
 * Return YES if cls is currently being initialized.
 * The initializing bit is stored in the metaclass only.
 **********************************************************************/
-PRIVATE_EXTERN BOOL _class_isInitializing(Class cls)
+BOOL _class_isInitializing(Class cls)
 {
     return _class_getInfo(_class_getMeta(cls), CLS_INITIALIZING);
 }
@@ -613,7 +615,7 @@ PRIVATE_EXTERN BOOL _class_isInitializing(Class cls)
 * Return YES if cls is already initialized.
 * The initialized bit is stored in the metaclass only.
 **********************************************************************/
-PRIVATE_EXTERN BOOL _class_isInitialized(Class cls)
+BOOL _class_isInitialized(Class cls)
 {
     return _class_getInfo(_class_getMeta(cls), CLS_INITIALIZED);
 }
@@ -623,7 +625,7 @@ PRIVATE_EXTERN BOOL _class_isInitialized(Class cls)
 * setInitializing
 * Mark cls as initialization in progress.
 **********************************************************************/
-PRIVATE_EXTERN void _class_setInitializing(Class cls)
+void _class_setInitializing(Class cls)
 {
     _class_setInfo(_class_getMeta(cls), CLS_INITIALIZING);
 }
@@ -633,7 +635,7 @@ PRIVATE_EXTERN void _class_setInitializing(Class cls)
 * setInitialized
 * Atomically mark cls as initialized and not initializing.
 **********************************************************************/
-PRIVATE_EXTERN void _class_setInitialized(Class cls)
+void _class_setInitialized(Class cls)
 {
     _class_changeInfo(_class_getMeta(cls), CLS_INITIALIZED, CLS_INITIALIZING);
 }
@@ -658,13 +660,13 @@ int class_getVersion(Class cls)
 }
 
 
-PRIVATE_EXTERN Class _class_getMeta(Class cls)
+Class _class_getMeta(Class cls)
 {
     if (_class_getInfo(cls, CLS_META)) return cls;
     else return ((id)cls)->isa;
 }
 
-PRIVATE_EXTERN BOOL _class_isMetaClass(Class cls)
+BOOL _class_isMetaClass(Class cls)
 {
     if (!cls) return NO;
     return _class_getInfo(cls, CLS_META);
@@ -676,7 +678,7 @@ PRIVATE_EXTERN BOOL _class_isMetaClass(Class cls)
 * Return the ordinary class for this class or metaclass. 
 * Used by +initialize. 
 **********************************************************************/
-PRIVATE_EXTERN Class _class_getNonMetaClass(Class cls)
+Class _class_getNonMetaClass(Class cls, id obj __unused)
 {
     // fixme ick
     if (_class_isMetaClass(cls)) {
@@ -695,30 +697,30 @@ PRIVATE_EXTERN Class _class_getNonMetaClass(Class cls)
 }
 
 
-PRIVATE_EXTERN Class _class_getSuperclass(Class cls)
+Class _class_getSuperclass(Class cls)
 {
     if (!cls) return nil;
     return (Class)cls->super_class;
 }
 
 
-PRIVATE_EXTERN Cache _class_getCache(Class cls)
+Cache _class_getCache(Class cls)
 {
     return cls->cache;
 }
 
-PRIVATE_EXTERN void _class_setCache(Class cls, Cache cache)
+void _class_setCache(Class cls, Cache cache)
 {
     cls->cache = cache;
 }
 
-PRIVATE_EXTERN size_t _class_getInstanceSize(Class cls)
+size_t _class_getInstanceSize(Class cls)
 {
     if (!cls) return 0;
     return (cls->instance_size + WORD_MASK) & ~WORD_MASK;
 }
 
-PRIVATE_EXTERN const char * _class_getName(Class cls)
+const char * _class_getName(Class cls)
 {
     if (!cls) return "nil";
     return cls->name;
@@ -726,22 +728,22 @@ PRIVATE_EXTERN const char * _class_getName(Class cls)
 
 
 
-PRIVATE_EXTERN const char *_category_getName(Category cat)
+const char *_category_getName(Category cat)
 {
     return oldcategory(cat)->category_name;
 }
 
-PRIVATE_EXTERN const char *_category_getClassName(Category cat)
+const char *_category_getClassName(Category cat)
 {
     return oldcategory(cat)->class_name;
 }
 
-PRIVATE_EXTERN Class _category_getClass(Category cat)
+Class _category_getClass(Category cat)
 {
     return (Class)objc_getClass(oldcategory(cat)->class_name);
 }
 
-PRIVATE_EXTERN IMP _category_getLoadMethod(Category cat)
+IMP _category_getLoadMethod(Category cat)
 {
     struct old_method_list *mlist = oldcategory(cat)->class_methods;
     if (mlist) {
@@ -824,14 +826,14 @@ OBJC_EXPORT void class_removeMethods(Class cls, struct objc_method_list *meths)
 * without fixing up the entire method list.
 * The class is not yet in use, so methodListLock is not taken.
 **********************************************************************/
-PRIVATE_EXTERN IMP lookupNamedMethodInMethodList(struct old_method_list *mlist, const char *meth_name)
+IMP lookupNamedMethodInMethodList(struct old_method_list *mlist, const char *meth_name)
 {
     struct old_method *m;
     m = meth_name ? _findNamedMethodInList(mlist, meth_name) : NULL;
     return (m ? m->method_imp : NULL);
 }
 
-PRIVATE_EXTERN Method _class_getMethod(Class cls, SEL sel)
+Method _class_getMethod(Class cls, SEL sel)
 {
     Method result;
     
@@ -842,7 +844,7 @@ PRIVATE_EXTERN Method _class_getMethod(Class cls, SEL sel)
     return result;
 }
 
-PRIVATE_EXTERN Method _class_getMethodNoSuper(Class cls, SEL sel)
+Method _class_getMethodNoSuper(Class cls, SEL sel)
 {
     Method result;
 
@@ -853,7 +855,7 @@ PRIVATE_EXTERN Method _class_getMethodNoSuper(Class cls, SEL sel)
     return result;
 }
 
-PRIVATE_EXTERN Method _class_getMethodNoSuper_nolock(Class cls, SEL sel)
+Method _class_getMethodNoSuper_nolock(Class cls, SEL sel)
 {
     mutex_assert_locked(&methodListLock);
     return (Method)_findMethodInClass(oldcls(cls), sel);
@@ -888,7 +890,7 @@ static NXMapTable *	posed_class_hash = NULL;
 /***********************************************************************
 * objc_getOrigClass.
 **********************************************************************/
-PRIVATE_EXTERN Class _objc_getOrigClass(const char *name)
+Class _objc_getOrigClass(const char *name)
 {
     Class ret;
 
@@ -949,7 +951,6 @@ static void	_objc_addOrigClass	   (struct old_class *origClass)
 * Used by class_poseAs and objc_setFutureClass
 * classLock must be locked.
 **********************************************************************/
-PRIVATE_EXTERN
 void change_class_references(struct old_class *imposter, 
                              struct old_class *original, 
                              struct old_class *copy, 
@@ -1105,7 +1106,7 @@ Class class_poseAs(Class imposter_gen, Class original_gen)
 *
 * Specifying Nil for the class "all classes."
 **********************************************************************/
-PRIVATE_EXTERN void flush_caches(Class target_gen, BOOL flush_meta)
+void flush_caches(Class target_gen, BOOL flush_meta)
 {
     NXHashState state;
     struct old_class *target = oldcls(target_gen);
@@ -1276,7 +1277,7 @@ PRIVATE_EXTERN void flush_caches(Class target_gen, BOOL flush_meta)
 * CLS_FLUSH_CACHE (and all subclasses thereof)
 * fixme instrument
 **********************************************************************/
-PRIVATE_EXTERN void flush_marked_caches(void)
+void flush_marked_caches(void)
 {
     struct old_class *cls;
     struct old_class *supercls;
@@ -1350,7 +1351,7 @@ static IMP _class_getLoadMethod_nocheck(struct old_class *cls)
 }
 
 
-PRIVATE_EXTERN BOOL _class_hasLoadMethod(Class cls)
+BOOL _class_hasLoadMethod(Class cls)
 {
     if (oldcls(cls)->isa->info & CLS_HAS_LOAD_METHOD) return YES;
     return (_class_getLoadMethod_nocheck(oldcls(cls)) ? YES : NO);
@@ -1361,7 +1362,7 @@ PRIVATE_EXTERN BOOL _class_hasLoadMethod(Class cls)
 * _class_getLoadMethod
 * Returns cls's +load implementation, or NULL if it doesn't have one.
 **********************************************************************/
-PRIVATE_EXTERN IMP _class_getLoadMethod(Class cls_gen)
+IMP _class_getLoadMethod(Class cls_gen)
 {
     struct old_class *cls = oldcls(cls_gen);
     if (cls->isa->info & CLS_HAS_LOAD_METHOD) {
@@ -1371,37 +1372,37 @@ PRIVATE_EXTERN IMP _class_getLoadMethod(Class cls_gen)
 }
 
 
-PRIVATE_EXTERN BOOL _class_shouldGrowCache(Class cls)
+BOOL _class_shouldGrowCache(Class cls)
 {
     return _class_getInfo(cls, CLS_GROW_CACHE);
 }
 
-PRIVATE_EXTERN void _class_setGrowCache(Class cls, BOOL grow)
+void _class_setGrowCache(Class cls, BOOL grow)
 {
     if (grow) _class_setInfo(cls, CLS_GROW_CACHE);
     else _class_clearInfo(cls, CLS_GROW_CACHE);
 }
 
-PRIVATE_EXTERN BOOL _class_hasCxxStructors(Class cls)
+BOOL _class_hasCxxStructors(Class cls)
 {
     // this DOES check superclasses too, because set_superclass 
     // propagates the flag from the superclass.
     return _class_getInfo(cls, CLS_HAS_CXX_STRUCTORS);
 }
 
-PRIVATE_EXTERN BOOL _class_shouldFinalizeOnMainThread(Class cls) {
+BOOL _class_shouldFinalizeOnMainThread(Class cls) {
     return _class_getInfo(cls, CLS_FINALIZE_ON_MAIN_THREAD);
 }
 
-PRIVATE_EXTERN void _class_setFinalizeOnMainThread(Class cls) {
+void _class_setFinalizeOnMainThread(Class cls) {
     _class_setInfo(cls, CLS_FINALIZE_ON_MAIN_THREAD);
 }
 
-PRIVATE_EXTERN BOOL _class_instancesHaveAssociatedObjects(Class cls) {
+BOOL _class_instancesHaveAssociatedObjects(Class cls) {
     return _class_getInfo(cls, CLS_INSTANCES_HAVE_ASSOCIATED_OBJECTS);
 }
 
-PRIVATE_EXTERN void _class_setInstancesHaveAssociatedObjects(Class cls) {
+void _class_setInstancesHaveAssociatedObjects(Class cls) {
     _class_setInfo(cls, CLS_INSTANCES_HAVE_ASSOCIATED_OBJECTS);
 }
 
@@ -1410,7 +1411,7 @@ BOOL _class_usesAutomaticRetainRelease(Class cls)
     return NO;
 }
 
-PRIVATE_EXTERN uint32_t _class_getInstanceStart(Class cls)
+uint32_t _class_getInstanceStart(Class cls)
 {
     _objc_fatal("_class_getInstanceStart() unimplemented for fragile instance variables");
     return 0;   // PCB:  never used just provided for ARR consistency.
@@ -1739,7 +1740,7 @@ BOOL class_addProtocol(Class cls_gen, Protocol *protocol_gen)
 * Used by category attachment and  class_addProperty() 
 * Locking: acquires classLock
 **********************************************************************/
-PRIVATE_EXTERN BOOL 
+BOOL 
 _class_addProperties(struct old_class *cls,
                      struct old_property_list *additions)
 {
@@ -2064,7 +2065,7 @@ Ivar *class_copyIvarList(Class cls_gen, unsigned int *outCount)
 /***********************************************************************
 * objc_allocateClass.
 **********************************************************************/
-PRIVATE_EXTERN 
+
 void set_superclass(struct old_class *cls, struct old_class *supercls, 
                     BOOL cls_is_new)
 {
@@ -2376,7 +2377,7 @@ void objc_disposeClassPair(Class cls_gen)
 * variables, in the specified zone.  The isa field is set to the
 * class, C++ default constructors are called, and all other fields are zeroed.
 **********************************************************************/
-PRIVATE_EXTERN id 
+id 
 _class_createInstanceFromZone(Class cls, size_t extraBytes, void *zone)
 {
     id obj;

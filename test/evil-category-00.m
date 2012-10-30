@@ -5,7 +5,7 @@ TEST_CONFIG SDK=iphoneos
 TEST_CRASHES
 
 TEST_BUILD
-    $C{COMPILE} $DIR/evil-category-00.m $DIR/evil-main.m -framework Foundation -o evil-category-00.out
+    $C{COMPILE} $DIR/evil-category-00.m $DIR/evil-main.m -o evil-category-00.out
 END
 
 TEST_RUN_OUTPUT

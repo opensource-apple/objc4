@@ -69,9 +69,10 @@ __BEGIN_DECLS
 
 #if SUPPORT_GC
 #   include <auto_zone.h>
-    extern PRIVATE_EXTERN BOOL UseGC;            // equivalent to calling objc_collecting_enabled()
-    extern PRIVATE_EXTERN BOOL UseCompaction;    // if binary has opted-in for compaction.
-    extern PRIVATE_EXTERN auto_zone_t *gc_zone;  // the GC zone, or NULL if no GC
+	// PRIVATE_EXTERN is needed to help the compiler know "how" extern these are
+    PRIVATE_EXTERN extern BOOL UseGC;            // equivalent to calling objc_collecting_enabled()
+    PRIVATE_EXTERN extern BOOL UseCompaction;    // if binary has opted-in for compaction.
+    PRIVATE_EXTERN extern auto_zone_t *gc_zone;  // the GC zone, or NULL if no GC
     extern void objc_addRegisteredClass(Class c);
     extern void objc_removeRegisteredClass(Class c);
     extern void objc_disableCompaction();
@@ -79,7 +80,6 @@ __BEGIN_DECLS
 #   define UseGC NO
 #   define UseCompaction NO
 #   define gc_zone NULL
-#   define objc_assign_ivar_internal objc_assign_ivar
 #   define objc_addRegisteredClass(c) do {} while(0)
 #   define objc_removeRegisteredClass(c) do {} while(0)
     /* Uses of the following must be protected with UseGC. */
@@ -149,34 +149,52 @@ typedef struct {
 
 typedef struct _header_info {
     struct _header_info *next;
-    const headerType *  mhdr;
+    const headerType *mhdr;
+    const objc_image_info *info;
+    const char *fname;  // same as Dl_info.dli_fname
+    bool loaded;
+    bool inSharedCache;
+    bool allClassesRealized;
+
+    // Do not add fields without editing ObjCModernAbstraction.hpp
+
+#if !__OBJC2__
+    struct old_protocol **proto_refs;
     struct objc_module *mod_ptr;
     size_t              mod_count;
-    const objc_image_info *info;
-    BOOL                allClassesRealized;
-    os_header_info      os;
+# if TARGET_OS_WIN32
+    struct objc_module **modules;
+    size_t moduleCount;
+    struct old_protocol **protocols;
+    size_t protocolCount;
+    void *imageinfo;
+    size_t imageinfoBytes;
+    SEL *selrefs;
+    size_t selrefCount;
+    struct objc_class **clsrefs;
+    size_t clsrefCount;    
+    TCHAR *moduleName;
+# endif
+#endif
 } header_info;
 
 extern header_info *FirstHeader;
 extern header_info *LastHeader;
 extern int HeaderCount;
 
-extern void _objc_appendHeader(header_info *hi);
-extern void _objc_removeHeader(header_info *hi);
-extern const char *_nameForHeader(const headerType*);
+extern void appendHeader(header_info *hi);
+extern void removeHeader(header_info *hi);
 
 extern objc_image_info *_getObjcImageInfo(const headerType *head, size_t *size);
-extern const char *_getObjcHeaderName(const headerType *head);
 extern BOOL _hasObjcContents(const header_info *hi);
 
 
 /* selectors */
-extern void sel_init(BOOL gc);
+extern void sel_init(BOOL gc, size_t selrefCount);
 extern SEL sel_registerNameNoLock(const char *str, BOOL copy);
 extern void sel_lock(void);
 extern void sel_unlock(void);
 extern BOOL sel_preoptimizationValid(const header_info *hi);
-extern void disableSharedCacheOptimizations(void);
 
 extern SEL SEL_load;
 extern SEL SEL_initialize;
@@ -189,10 +207,24 @@ extern SEL SEL_release;
 extern SEL SEL_autorelease;
 extern SEL SEL_retainCount;
 extern SEL SEL_alloc;
+extern SEL SEL_allocWithZone;
 extern SEL SEL_copy;
 extern SEL SEL_new;
 extern SEL SEL_finalize;
 extern SEL SEL_forwardInvocation;
+
+/* preoptimization */
+extern void preopt_init(void);
+extern void disableSharedCacheOptimizations(void);
+extern bool isPreoptimized(void);
+extern header_info *preoptimizedHinfoForHeader(const headerType *mhdr);
+
+#if __cplusplus
+namespace objc_opt { struct objc_selopt_t; };
+extern const struct objc_opt::objc_selopt_t *preoptimizedSelectors(void);
+extern struct class_t * getPreoptimizedClass(const char *name);
+#endif
+
 
 
 /* optional malloc zone for runtime data */
@@ -209,18 +241,24 @@ extern size_t _malloc_size_internal(void *ptr);
 
 extern Class _calloc_class(size_t size);
 
-extern IMP lookUpMethod(Class, SEL, BOOL initialize, BOOL cache);
+extern IMP lookUpMethod(Class, SEL, BOOL initialize, BOOL cache, id obj);
 extern void lockForMethodLookup(void);
 extern void unlockForMethodLookup(void);
-extern IMP prepareForMethodLookup(Class cls, SEL sel, BOOL initialize);
+extern IMP prepareForMethodLookup(Class cls, SEL sel, BOOL initialize, id obj);
 
 extern IMP _cache_getImp(Class cls, SEL sel);
 extern Method _cache_getMethod(Class cls, SEL sel, IMP objc_msgForward_internal_imp);
 
 /* message dispatcher */
 extern IMP _class_lookupMethodAndLoadCache3(id, SEL, Class);
-extern id _objc_msgForward_internal(id self, SEL sel, ...);
-extern id _objc_ignored_method(id self, SEL _cmd);
+
+#if !OBJC_OLD_DISPATCH_PROTOTYPES
+extern void _objc_msgForward_internal(void);
+extern void _objc_ignored_method(void);
+#else
+extern id _objc_msgForward_internal(id, SEL, ...);
+extern id _objc_ignored_method(id, SEL, ...);
+#endif
 
 /* errors */
 extern void __objc_error(id, const char *, ...) __attribute__((format (printf, 2, 3), noreturn));
@@ -238,6 +276,10 @@ extern Class _objc_getFreedObjectClass (void);
 /* map table additions */
 extern void *NXMapKeyCopyingInsert(NXMapTable *table, const void *key, const void *value);
 extern void *NXMapKeyFreeingRemove(NXMapTable *table, const void *key);
+
+/* hash table additions */
+extern unsigned _NXHashCapacity(NXHashTable *table);
+extern void _NXHashRehashToCapacity(NXHashTable *table, unsigned newCapacity);
 
 /* property attribute parsing */
 extern const char *copyPropertyAttributeString(const objc_property_attribute_t *attrs, unsigned int count);
@@ -439,13 +481,14 @@ static inline int ignoreSelectorNamed(const char *sel)
 /* Protocol implementation */
 #if !__OBJC2__
 struct old_protocol;
-PRIVATE_EXTERN struct objc_method_description * lookup_protocol_method(struct old_protocol *proto, SEL aSel, BOOL isRequiredMethod, BOOL isInstanceMethod);
+struct objc_method_description * lookup_protocol_method(struct old_protocol *proto, SEL aSel, BOOL isRequiredMethod, BOOL isInstanceMethod, BOOL recursive);
 #else
-PRIVATE_EXTERN Method _protocol_getMethod(Protocol *p, SEL sel, BOOL isRequiredMethod, BOOL isInstanceMethod);
+Method _protocol_getMethod(Protocol *p, SEL sel, BOOL isRequiredMethod, BOOL isInstanceMethod, BOOL recursive);
 #endif
 
 /* GC and RTP startup */
 extern void gc_init(BOOL wantsGC, BOOL wantsCompaction);
+extern void gc_init2(void);
 extern void rtp_init(void);
 
 /* Exceptions */
@@ -539,6 +582,8 @@ ENV(PrintDeprecation);          // env OBJC_PRINT_DEPRECATION_WARNINGS
 ENV(PrintReplacedMethods);      // env OBJC_PRINT_REPLACED_METHODS
 ENV(PrintCaches);               // env OBJC_PRINT_CACHE_SETUP
 ENV(PrintPoolHiwat);            // env OBJC_PRINT_POOL_HIGHWATER
+ENV(PrintCustomRR);             // env OBJC_PRINT_CUSTOM_RR
+ENV(PrintCustomAWZ);            // env OBJC_PRINT_CUSTOM_AWZ
 ENV(UseInternalZone);           // env OBJC_USE_INTERNAL_ZONE
 
 ENV(DebugUnload);               // env OBJC_DEBUG_UNLOAD
@@ -603,7 +648,7 @@ extern mutex_t cacheUpdateLock;
 // encoding.h
 extern unsigned int encoding_getNumberOfArguments(const char *typedesc);
 extern unsigned int encoding_getSizeOfArguments(const char *typedesc);
-extern unsigned int encoding_getArgumentInfo(const char *typedesc, int arg, const char **type, int *offset);
+extern unsigned int encoding_getArgumentInfo(const char *typedesc, unsigned int arg, const char **type, int *offset);
 extern void encoding_getReturnType(const char *t, char *dst, size_t dst_len);
 extern char * encoding_copyReturnType(const char *t);
 extern void encoding_getArgumentType(const char *t, unsigned int index, char *dst, size_t dst_len);
@@ -659,6 +704,7 @@ extern Class _objc_allocateFutureClass(const char *name);
 extern const header_info *_headerForClass(Class cls);
 
 extern Class _class_getSuperclass(Class cls);
+extern Class _class_remap(Class cls);
 extern BOOL _class_getInfo(Class cls, int info);
 extern const char *_class_getName(Class cls);
 extern size_t _class_getInstanceSize(Class cls);
@@ -670,7 +716,7 @@ extern BOOL _class_isInitializing(Class cls);
 extern BOOL _class_isInitialized(Class cls);
 extern void _class_setInitializing(Class cls);
 extern void _class_setInitialized(Class cls);
-extern Class _class_getNonMetaClass(Class cls);
+extern Class _class_getNonMetaClass(Class cls, id obj);
 extern Method _class_getMethod(Class cls, SEL sel);
 extern Method _class_getMethodNoSuper(Class cls, SEL sel);
 extern Method _class_getMethodNoSuper_nolock(Class cls, SEL sel);
@@ -745,7 +791,7 @@ static inline Class _object_getClass(id obj)
 // Global operator new and delete. We must not use any app overrides.
 // This ALSO REQUIRES each of these be in libobjc's unexported symbol list.
 #if __cplusplus
-#import <new>
+#include <new>
 inline void* operator new(std::size_t size) throw (std::bad_alloc) { return _malloc_internal(size); }
 inline void* operator new[](std::size_t size) throw (std::bad_alloc) { return _malloc_internal(size); }
 inline void* operator new(std::size_t size, const std::nothrow_t&) throw() { return _malloc_internal(size); }

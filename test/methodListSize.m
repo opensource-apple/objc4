@@ -1,11 +1,10 @@
 // TEST_CONFIG
-
 // rdar://8052003 rdar://8077031
 
-#include <Foundation/Foundation.h>
+#include "test.h"
+
 #include <malloc/malloc.h>
 #include <objc/runtime.h>
-#include "test.h"
 
 // add SELCOUNT methods to each of CLASSCOUNT classes
 #define CLASSCOUNT 100
@@ -54,3 +53,4 @@ int main()
 
     succeed(__FILE__);
 }
+

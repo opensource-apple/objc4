@@ -34,8 +34,8 @@
 
 #if !__OBJC2__
 
-#import <objc/Object.h>
-#import <Availability.h>
+#include <objc/Object.h>
+#include <Availability.h>
 
 AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED
 @interface List : Object
@@ -48,14 +48,14 @@ AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED
 
 /* Creating, freeing */
 
-- free  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- freeObjects  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- copyFromZone:(void *)z  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)free  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)freeObjects  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)copyFromZone:(void *)z  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
   
 /* Initializing */
 
-- init  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- initCount:(unsigned)numSlots  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)init  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)initCount:(unsigned)numSlots  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
 
 /* Comparing two lists */
 
@@ -64,35 +64,35 @@ AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED
 /* Managing the storage capacity */
 
 - (unsigned)capacity  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- setAvailableCapacity:(unsigned)numSlots  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)setAvailableCapacity:(unsigned)numSlots  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
 
 /* Manipulating objects by index */
 
 - (unsigned)count  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- objectAt:(unsigned)index  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- lastObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- addObject:anObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- insertObject:anObject at:(unsigned)index  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- removeObjectAt:(unsigned)index  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- removeLastObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- replaceObjectAt:(unsigned)index with:newObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- appendList: (List *)otherList  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)objectAt:(unsigned)index  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)lastObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)addObject:anObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)insertObject:anObject at:(unsigned)index  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)removeObjectAt:(unsigned)index  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)removeLastObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)replaceObjectAt:(unsigned)index with:newObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)appendList: (List *)otherList  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
 
 /* Manipulating objects by id */
 
 - (unsigned)indexOf:anObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- addObjectIfAbsent:anObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- removeObject:anObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- replaceObject:anObject with:newObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)addObjectIfAbsent:anObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)removeObject:anObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)replaceObject:anObject with:newObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
 
 /* Emptying the list */
 
-- empty  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)empty  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
 
 /* Sending messages to elements of the list */
 
-- makeObjectsPerform:(SEL)aSelector  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-- makeObjectsPerform:(SEL)aSelector with:anObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)makeObjectsPerform:(SEL)aSelector  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
+- (id)makeObjectsPerform:(SEL)aSelector with:anObject  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
 
 /*
  * The following new... methods are now obsolete.  They remain in this 
@@ -100,13 +100,13 @@ AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED
  * and the init... methods defined in this class instead.
  */
 
-+ new  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
-+ newCount:(unsigned)numSlots  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
++ (id)new  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
++ (id)newCount:(unsigned)numSlots  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
 
 @end
 
 typedef struct {
-    @defs(List)
+    @defs(List);
 } NXListId  AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER_BUT_DEPRECATED;
 
 #define NX_ADDRESS(x) (((NXListId *)(x))->dataPtr)

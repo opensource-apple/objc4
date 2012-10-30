@@ -11,6 +11,7 @@
 #include <string.h>
 #include <libgen.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/param.h>
 #include <malloc/malloc.h>
 #include <mach/mach.h>
@@ -18,7 +19,9 @@
 #include <objc/objc.h>
 #include <objc/runtime.h>
 #include <objc/message.h>
+#include <objc/objc-abi.h>
 #include <objc/objc-auto.h>
+#include <objc/objc-internal.h>
 #include <TargetConditionals.h>
 
 static inline void succeed(const char *name)  __attribute__((noreturn));
@@ -37,13 +40,14 @@ static inline void succeed(const char *name)
 static inline void fail(const char *msg, ...)   __attribute__((noreturn));
 static inline void fail(const char *msg, ...)
 {
-    va_list v;
     if (msg) {
-        fprintf(stderr, "BAD: ");
+        char *msg2;
+        asprintf(&msg2, "BAD: %s\n", msg);
+        va_list v;
         va_start(v, msg);
-        vfprintf(stderr, msg, v);
+        vfprintf(stderr, msg2, v);
         va_end(v);
-        fprintf(stderr, "\n");
+        free(msg2);
     } else {
         fprintf(stderr, "BAD\n");
     }
@@ -51,7 +55,7 @@ static inline void fail(const char *msg, ...)
 }
 
 #define testassert(cond) \
-    ((void) ((cond) ? (void)0 : __testassert(#cond, __FILE__, __LINE__)))
+    ((void) (((cond) != 0) ? (void)0 : __testassert(#cond, __FILE__, __LINE__)))
 #define __testassert(cond, file, line) \
     (fail("failed assertion '%s' at %s:%u", cond, __FILE__, __LINE__))
 
@@ -74,11 +78,13 @@ static inline void fail(const char *msg, ...)
 static inline void testprintf(const char *msg, ...)
 {
     if (msg  &&  getenv("VERBOSE")) {
+        char *msg2;
+        asprintf(&msg2, "VERBOSE: %s", msg);
         va_list v;
         va_start(v, msg);
-        fprintf(stderr, "VERBOSE: ");
-        vfprintf(stderr, msg, v);
+        vfprintf(stderr, msg2, v);
         va_end(v);
+        free(msg2);
     }
 }
 
@@ -88,12 +94,13 @@ static inline void testprintf(const char *msg, ...)
 static inline void testwarn(const char *msg, ...)
 {
     if (msg) {
+        char *msg2;
+        asprintf(&msg2, "WARN: %s\n", msg);
         va_list v;
         va_start(v, msg);
-        fprintf(stderr, "WARN: ");
-        vfprintf(stderr, msg, v);
+        vfprintf(stderr, msg2, v);
         va_end(v);
-        fprintf(stderr, "\n");
+        free(msg2);
     }
 }
 
@@ -142,6 +149,27 @@ static inline void testnoop() { }
 
 #endif
 
+
+// Synchronously run test code on another thread.
+// This can help force GC to kill objects promptly, which some tests depend on.
+
+// The block object is unsafe_unretained because we must not allow 
+// ARC to retain them in non-Foundation tests
+typedef void(^testblock_t)(void);
+static __unsafe_unretained testblock_t testcodehack;
+static inline void *_testthread(void *arg __unused)
+{
+    objc_registerThreadWithCollector();
+    testcodehack();
+    return NULL;
+}
+static inline void testonthread(__unsafe_unretained testblock_t code) 
+{
+    pthread_t th;
+    testcodehack = code;  // force GC not-thread-local, avoid ARC void* casts
+    pthread_create(&th, NULL, _testthread, NULL);
+    pthread_join(th, NULL);
+}
 
 /* Make sure libobjc does not call global operator new. 
    Any test that DOES need to call global operator new must 
@@ -245,5 +273,133 @@ static inline bool is_guardmalloc(void)
     const char *env = getenv("GUARDMALLOC");
     return (env  &&  0 == strcmp(env, "YES"));
 }
+
+
+/* Memory management compatibility macros */
+
+static id self_fn(id x) __attribute__((used));
+static id self_fn(id x) { return x; }
+
+#if __has_feature(objc_arc)
+    // ARC
+#   define RELEASE_VAR(x)            x = nil
+#   define WEAK_STORE(dst, val)      (dst = (val))
+#   define WEAK_LOAD(src)            (src)
+#   define SUPER_DEALLOC() 
+#   define RETAIN(x)                 (self_fn(x))
+#   define RELEASE_VALUE(x)          ((void)self_fn(x))
+#   define AUTORELEASE(x)            (self_fn(x))
+
+#elif defined(__OBJC_GC__)
+    // GC
+#   define RELEASE_VAR(x)            x = nil
+#   define WEAK_STORE(dst, val)      (dst = (val))
+#   define WEAK_LOAD(src)            (src)
+#   define SUPER_DEALLOC()           [super dealloc]
+#   define RETAIN(x)                 [x self]
+#   define RELEASE_VALUE(x)          (void)[x self]
+#   define AUTORELEASE(x)            [x self]
+
+#else
+    // MRC
+#   define RELEASE_VAR(x)            do { [x release]; x = nil; } while (0)
+#   define WEAK_STORE(dst, val)      objc_storeWeak((id *)&dst, val)
+#   define WEAK_LOAD(src)            objc_loadWeak((id *)&src)
+#   define SUPER_DEALLOC()           [super dealloc]
+#   define RETAIN(x)                 [x retain]
+#   define RELEASE_VALUE(x)          [x release]
+#   define AUTORELEASE(x)            [x autorelease]
+#endif
+
+/* gcc compatibility macros */
+/* <rdar://problem/9412038> @autoreleasepool should generate objc_autoreleasePoolPush/Pop on 10.7/5.0 */
+//#if !defined(__clang__)
+#   define PUSH_POOL { void *pool = objc_autoreleasePoolPush();
+#   define POP_POOL objc_autoreleasePoolPop(pool); }
+//#else
+//#   define PUSH_POOL @autoreleasepool
+//#   define POP_POOL
+//#endif
+
+#if __OBJC__
+
+/* General purpose root class */
+
+@interface TestRoot {
+ @public
+    Class isa;
+}
+
++(void) load;
++(void) initialize;
+
+-(id) self;
+-(Class) class;
+-(Class) superclass;
+
++(id) new;
++(id) alloc;
++(id) allocWithZone:(void*)zone;
+-(id) copy;
+-(id) mutableCopy;
+-(id) init;
+-(void) dealloc;
+-(void) finalize;
+@end
+@interface TestRoot (RR)
+-(id) retain;
+-(oneway void) release;
+-(id) autorelease;
+-(unsigned long) retainCount;
+-(id) copyWithZone:(void *)zone;
+-(id) mutableCopyWithZone:(void*)zone;
+@end
+
+// incremented for each call of TestRoot's methods
+extern int TestRootLoad;
+extern int TestRootInitialize;
+extern int TestRootAlloc;
+extern int TestRootAllocWithZone;
+extern int TestRootCopy;
+extern int TestRootCopyWithZone;
+extern int TestRootMutableCopy;
+extern int TestRootMutableCopyWithZone;
+extern int TestRootInit;
+extern int TestRootDealloc;
+extern int TestRootFinalize;
+extern int TestRootRetain;
+extern int TestRootRelease;
+extern int TestRootAutorelease;
+extern int TestRootRetainCount;
+extern int TestRootTryRetain;
+extern int TestRootIsDeallocating;
+extern int TestRootPlusRetain;
+extern int TestRootPlusRelease;
+extern int TestRootPlusAutorelease;
+extern int TestRootPlusRetainCount;
+
+#endif
+
+
+// Struct that does not return in registers on any architecture
+
+struct stret {
+    int a;
+    int b;
+    int c;
+    int d;
+    int e;
+};
+
+static inline BOOL stret_equal(struct stret a, struct stret b)
+{
+    return (a.a == b.a  &&  
+            a.b == b.b  &&  
+            a.c == b.c  &&  
+            a.d == b.d  &&  
+            a.e == b.e);
+}
+
+static struct stret STRET_RESULT __attribute__((used)) = {1, 2, 3, 4, 5};
 
 #endif

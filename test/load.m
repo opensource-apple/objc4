@@ -1,13 +1,30 @@
 // TEST_CONFIG
 
 #include "test.h"
+#include "testroot.i"
 
 int state = 0;
 int catstate = 0;
+int deallocstate = 0;
 
-@interface Super { id isa; } @end
+@interface Deallocator : TestRoot @end
+@implementation Deallocator
+-(id)init {
+    self = [super init];
+    if (objc_collectingEnabled()) {
+        deallocstate = 1;
+    }
+    return self;
+}
+-(void)dealloc {
+    deallocstate = 1;
+    SUPER_DEALLOC();
+}
+@end
+
+
+@interface Super : TestRoot @end
 @implementation Super
-+class { return self; }
 +(void)initialize { 
     if (self == [Super class]) {
         testprintf("in +[Super initialize]\n");
@@ -58,6 +75,10 @@ int catstate = 0;
     testprintf("in +[Sub(Category) load]\n");
     testassert(state >= 2); 
     catstate++;
+
+    // test autorelease pool
+    __autoreleasing id x;
+    x = AUTORELEASE([Deallocator new]);
 }
 @end
 
@@ -76,6 +97,7 @@ int main()
 {
     testassert(state == 2);
     testassert(catstate == 3);
+    testassert(deallocstate == 1);
     [Sub class];
     testassert(state == 4);
     testassert(catstate == 3);

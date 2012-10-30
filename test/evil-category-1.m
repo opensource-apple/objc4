@@ -5,7 +5,7 @@ TEST_CONFIG SDK=iphoneos
 TEST_CRASHES
 
 TEST_BUILD
-    $C{COMPILE} $DIR/evil-category-1.m -dynamiclib -o libevil.dylib -framework Foundation
+    $C{COMPILE} $DIR/evil-category-1.m -dynamiclib -o libevil.dylib
     $C{COMPILE} $DIR/evil-main.m -x none libevil.dylib -o evil-category-1.out
 END
 

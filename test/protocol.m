@@ -1,51 +1,77 @@
-// TEST_CFLAGS -Wno-deprecated-declarations
+// TEST_CFLAGS -framework Foundation -Wno-deprecated-declarations
+// need Foundation to get NSObject compatibility additions for class Protocol
+// because ARC calls [protocol retain]
 
 #include "test.h"
-
+#include "testroot.i"
 #include <string.h>
-#include <objc/objc-runtime.h>
+#include <objc/runtime.h>
+#include <objc/objc-internal.h>
 
 #if !__OBJC2__
 #include <objc/Protocol.h>
 #endif
 
 @protocol Proto1 
-+proto1ClassMethod;
--proto1InstanceMethod;
++(id)proto1ClassMethod;
+-(id)proto1InstanceMethod;
 @end
 
 @protocol Proto2
-+proto2ClassMethod;
--proto2InstanceMethod;
++(id)proto2ClassMethod;
+-(id)proto2InstanceMethod;
 @end
 
 @protocol Proto3 <Proto2>
-+proto3ClassMethod;
--proto3InstanceMethod;
++(id)proto3ClassMethod;
+-(id)proto3InstanceMethod;
 @end
 
 @protocol Proto4
 @property int i;
 @end
 
+
+// Force some of Proto5's selectors out of address order rdar://10582325
+SEL fn(int x) { if (x) return @selector(m12:); else return @selector(m22:); }
+
+// This declaration order deliberately looks weird because it determines the 
+// selector address order on some architectures rdar://10582325
+@protocol Proto5
+-(id)m11:(id<Proto1>)a;
+-(void)m12:(id<Proto1>)a;
+-(int)m13:(id<Proto1>)a;
++(void)m22:(TestRoot<Proto1>*)a;
++(int)m23:(TestRoot<Proto1>*)a;
++(TestRoot*)m21:(TestRoot<Proto1>*)a;
+@optional
+-(id(^)(id))m31:(id<Proto1>(^)(id<Proto1>))a;
+-(void)m32:(id<Proto1>(^)(id<Proto1>))a;
+-(int)m33:(id<Proto1>(^)(id<Proto1>))a;
++(void)m42:(TestRoot<Proto1>*(^)(TestRoot<Proto1>*))a;
++(int)m43:(TestRoot<Proto1>*(^)(TestRoot<Proto1>*))a;
++(TestRoot*(^)(TestRoot*))m41:(TestRoot<Proto1>*(^)(TestRoot<Proto1>*))a;
+@end
+
+@protocol Proto6 <Proto5>
+@optional
++(TestRoot*(^)(TestRoot*))n41:(TestRoot<Proto1>*(^)(TestRoot<Proto1>*))a;
+@end
+
 @protocol ProtoEmpty
 @end
 
-@interface Super <Proto1> { id isa; } @end
+@interface Super : TestRoot <Proto1> @end
 @implementation Super
-+class { return self; }
-+(void)initialize { } 
-+proto1ClassMethod { return self; }
--proto1InstanceMethod { return self; }
++(id)proto1ClassMethod { return self; }
+-(id)proto1InstanceMethod { return self; }
 @end
 
-@interface SubNoProtocols : Super { } @end
+@interface SubNoProtocols : Super @end
 @implementation SubNoProtocols @end
 
-@interface SuperNoProtocols { id isa; } @end
+@interface SuperNoProtocols : TestRoot @end
 @implementation SuperNoProtocols
-+class { return self; }
-+(void)initialize { } 
 @end
 
 @interface SubProp : Super <Proto4> { int i; } @end
@@ -57,7 +83,7 @@
 int main()
 {
     Class cls;
-    Protocol * const *list;
+    Protocol * __unsafe_unretained *list;
     Protocol *protocol, *empty;
 #if !__OBJC2__
     struct objc_method_description *desc;
@@ -104,6 +130,10 @@ int main()
     desc = [protocol descriptionForClassMethod:@selector(proto3ClassMethod)];
     testassert(desc);
     testassert(desc->name == @selector(proto3ClassMethod));
+    desc = [protocol descriptionForClassMethod:@selector(proto2ClassMethod)];
+    testassert(desc);
+    testassert(desc->name == @selector(proto2ClassMethod));
+
     desc = [protocol descriptionForInstanceMethod:@selector(proto3ClassMethod)];
     testassert(!desc);
     desc = [protocol descriptionForClassMethod:@selector(proto3InstanceMethod)];
@@ -119,6 +149,9 @@ int main()
     desc2 = protocol_getMethodDescription(protocol, @selector(proto3ClassMethod), YES, NO);
     testassert(desc2.name && desc2.types);
     testassert(desc2.name == @selector(proto3ClassMethod));
+    desc2 = protocol_getMethodDescription(protocol, @selector(proto2ClassMethod), YES, NO);
+    testassert(desc2.name && desc2.types);
+    testassert(desc2.name == @selector(proto2ClassMethod));
 
     desc2 = protocol_getMethodDescription(protocol, @selector(proto3ClassMethod), YES, YES);
     testassert(!desc2.name && !desc2.types);
@@ -139,7 +172,7 @@ int main()
     testassert(count == 1);
     testassert(protocol_isEqual(list[0], @protocol(Proto2)));
     testassert(!list[1]);
-    free((void*)list);    
+    free(list);    
 
     count = 100;
     cls = objc_getClass("Super");
@@ -149,7 +182,7 @@ int main()
     testassert(list[count] == NULL);
     testassert(count == 1);
     testassert(0 == strcmp(protocol_getName(list[0]), "Proto1"));
-    free((void*)list);
+    free(list);
 
     count = 100;
     cls = objc_getClass("SuperNoProtocols");
@@ -175,7 +208,7 @@ int main()
     testassert(cls);
     list = class_copyProtocolList(cls, NULL);
     testassert(list);
-    free((void*)list);
+    free(list);
 
     count = 100;
     list = class_copyProtocolList(NULL, &count);
@@ -193,7 +226,7 @@ int main()
     testassert(count == 1);
     testassert(0 == strcmp(protocol_getName(list[0]), "Proto4"));
     testassert(list[1] == NULL);
-    free((void*)list);
+    free(list);
 
     count = 100;
     proplist = class_copyPropertyList(cls, &count);
@@ -202,6 +235,74 @@ int main()
     testassert(0 == strcmp(property_getName(proplist[0]), "i"));
     testassert(proplist[1] == NULL);
     free(proplist);
+
+    // Check extended type encodings
+    testassert(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(DoesNotExist), true, true) == NULL);
+    testassert(_protocol_getMethodTypeEncoding(NULL, @selector(m11), true, true) == NULL);
+    testassert(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m11), true, false) == NULL);
+    testassert(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m11), false, false) == NULL);
+    testassert(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m11), false, true) == NULL);
+    testassert(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m21), true, true) == NULL);
+#if __LP64__
+    const char *types11 = "@24@0:8@\"<Proto1>\"16";
+    const char *types12 = "v24@0:8@\"<Proto1>\"16";
+    const char *types13 = "i24@0:8@\"<Proto1>\"16";
+    const char *types21 = "@\"TestRoot\"24@0:8@\"TestRoot<Proto1>\"16";
+    const char *types22 = "v24@0:8@\"TestRoot<Proto1>\"16";
+    const char *types23 = "i24@0:8@\"TestRoot<Proto1>\"16";
+    const char *types31 = "@?<@@?@>24@0:8@?<@\"<Proto1>\"@?@\"<Proto1>\">16";
+    const char *types32 = "v24@0:8@?<@\"<Proto1>\"@?@\"<Proto1>\">16";
+    const char *types33 = "i24@0:8@?<@\"<Proto1>\"@?@\"<Proto1>\">16";
+    const char *types41 = "@?<@\"TestRoot\"@?@\"TestRoot\">24@0:8@?<@\"TestRoot<Proto1>\"@?@\"TestRoot<Proto1>\">16";
+    const char *types42 = "v24@0:8@?<@\"TestRoot<Proto1>\"@?@\"TestRoot<Proto1>\">16";
+    const char *types43 = "i24@0:8@?<@\"TestRoot<Proto1>\"@?@\"TestRoot<Proto1>\">16";
+#else
+    const char *types11 = "@12@0:4@\"<Proto1>\"8";
+    const char *types12 = "v12@0:4@\"<Proto1>\"8";
+    const char *types13 = "i12@0:4@\"<Proto1>\"8";
+    const char *types21 = "@\"TestRoot\"12@0:4@\"TestRoot<Proto1>\"8";
+    const char *types22 = "v12@0:4@\"TestRoot<Proto1>\"8";
+    const char *types23 = "i12@0:4@\"TestRoot<Proto1>\"8";
+    const char *types31 = "@?<@@?@>12@0:4@?<@\"<Proto1>\"@?@\"<Proto1>\">8";
+    const char *types32 = "v12@0:4@?<@\"<Proto1>\"@?@\"<Proto1>\">8";
+    const char *types33 = "i12@0:4@?<@\"<Proto1>\"@?@\"<Proto1>\">8";
+    const char *types41 = "@?<@\"TestRoot\"@?@\"TestRoot\">12@0:4@?<@\"TestRoot<Proto1>\"@?@\"TestRoot<Proto1>\">8";
+    const char *types42 = "v12@0:4@?<@\"TestRoot<Proto1>\"@?@\"TestRoot<Proto1>\">8";
+    const char *types43 = "i12@0:4@?<@\"TestRoot<Proto1>\"@?@\"TestRoot<Proto1>\">8";
+#endif
+
+    // Make sure some of Proto5's selectors are out of order rdar://10582325
+    // These comparisons deliberately look weird because they determine the 
+    // selector order on some architectures.
+    testassert(sel_registerName("m11:") > sel_registerName("m12:")  ||  
+               sel_registerName("m21:") > sel_registerName("m22:")  ||  
+               sel_registerName("m32:") < sel_registerName("m31:")  ||  
+               sel_registerName("m42:") < sel_registerName("m41:")  );
+
+    if (!_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m11:), true, true)) {
+#if __clang__
+        testwarn("rdar://10492418 extended type encodings not present (is compiler old?)");
+#else
+        // extended type encodings quietly not supported
+        testwarn("rdar://10492418 extended type encodings not present (compiler is not clang?)");
+#endif
+    } else {
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m11:), true, true),   types11));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m12:), true, true),   types12));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m13:), true, true),   types13));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m21:), true, false),  types21));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m22:), true, false),  types22));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m23:), true, false),  types23));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m31:), false, true),  types31));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m32:), false, true),  types32));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m33:), false, true),  types33));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m41:), false, false), types41));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m42:), false, false), types42));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto5), @selector(m43:), false, false), types43));
+        
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto6), @selector(n41:), false, false), types41));
+        testassert(0 == strcmp(_protocol_getMethodTypeEncoding(@protocol(Proto6), @selector(m41:), false, false), types41));
+    }
 
     succeed(__FILE__);
 }

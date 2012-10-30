@@ -115,9 +115,11 @@ static inline uint32_t _slotSize() {
 
 static inline bool trampolinesAreThumb(void) {
     extern void *_a1a2_firsttramp;
+#if !NDEBUG
     extern void *_a1a2_nexttramp;
     extern void *_a2a3_firsttramp;
     extern void *_a2a3_nexttramp;
+#endif
 
     // make sure thumb-edness of all trampolines match
     assert(((uintptr_t)&_a1a2_firsttramp) % 2 == 
@@ -143,11 +145,11 @@ static inline uint32_t _paddingSlotCount() {
     return paddingSlots;
 }
 
-static inline void **_payloadAddressAtIndex(TrampolineBlockPagePair *pagePair, uint32_t index) {
+static inline id *_payloadAddressAtIndex(TrampolineBlockPagePair *pagePair, uint32_t index) {
     uint32_t slotSize = _slotSize();
     uintptr_t baseAddress = (uintptr_t) pagePair; 
     uintptr_t payloadAddress = baseAddress + (slotSize * index);
-    return (void **)payloadAddress;
+    return (id *)payloadAddress;
 }
 
 static inline IMP _trampolineAddressAtIndex(TrampolineBlockPagePair *pagePair, uint32_t index) {
@@ -258,8 +260,8 @@ static TrampolineBlockPagePair *_allocateTrampolinesAndData(ArgumentMode aMode) 
     pagePair->nextAvailable = _paddingSlotCount();
     pagePair->nextPagePair = NULL;
     pagePair->nextAvailablePage = NULL;
-    void **lastPageBlockPtr = _payloadAddressAtIndex(pagePair, _slotsPerPagePair() - 1);
-    *lastPageBlockPtr = (void*)(uintptr_t) LAST_SLOT_MARKER;
+    id *lastPageBlockPtr = _payloadAddressAtIndex(pagePair, _slotsPerPagePair() - 1);
+    *lastPageBlockPtr = (id)(uintptr_t) LAST_SLOT_MARKER;
     
     if (headPagePair) {
         TrampolineBlockPagePair *lastPage = headPagePair;
@@ -323,7 +325,7 @@ static TrampolineBlockPagePair *_pagePairAndIndexContainingIMP(IMP anImp, uint32
 }
 
 // `block` must already have been copied 
-static IMP _imp_implementationWithBlockNoCopy(ArgumentMode aMode, void *block)
+static IMP _imp_implementationWithBlockNoCopy(ArgumentMode aMode, id block)
 {
     _assert_locked();
 
@@ -332,7 +334,7 @@ static IMP _imp_implementationWithBlockNoCopy(ArgumentMode aMode, void *block)
         headPagePairs[aMode] = pagePair;
 
     uint32_t index = pagePair->nextAvailable;
-    void **payloadAddress = _payloadAddressAtIndex(pagePair, index);
+    id *payloadAddress = _payloadAddressAtIndex(pagePair, index);
     assert((index < 1024) || (index == LAST_SLOT_MARKER));
     
     uint32_t nextAvailableIndex = (uint32_t) *((uintptr_t *) payloadAddress);
@@ -361,7 +363,7 @@ static IMP _imp_implementationWithBlockNoCopy(ArgumentMode aMode, void *block)
     return trampoline;
 }
 
-static ArgumentMode _argumentModeForBlock(void *block) {
+static ArgumentMode _argumentModeForBlock(id block) {
     ArgumentMode aMode = ReturnValueInRegisterArgumentMode;
     
     if (_Block_has_signature(block) && _Block_use_stret(block))
@@ -371,7 +373,7 @@ static ArgumentMode _argumentModeForBlock(void *block) {
 }
 
 #pragma mark Public API
-IMP imp_implementationWithBlock(void *block) 
+IMP imp_implementationWithBlock(id block) 
 {
     block = Block_copy(block);
     _lock();
@@ -381,7 +383,7 @@ IMP imp_implementationWithBlock(void *block)
 }
 
 
-void *imp_getBlock(IMP anImp) {
+id imp_getBlock(IMP anImp) {
     uint32_t index;
     TrampolineBlockPagePair *pagePair;
     
@@ -396,7 +398,7 @@ void *imp_getBlock(IMP anImp) {
         return NULL;
     }
     
-    void *potentialBlock = *_payloadAddressAtIndex(pagePair, index);
+    id potentialBlock = *_payloadAddressAtIndex(pagePair, index);
     
     if ((uintptr_t) potentialBlock == (uintptr_t) LAST_SLOT_MARKER) {
         _unlock();
@@ -428,15 +430,15 @@ BOOL imp_removeBlock(IMP anImp) {
         return NO;
     }
     
-    void **payloadAddress = _payloadAddressAtIndex(pagePair, index);
-    void *block = *payloadAddress;
+    id *payloadAddress = _payloadAddressAtIndex(pagePair, index);
+    id block = *payloadAddress;
     // block is released below
     
     if (pagePair->nextAvailable) {
-        *payloadAddress = (void *) (uintptr_t) pagePair->nextAvailable;
+        *payloadAddress = (id) (uintptr_t) pagePair->nextAvailable;
         pagePair->nextAvailable = index;
     } else {
-        *payloadAddress = (void *) (uintptr_t) LAST_SLOT_MARKER; // nada after this one is used
+        *payloadAddress = (id) (uintptr_t) LAST_SLOT_MARKER; // nada after this one is used
         pagePair->nextAvailable = index;
     }
     

@@ -120,9 +120,11 @@ OBJC_EXPORT id objc_lookUpClass(const char *name)
 OBJC_EXPORT id objc_getRequiredClass(const char *name)
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 OBJC_EXPORT Class objc_getFutureClass(const char *name) 
-     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0)
+     OBJC_ARC_UNAVAILABLE;
 OBJC_EXPORT void objc_setFutureClass(Class cls, const char *name) 
-     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0)
+     OBJC_ARC_UNAVAILABLE;
 OBJC_EXPORT int objc_getClassList(Class *buffer, int bufferCount)
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 OBJC_EXPORT Class *objc_copyClassList(unsigned int *outCount)
@@ -322,9 +324,9 @@ OBJC_EXPORT void objc_setEnumerationMutationHandler(void (*handler)(id))
 OBJC_EXPORT void objc_setForwardHandler(void *fwd, void *fwd_stret) 
      __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 
-OBJC_EXPORT IMP imp_implementationWithBlock(void *block)
+OBJC_EXPORT IMP imp_implementationWithBlock(id block)
      __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_4_3);
-OBJC_EXPORT void *imp_getBlock(IMP anImp)
+OBJC_EXPORT id imp_getBlock(IMP anImp)
      __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_4_3);
 OBJC_EXPORT BOOL imp_removeBlock(IMP anImp)
      __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_4_3);

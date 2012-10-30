@@ -1,10 +1,11 @@
-// TEST_CFLAGS -framework Foundation
+// TEST_CONFIG
 
 #include "test.h"
-#include <Foundation/Foundation.h>
+#include <Foundation/NSObject.h>
 #include <objc/runtime.h>
 
 static int values;
+static int supers;
 static int subs;
 
 static const char *key = "key";
@@ -14,6 +15,9 @@ static const char *key = "key";
 @interface Super : NSObject @end
 @interface Sub : NSObject @end
 
+@interface Super2 : NSObject @end
+@interface Sub2 : NSObject @end
+
 @implementation Super 
 -(id) init
 {
@@ -21,11 +25,22 @@ static const char *key = "key";
 
     id value = [Value new];
     objc_setAssociatedObject(self, &key, value, OBJC_ASSOCIATION_RETAIN);
-    [value release];
+    RELEASE_VAR(value);
 
     object_setClass(self, [Sub class]);
     
     return self;
+}
+
+-(void) dealloc 
+{
+    supers++;
+    SUPER_DEALLOC();
+}
+-(void) finalize
+{
+    supers++;
+    [super finalize];
 }
 
 @end
@@ -34,7 +49,47 @@ static const char *key = "key";
 -(void) dealloc 
 {
     subs++;
-    [super dealloc];
+    SUPER_DEALLOC();
+}
+-(void) finalize
+{
+    subs++;
+    [super finalize];
+}
+@end
+
+@implementation Super2
+-(id) init
+{
+    // rdar://9617109 don't lose associations after isa swizzling
+
+    id value = [Value new];
+    object_setClass(self, [Sub2 class]);
+    objc_setAssociatedObject(self, &key, value, OBJC_ASSOCIATION_RETAIN);
+    RELEASE_VAR(value);
+    object_setClass(self, [Super2 class]);
+    
+    return self;
+}
+
+-(void) dealloc 
+{
+    supers++;
+    SUPER_DEALLOC();
+}
+-(void) finalize
+{
+    supers++;
+    [super finalize];
+}
+
+@end
+
+@implementation Sub2
+-(void) dealloc 
+{
+    subs++;
+    SUPER_DEALLOC();
 }
 -(void) finalize
 {
@@ -46,7 +101,7 @@ static const char *key = "key";
 @implementation Value
 -(void) dealloc {
     values++;
-    [super dealloc];
+    SUPER_DEALLOC();
 }
 -(void) finalize {
     values++;
@@ -54,17 +109,37 @@ static const char *key = "key";
 }
 @end
 
+
 int main()
 {
-    int i;
-    for (i = 0; i < 100; i++) {
-        [[[Super alloc] init] release];
-    }
-
+    testonthread(^{
+        int i;
+        for (i = 0; i < 100; i++) {
+            RELEASE_VALUE([[Super alloc] init]);
+        }
+    });
     testcollect();
-
+            
+    testassert(supers == 0);
     testassert(subs > 0);
     testassert(subs == values);
+
+
+    supers = 0;
+    subs = 0;
+    values = 0;
+
+    testonthread(^{
+        int i;
+        for (i = 0; i < 100; i++) {
+            RELEASE_VALUE([[Super2 alloc] init]);
+        }
+    });
+    testcollect();
+
+    testassert(supers > 0);
+    testassert(subs == 0);
+    testassert(supers == values);
 
     succeed(__FILE__);
 }

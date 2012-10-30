@@ -16,7 +16,7 @@ bool testHandwritten(const char *style, const char *test, const char *message, i
         if ([reference member:elem]) ++counter;
  */
    NSFastEnumerationState state; 
-   id buffer[4];
+   id __unsafe_unretained buffer[4];
    state.state = 0;
    NSUInteger limit = [collection countByEnumeratingWithState:&state objects:buffer count:4];
    if (limit != 0) {
@@ -80,26 +80,26 @@ void testContinue(NSArray *array) {
             
 // array is filled with NSNumbers, in order, from 0 - N
 bool testBreak(unsigned int where, NSArray *array) {
-    unsigned int counter = 0;
-    NSAutoreleasePool *pool = [NSAutoreleasePool new];
-    id enumerator = [array objectEnumerator];
-    for (id __unused elem in enumerator) {
-        if (++counter == where)
-            break;
-    }
-    if (counter != where) {
-        ++Errors;
-        printf("*** break at %d didn't work (actual was %d)\n", where, counter);
-        return false;
-    }
-    for (id __unused elem in enumerator)
-        ++counter;
-    if (counter != [array count]) {
-        ++Errors;
-        printf("*** break at %d didn't finish (actual was %d)\n", where, counter);
-        return false;
-    }
-    [pool drain];
+    PUSH_POOL {
+        unsigned int counter = 0;
+        id enumerator = [array objectEnumerator];
+        for (id __unused elem in enumerator) {
+            if (++counter == where)
+                break;
+        }
+        if (counter != where) {
+            ++Errors;
+            printf("*** break at %d didn't work (actual was %d)\n", where, counter);
+            return false;
+        }
+        for (id __unused elem in enumerator)
+            ++counter;
+        if (counter != [array count]) {
+            ++Errors;
+            printf("*** break at %d didn't finish (actual was %d)\n", where, counter);
+            return false;
+        }
+    } POP_POOL;
     return true;
 }
     
@@ -139,27 +139,27 @@ void makeReferences(int n) {
             NSNumber *number = [[NSNumber alloc] initWithInt:i];
             [ReferenceSet addObject:number];
             [ReferenceArray addObject:number];
-            [number release];
+            RELEASE_VAR(number);
         }
     }
 }
     
 void testCollections(const char *test, NSArray *array, NSSet *set) {
-    NSAutoreleasePool *pool = [NSAutoreleasePool new];
-    id collection;
-    collection = [NSMutableArray arrayWithArray:array];
-    testCompleteness(test, "mutable array", collection, set);
-    testEnumerator(test, "mutable array enumerator", collection, set);
-    collection = [NSArray arrayWithArray:array];
-    testCompleteness(test, "immutable array", collection, set);
-    testEnumerator(test, "immutable array enumerator", collection, set);
-    collection = set;
-    testCompleteness(test, "immutable set", collection, set);
-    testEnumerator(test, "immutable set enumerator", collection, set);
-    collection = [NSMutableSet setWithArray:array];
-    testCompleteness(test, "mutable set", collection, set);
-    testEnumerator(test, "mutable set enumerator", collection, set);
-    [pool drain];
+    PUSH_POOL {
+        id collection;
+        collection = [NSMutableArray arrayWithArray:array];
+        testCompleteness(test, "mutable array", collection, set);
+        testEnumerator(test, "mutable array enumerator", collection, set);
+        collection = [NSArray arrayWithArray:array];
+        testCompleteness(test, "immutable array", collection, set);
+        testEnumerator(test, "immutable array enumerator", collection, set);
+        collection = set;
+        testCompleteness(test, "immutable set", collection, set);
+        testEnumerator(test, "immutable set enumerator", collection, set);
+        collection = [NSMutableSet setWithArray:array];
+        testCompleteness(test, "mutable set", collection, set);
+        testEnumerator(test, "mutable set enumerator", collection, set);
+    } POP_POOL;
 }
 
 void testInnerDecl(const char *test, const char *message, id collection) {
@@ -212,16 +212,16 @@ void testExpressions(const char *message, id collection) {
     
 
 int main() {
-    NSAutoreleasePool *pool = [NSAutoreleasePool new];
-    testCollections("nil", nil, nil);
-    testCollections("empty", [NSArray array], [NSSet set]);
-    makeReferences(100);
-    testCollections("100 item", ReferenceArray, ReferenceSet);
-    testExpressions("array", ReferenceArray);
-    testBreaks(ReferenceArray);
-    testContinue(ReferenceArray);
-    if (Errors == 0) succeed(__FILE__);
-    else fail("foreach %d errors detected\n", Errors);
-    [pool drain];
+    PUSH_POOL {
+        testCollections("nil", nil, nil);
+        testCollections("empty", [NSArray array], [NSSet set]);
+        makeReferences(100);
+        testCollections("100 item", ReferenceArray, ReferenceSet);
+        testExpressions("array", ReferenceArray);
+        testBreaks(ReferenceArray);
+        testContinue(ReferenceArray);
+        if (Errors == 0) succeed(__FILE__);
+        else fail("foreach %d errors detected\n", Errors);
+    } POP_POOL;
     exit(Errors);
 }

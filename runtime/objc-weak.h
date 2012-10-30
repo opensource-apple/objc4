@@ -22,7 +22,7 @@
  */
 
 #include <objc/objc.h>
-#import "objc-config.h"
+#include "objc-config.h"
 
 __BEGIN_DECLS
 

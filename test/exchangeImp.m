@@ -1,7 +1,8 @@
 // TEST_CONFIG
 
 #include "test.h"
-#include <objc/objc-runtime.h>
+#include "testroot.i"
+#include <objc/runtime.h>
 
 static int state;
 
@@ -10,10 +11,8 @@ static int state;
 #define LENGTH 3
 #define COUNT 4
 
-@interface Super { id isa; } @end
+@interface Super : TestRoot @end
 @implementation Super
-+class { return self; }
-+(void)initialize { } 
 +(void) one { state = ONE; }
 +(void) two { state = TWO; }
 +(void) length { state = LENGTH; }

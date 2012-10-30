@@ -13,47 +13,45 @@ END
 
 #include "cacheflush.h"
 
-@interface Sub : Super @end
+@interface Sub : TestRoot @end
 @implementation Sub @end
 
 
 int main()
 {
-    uintptr_t buf[10];
-    uintptr_t buf2[10];
-    buf[0] = (uintptr_t)[Super class];
-    buf2[0] = (uintptr_t)[Sub class];
+    TestRoot *sup = [TestRoot new];
+    Sub *sub = [Sub new];
 
     // Fill method cache
-    testassert(1 == [Super classMethod]);
-    testassert(1 == [(Super *)buf instanceMethod]);
-    testassert(1 == [Super classMethod]);
-    testassert(1 == [(Super *)buf instanceMethod]);
+    testassert(1 == [TestRoot classMethod]);
+    testassert(1 == [sup instanceMethod]);
+    testassert(1 == [TestRoot classMethod]);
+    testassert(1 == [sup instanceMethod]);
 
     testassert(1 == [Sub classMethod]);
-    testassert(1 == [(Sub *)buf2 instanceMethod]);
+    testassert(1 == [sub instanceMethod]);
     testassert(1 == [Sub classMethod]);
-    testassert(1 == [(Sub *)buf2 instanceMethod]);
+    testassert(1 == [sub instanceMethod]);
 
     // Dynamically load a category
     dlopen("cacheflush2.dylib", 0);
 
     // Make sure old cache results are gone
-    testassert(2 == [Super classMethod]);
-    testassert(2 == [(Super *)buf instanceMethod]);
+    testassert(2 == [TestRoot classMethod]);
+    testassert(2 == [sup instanceMethod]);
 
     testassert(2 == [Sub classMethod]);
-    testassert(2 == [(Sub *)buf2 instanceMethod]);
+    testassert(2 == [sub instanceMethod]);
 
     // Dynamically load another category
     dlopen("cacheflush3.dylib", 0);
 
     // Make sure old cache results are gone
-    testassert(3 == [Super classMethod]);
-    testassert(3 == [(Super *)buf instanceMethod]);
+    testassert(3 == [TestRoot classMethod]);
+    testassert(3 == [sup instanceMethod]);
 
     testassert(3 == [Sub classMethod]);
-    testassert(3 == [(Sub *)buf2 instanceMethod]);
+    testassert(3 == [sub instanceMethod]);
 
     // fixme test subclasses
 

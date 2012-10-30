@@ -61,9 +61,10 @@ L ## var ## __non_lazy_ptr:                         ;\
 #if defined(__DYNAMIC__) && defined(THUMB)
 #define MI_GET_ADDRESS(reg,var)  \
 	ldr     reg, 4f                                 ;\
-3:	add	reg, pc, reg                                ;\
+3:	add	reg, pc                                     ;\
 	ldr	reg, [reg]                                  ;\
 	b	5f                                          ;\
+	.align 2 ;\
 4:	.long   L ## var ## __non_lazy_ptr - (3b + 4)	;\
 5:
 #elif defined(__DYNAMIC__)	
@@ -71,12 +72,14 @@ L ## var ## __non_lazy_ptr:                         ;\
 	ldr     reg, 4f                                 ;\
 3:	ldr     reg, [pc, reg]                          ;\
 	b       5f                                      ;\
+	.align 2 ;\
 4:	.long   L ## var ## __non_lazy_ptr - (3b + 8)   ;\
 5:
 #else	
 #define MI_GET_ADDRESS(reg,var)  \
 	ldr     reg, 3f ;\
 	b       4f      ;\
+	.align 2 ;\
 3:	.long var       ;\
 4:
 #endif
@@ -106,7 +109,7 @@ L ## var ## __non_lazy_ptr:                         ;\
 #endif
 
 
-MI_EXTERN(__class_lookupMethodAndLoadCache)
+MI_EXTERN(__class_lookupMethodAndLoadCache3)
 MI_EXTERN(_FwdSel)
 MI_EXTERN(___objc_error)
 MI_EXTERN(__objc_forward_handler)
@@ -194,7 +197,7 @@ _objc_exitPoints:
 #ifdef THUMB
 	.thumb
 #endif
-	.align 2
+	.align 5
 	.globl    _$0
 #ifdef THUMB
 	.thumb_func
@@ -207,7 +210,7 @@ _$0:
 #ifdef THUMB
 	.thumb
 #endif
-	.align 2
+	.align 5
 	.private_extern _$0
 #ifdef THUMB
 	.thumb_func
@@ -356,9 +359,7 @@ LGetImpExit:
 	ENTRY objc_msgSend
 # check whether receiver is nil
 	teq     a1, #0
-	itt	eq
-	moveq   a2, #0
-	bxeq    lr
+    beq     LMsgSendNilReceiver
 	
 # save registers and load receiver's class for CacheLookup
 	stmfd   sp!, {a4,v1}
@@ -376,6 +377,10 @@ LMsgSendCacheMiss:
 	ldmfd	sp!, {a4,v1}
 	b	_objc_msgSend_uncached
 
+LMsgSendNilReceiver:
+    mov     a2, #0
+    bx      lr
+
 LMsgSendExit:
 	END_ENTRY objc_msgSend
 
@@ -387,11 +392,12 @@ LMsgSendExit:
 	add     r7, sp, #16
 
 # Load class and selector
-	ldr	a1, [a1, #ISA]		/* class = receiver->isa  */
-	# MOVE	a2, a2			/* selector already in a2 */
+	ldr	a3, [a1, #ISA]		/* class = receiver->isa  */
+					/* selector already in a2 */
+					/* receiver already in a1 */
 
 # Do the lookup
-	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache)
+	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache3)
 	MOVE    ip, a1
 
 # Prep for forwarding, Pop stack frame and call imp
@@ -409,9 +415,7 @@ LMsgSendExit:
 	ENTRY objc_msgSend_noarg
 # check whether receiver is nil
 	teq     a1, #0
-	itt	eq
-	moveq   a2, #0
-	bxeq    lr
+    beq     LMsgSendNilReceiver
 	
 # load receiver's class for CacheLookup
 	ldr     a3, [a1, #ISA]
@@ -478,11 +482,12 @@ LMsgSendStretExit:
 	add     r7, sp, #16
 
 # Load class and selector
-	ldr	a1, [a2, #ISA]		/* class = receiver->isa */
+	MOVE	a1, a2			/* receiver */
 	MOVE	a2, a3			/* selector */
+	ldr	a3, [a1, #ISA]		/* class = receiver->isa */
 
 # Do the lookup
-	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache)
+	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache3)
 	MOVE    ip, a1
 
 # Prep for forwarding, pop stack frame and call imp
@@ -533,11 +538,12 @@ LMsgSendSuperExit:
 	add     r7, sp, #16
 
 # Load class and selector
-	ldr     a1, [a1, #CLASS]        /* class = super->class   */
-	# MOVE	a2, a2			/* selector already in a2 */
+	ldr	a3, [a1, #CLASS]	/* class = super->class  */
+					/* selector already in a2 */
+	ldr     a1, [a1, #RECEIVER]	/* receiver = super->receiver */
 
 # Do the lookup
-	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache)
+	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache3)
 	MOVE    ip, a1
 
 # Prep for forwarding, pop stack frame and call imp
@@ -582,12 +588,13 @@ LMsgSendSuper2Exit:
 	add     r7, sp, #16
 
 # Load class and selector
-	ldr     a1, [a1, #CLASS]        /* class = super->class   */
-	ldr     a1, [a1, #SUPERCLASS]   /* class = class->superclass */
-	# MOVE	a2, a2			/* selector already in a2 */
+	ldr	a3, [a1, #CLASS]	/* class = super->class  */
+	ldr     a3, [a3, #SUPERCLASS]   /* class = class->superclass */
+					/* selector already in a2 */
+	ldr     a1, [a1, #RECEIVER]	/* receiver = super->receiver */
 
 # Do the lookup
-	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache)
+	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache3)
 	MOVE    ip, a1
 
 # Prep for forwarding, pop stack frame and call imp
@@ -648,11 +655,13 @@ LMsgSendSuperStretExit:
 	add     r7, sp, #16
 
 # Load class and selector
-	ldr     a1, [a2, #CLASS]        /* class = super->class */
+	MOVE	a1, a2			/* struct super */
 	MOVE	a2, a3			/* selector */
+	ldr	a3, [a1, #CLASS]	/* class = super->class  */
+	ldr     a1, [a1, #RECEIVER]	/* receiver = super->receiver */
 
 # Do the lookup
-	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache)
+	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache3)
 	MOVE    ip, a1
 
 # Prep for forwarding, pop stack frame and call imp
@@ -699,12 +708,14 @@ LMsgSendSuper2StretExit:
 	add     r7, sp, #16
 
 # Load class and selector
-	ldr     a1, [a2, #CLASS]        /* class = super->class */
-	ldr     a1, [a1, #SUPERCLASS]   /* class = class->superclass */
+	MOVE	a1, a2			/* struct super */
 	MOVE	a2, a3			/* selector */
+	ldr	a3, [a1, #CLASS]	/* class = super->class  */
+	ldr     a3, [a3, #SUPERCLASS]   /* class = class->superclass */
+	ldr     a1, [a1, #RECEIVER]	/* receiver = super->receiver */
 
 # Do the lookup
-	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache)
+	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache3)
 	MOVE    ip, a1
 
 # Prep for forwarding, pop stack frame and call imp

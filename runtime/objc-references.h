@@ -24,7 +24,7 @@
  *	objc-references.h
  */
 
-#if !defined(_OBJC_REFERENCES_H_)
+#ifndef _OBJC_REFERENCES_H_
 #define _OBJC_REFERENCES_H_
 
 #include "objc-api.h"

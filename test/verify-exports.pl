@@ -136,6 +136,8 @@ for my $cdecl (@cdecls) {
     ($cdecl2, $avail) = ($cdecl =~ /^(.*)\s+(__OSX_AVAILABLE_\w+\([a-zA-Z0-9_, ]+\))\s*$/) if (!defined $avail);
     ($cdecl2, $avail) = ($cdecl =~ /^(.*)\s+(AVAILABLE_MAC_OS_X_VERSION_\w+)\s*$/) if (!defined $avail);
     ($cdecl2, $avail) = ($cdecl =~ /^(.*)\s+(OBJC2_UNAVAILABLE)\s*$/) if (!defined $avail);
+    ($cdecl2, $avail) = ($cdecl =~ /^(.*)\s+(OBJC_GC_UNAVAILABLE)\s*$/) if (!defined $avail);
+    ($cdecl2, $avail) = ($cdecl =~ /^(.*)\s+(OBJC_ARC_UNAVAILABLE)\s*$/) if (!defined $avail);
     ($cdecl2, $avail) = ($cdecl =~ /^(.*)\s+(OBJC_HASH_AVAILABILITY)\s*$/) if (!defined $avail);
     ($cdecl2, $avail) = ($cdecl =~ /^(.*)\s+(OBJC_MAP_AVAILABILITY)\s*$/) if (!defined $avail);
     ($cdecl2, $avail) = ($cdecl =~ /^(.*)\s+(UNAVAILABLE_ATTRIBUTE)\s*$/) if (!defined $avail);

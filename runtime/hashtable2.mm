@@ -57,13 +57,17 @@ static unsigned log2u (unsigned x) { return (x<2) ? 0 : log2u (x>>1)+1; };
 #   define	ZONE_FROM_PTR(p) NULL
 #   define	ALLOCTABLE(z)	((NXHashTable *) malloc (sizeof (NXHashTable)))
 #   define	ALLOCBUCKETS(z,nb)((HashBucket *) calloc (nb, sizeof (HashBucket)))
-#   define	ALLOCPAIRS(z,nb) ((const void **) calloc (nb, sizeof (void *)))
+/* Return interior pointer so a table of classes doesn't look like objects */
+#   define	ALLOCPAIRS(z,nb) (1+(const void **) calloc (nb+1, sizeof (void *)))
+#   define	FREEPAIRS(p) (free((void*)(-1+p)))
 #else
 #   define	DEFAULT_ZONE	 malloc_default_zone()
 #   define	ZONE_FROM_PTR(p) malloc_zone_from_ptr(p)
-#   define	ALLOCTABLE(z)	((NXHashTable *) malloc_zone_malloc (z,sizeof (NXHashTable)))
-#   define	ALLOCBUCKETS(z,nb)((HashBucket *) malloc_zone_calloc (z, nb, sizeof (HashBucket)))
-#   define	ALLOCPAIRS(z,nb) ((const void **) malloc_zone_calloc (z, nb, sizeof (void *)))
+#   define	ALLOCTABLE(z)	((NXHashTable *) malloc_zone_malloc ((malloc_zone_t *)z,sizeof (NXHashTable)))
+#   define	ALLOCBUCKETS(z,nb)((HashBucket *) malloc_zone_calloc ((malloc_zone_t *)z, nb, sizeof (HashBucket)))
+/* Return interior pointer so a table of classes doesn't look like objects */
+#   define	ALLOCPAIRS(z,nb) (1+(const void **) malloc_zone_calloc ((malloc_zone_t *)z, nb+1, sizeof (void *)))
+#   define	FREEPAIRS(p) (free((void*)(-1+p)))
 #endif
 
 #if !SUPPORT_MOD
@@ -98,7 +102,7 @@ static int isEqualPrototype (const void *info, const void *data1, const void *da
 static uintptr_t hashPrototype (const void *info, const void *data) {
     NXHashTablePrototype	*proto = (NXHashTablePrototype *) data;
     
-    return NXPtrHash(info, proto->hash) ^ NXPtrHash(info, proto->isEqual) ^ NXPtrHash(info, proto->free) ^ (uintptr_t) proto->style;
+    return NXPtrHash(info, (void*)proto->hash) ^ NXPtrHash(info, (void*)proto->isEqual) ^ NXPtrHash(info, (void*)proto->free) ^ (uintptr_t) proto->style;
     };
 
 void NXNoEffectFree (const void *info, void *data) {};
@@ -149,13 +153,13 @@ NXHashTable *NXCreateHashTableFromZone (NXHashTablePrototype prototype, unsigned
 	_objc_inform ("*** NXCreateHashTable: invalid style\n");
 	return NULL;
 	};
-    proto = NXHashGet (prototypes, &prototype); 
+    proto = (NXHashTablePrototype *)NXHashGet (prototypes, &prototype); 
     if (! proto) {
 	proto
             = (NXHashTablePrototype *) malloc(sizeof (NXHashTablePrototype));
 	bcopy ((const char*)&prototype, (char*)proto, sizeof (NXHashTablePrototype));
     	(void) NXHashInsert (prototypes, proto);
-	proto = NXHashGet (prototypes, &prototype);
+	proto = (NXHashTablePrototype *)NXHashGet (prototypes, &prototype);
 	if (! proto) {
 	    _objc_inform ("*** NXCreateHashTable: bug\n");
 	    return NULL;
@@ -180,7 +184,7 @@ static void freeBucketPairs (void (*freeProc)(const void *info, void *data), Has
 	(*freeProc) (info, (void *) *pairs);
 	pairs ++;
 	};
-    free ((void*)bucket.elements.many);
+    FREEPAIRS (bucket.elements.many);
     };
     
 static void freeBuckets (NXHashTable *table, int freeObjects) {
@@ -283,11 +287,11 @@ void *NXHashGet (NXHashTable *table, const void *data) {
     return NULL;
     }
 
-PRIVATE_EXTERN unsigned _NXHashCapacity (NXHashTable *table) {
+unsigned _NXHashCapacity (NXHashTable *table) {
     return table->nbBuckets;
     }
 
-PRIVATE_EXTERN void _NXHashRehashToCapacity (NXHashTable *table, unsigned newCapacity) {
+void _NXHashRehashToCapacity (NXHashTable *table, unsigned newCapacity) {
     /* Rehash: we create a pseudo table pointing really to the old guys,
     extend self, copy the old pairs, and free the pseudo table */
     NXHashTable	*old;
@@ -354,7 +358,7 @@ void *NXHashInsert (NXHashTable *table, const void *data) {
     newt = ALLOCPAIRS(z, bucket->count+1);
     if (bucket->count) bcopy ((const char*)bucket->elements.many, (char*)(newt+1), bucket->count * PTRSIZE);
     *newt = data;
-    free ((void*)bucket->elements.many);
+    FREEPAIRS (bucket->elements.many);
     bucket->count++; bucket->elements.many = newt; 
     table->count++; 
     if (table->count > table->nbBuckets) _NXHashRehash (table);
@@ -395,7 +399,7 @@ void *NXHashInsertIfAbsent (NXHashTable *table, const void *data) {
     newt = ALLOCPAIRS(z, bucket->count+1);
     if (bucket->count) bcopy ((const char*)bucket->elements.many, (char*)(newt+1), bucket->count * PTRSIZE);
     *newt = data;
-    free ((void*)bucket->elements.many);
+    FREEPAIRS (bucket->elements.many);
     bucket->count++; bucket->elements.many = newt; 
     table->count++; 
     if (table->count > table->nbBuckets) _NXHashRehash (table);
@@ -425,7 +429,7 @@ void *NXHashRemove (NXHashTable *table, const void *data) {
 	    bucket->elements.one = pairs[0]; data = pairs[1];
 	    }
 	else return NULL;
-	free ((void*)pairs);
+	FREEPAIRS (pairs);
 	table->count--; bucket->count--;
 	return (void *) data;
 	};
@@ -439,7 +443,7 @@ void *NXHashRemove (NXHashTable *table, const void *data) {
 		    bcopy ((const char*)bucket->elements.many, (char*)newt, PTRSIZE*(bucket->count-j-1));
 	    if (j)
 		    bcopy ((const char*)(bucket->elements.many + bucket->count-j), (char*)(newt+bucket->count-j-1), PTRSIZE*j);
-	    free ((void*)bucket->elements.many);
+	    FREEPAIRS (bucket->elements.many);
 	    table->count--; bucket->count--; bucket->elements.many = newt;
 	    return (void *) data;
 	    };
@@ -565,27 +569,27 @@ static mutex_t		lock = MUTEX_INITIALIZER;
 
 static const char *CopyIntoReadOnly (const char *str) {
     size_t	len = strlen (str) + 1;
-    char	*new;
+    char	*result;
     
     if (len > CHUNK_SIZE/2) {	/* dont let big strings waste space */
-	new = malloc (len);
-	bcopy (str, new, len);
-	return new;
+	result = (char *)malloc (len);
+	bcopy (str, result, len);
+	return result;
     }
 
     mutex_lock (&lock);
     if (zSize < len) {
 	zSize = CHUNK_SIZE *((len + CHUNK_SIZE - 1) / CHUNK_SIZE);
 	/* not enough room, we try to allocate.  If no room left, too bad */
-	z = malloc (zSize);
+	z = (char *)malloc (zSize);
 	};
     
-    new = z;
-    bcopy (str, new, len);
+    result = z;
+    bcopy (str, result, len);
     z += len;
     zSize -= len;
     mutex_unlock (&lock);
-    return new;
+    return result;
     };
     
 NXAtom NXUniqueString (const char *buffer) {
@@ -620,7 +624,7 @@ NXAtom NXUniqueStringWithLength (const char *buffer, int length) {
     char	stackBuf[BUF_SIZE];
 
     if (length+1 > BUF_SIZE)
-	nullTermStr = malloc (length+1);
+	nullTermStr = (char *)malloc (length+1);
     else
 	nullTermStr = stackBuf;
     bcopy (buffer, nullTermStr, length);
@@ -631,11 +635,11 @@ NXAtom NXUniqueStringWithLength (const char *buffer, int length) {
     return atom;
     };
 
-char *NXCopyStringBufferFromZone (const char *str, void *z) {
+char *NXCopyStringBufferFromZone (const char *str, void *zone) {
 #if !SUPPORT_ZONES
     return strdup(str);
 #else
-    return strcpy ((char *) malloc_zone_malloc(z, strlen (str) + 1), str);
+    return strcpy ((char *) malloc_zone_malloc((malloc_zone_t *)zone, strlen (str) + 1), str);
 #endif
     };
     

@@ -1,10 +1,6 @@
-@interface SmallClass { id isa; } 
-+(id)new;
--(void)free;
-@end
+#include "test.h"
 
-@interface BigClass { id isa; } 
-+(id)new;
--(void)free;
-@end
+@interface SmallClass : TestRoot @end
+
+@interface BigClass : TestRoot @end
 

@@ -21,15 +21,15 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#import <string.h>
-#import <stddef.h>
+#include <string.h>
+#include <stddef.h>
 
-#import <libkern/OSAtomic.h>
+#include <libkern/OSAtomic.h>
 
-#import "objc-private.h"
-#import "objc-auto.h"
-#import "runtime.h"
-#import "objc-accessors.h"
+#include "objc-private.h"
+#include "objc-auto.h"
+#include "runtime.h"
+#include "objc-accessors.h"
 
 // stub interface declarations to make compiler happy.
 
@@ -43,9 +43,9 @@
 
 
 typedef uintptr_t spin_lock_t;
-extern void _spin_lock(spin_lock_t *lockp);
-extern int  _spin_lock_try(spin_lock_t *lockp);
-extern void _spin_unlock(spin_lock_t *lockp);
+OBJC_EXTERN void _spin_lock(spin_lock_t *lockp);
+OBJC_EXTERN int  _spin_lock_try(spin_lock_t *lockp);
+OBJC_EXTERN void _spin_unlock(spin_lock_t *lockp);
 
 /* need to consider cache line contention - space locks out XXX */
 
@@ -54,11 +54,13 @@ extern void _spin_unlock(spin_lock_t *lockp);
 #define GOODHASH(x) (((long)x >> 5) & GOODMASK)
 static spin_lock_t PropertyLocks[1 << GOODPOWER] = { 0 };
 
-PRIVATE_EXTERN id objc_getProperty_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
+#define MUTABLE_COPY 2
+
+id objc_getProperty_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
     return *(id*) ((char*)self + offset);
 }
 
-PRIVATE_EXTERN id objc_getProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
+id objc_getProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
     // Retain release world
     id *slot = (id*) ((char*)self + offset);
     if (!atomic) return *slot;
@@ -83,27 +85,28 @@ id objc_getProperty(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
             (self, _cmd, offset, atomic);
 }
 
-enum { OBJC_PROPERTY_RETAIN = 0, OBJC_PROPERTY_COPY = 1, OBJC_PROPERTY_MUTABLECOPY = 2 };
-
 #if SUPPORT_GC
-PRIVATE_EXTERN void objc_setProperty_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy) {
+void objc_setProperty_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, signed char shouldCopy) {
     if (shouldCopy) {
-        newValue = (shouldCopy == OBJC_PROPERTY_MUTABLECOPY ? [newValue mutableCopyWithZone:NULL] : [newValue copyWithZone:NULL]);
+        newValue = (shouldCopy == MUTABLE_COPY ? [newValue mutableCopyWithZone:NULL] : [newValue copyWithZone:NULL]);
     }
     objc_assign_ivar_gc(newValue, self, offset);
 }
 #endif
 
-PRIVATE_EXTERN void objc_setProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy) {
-    // Retain release world
-    id oldValue, *slot = (id*) ((char*)self + offset);
+static inline void reallySetProperty(id self, SEL _cmd, id newValue, ptrdiff_t offset, bool atomic, bool copy, bool mutableCopy) __attribute__((always_inline));
 
-    // atomic or not, if slot would be unchanged, do nothing.
-    if (!shouldCopy && *slot == newValue) return;
-   
-    if (shouldCopy) {
-        newValue = (shouldCopy == OBJC_PROPERTY_MUTABLECOPY ? [newValue mutableCopyWithZone:NULL] : [newValue copyWithZone:NULL]);
+static inline void reallySetProperty(id self, SEL _cmd, id newValue, ptrdiff_t offset, bool atomic, bool copy, bool mutableCopy)
+{
+    id oldValue;
+    id *slot = (id*) ((char*)self + offset);
+
+    if (copy) {
+        newValue = [newValue copyWithZone:NULL];
+    } else if (mutableCopy) {
+        newValue = [newValue mutableCopyWithZone:NULL];
     } else {
+        if (*slot == newValue) return;
         newValue = objc_retain(newValue);
     }
 
@@ -115,13 +118,42 @@ PRIVATE_EXTERN void objc_setProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset,
         _spin_lock(slotlock);
         oldValue = *slot;
         *slot = newValue;        
-        _spin_unlock(slotlock);        
+        _spin_unlock(slotlock);
     }
 
     objc_release(oldValue);
 }
 
-void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy) {
+void objc_setProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, signed char shouldCopy) 
+{
+    bool copy = (shouldCopy && shouldCopy != MUTABLE_COPY);
+    bool mutableCopy = (shouldCopy == MUTABLE_COPY);
+    reallySetProperty(self, _cmd, newValue, offset, atomic, copy, mutableCopy);
+}
+
+void objc_setProperty_atomic(id self, SEL _cmd, id newValue, ptrdiff_t offset)
+{
+    reallySetProperty(self, _cmd, newValue, offset, true, false, false);
+}
+
+void objc_setProperty_nonatomic(id self, SEL _cmd, id newValue, ptrdiff_t offset)
+{
+    reallySetProperty(self, _cmd, newValue, offset, false, false, false);
+}
+
+
+void objc_setProperty_atomic_copy(id self, SEL _cmd, id newValue, ptrdiff_t offset)
+{
+    reallySetProperty(self, _cmd, newValue, offset, true, true, false);
+}
+
+void objc_setProperty_nonatomic_copy(id self, SEL _cmd, id newValue, ptrdiff_t offset)
+{
+    reallySetProperty(self, _cmd, newValue, offset, false, true, false);
+}
+
+
+void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, signed char shouldCopy) {
 #if SUPPORT_GC
     (UseGC ? objc_setProperty_gc : objc_setProperty_non_gc)
 #else
@@ -167,3 +199,24 @@ void objc_copyStruct(void *dest, const void *src, ptrdiff_t size, BOOL atomic, B
     }
 }
 
+void objc_copyCppObjectAtomic(void *dest, const void *src, void (*copyHelper) (void *dest, const void *source)) {
+    static spin_lock_t CppObjectLocks[1 << GOODPOWER] = { 0 };
+    spin_lock_t *lockfirst = &CppObjectLocks[GOODHASH(src)], *locksecond = &CppObjectLocks[GOODHASH(dest)];
+    // order the locks by address so that we don't deadlock
+    if (lockfirst > locksecond) {
+        spin_lock_t *temp = lockfirst;
+        lockfirst = locksecond;
+        locksecond = temp;
+    } else if (lockfirst == locksecond) {
+        // lucky - we only need one lock
+        locksecond = NULL;
+    }
+    _spin_lock(lockfirst);
+    if (locksecond) _spin_lock(locksecond);
+
+        // let C++ code perform the actual copy.
+        copyHelper(dest, src);
+    
+    _spin_unlock(lockfirst);
+    if (locksecond) _spin_unlock(locksecond);
+}

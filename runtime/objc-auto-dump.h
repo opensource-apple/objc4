@@ -7,7 +7,8 @@
 //  Created by Blaine Garst on 12/8/08.
 //  Copyright 2008 Apple, Inc. All rights reserved.
 //
-
+#ifndef _OBJC_AUTO_DUMP_H_
+#define _OBJC_AUTO_DUMP_H_
 
 /*
  *  Raw file format definitions
@@ -51,3 +52,4 @@ Raw format, not that anyone should really care.  Most programs should use the co
 
  */
 
+#endif

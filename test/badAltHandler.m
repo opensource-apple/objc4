@@ -10,7 +10,6 @@ END
 
 #include "test.h"
 
-#include <pthread.h>
 #include <objc/objc-exception.h>
 
 /*
@@ -23,16 +22,6 @@ uintptr_t Token;
 
 void handler(id unused __unused, void *context __unused)
 {
-}
-
-void *fn(void *arg __unused)
-{
-    @try {
-        Token = objc_addExceptionHandler(&handler, NULL);
-    } @catch (...) {
-    }
-
-    return NULL;
 }
 
 int main()
@@ -61,9 +50,12 @@ int main()
         
         // Create an alt handler on another thread 
         // that collides with one of the removed handlers
-        pthread_t th;
-        pthread_create(&th, NULL, &fn, NULL);
-        pthread_join(th, NULL);
+        testonthread(^{
+            @try {
+                Token = objc_addExceptionHandler(&handler, NULL);
+            } @catch (...) {
+            }
+        });
         
         // Incorrectly remove the other thread's handler
         objc_removeExceptionHandler(Token);

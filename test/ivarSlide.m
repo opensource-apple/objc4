@@ -10,6 +10,15 @@ END
 #include <objc/objc-runtime.h>
 #include <objc/objc-auto.h>
 
+// ARC doesn't like __strong void* or __weak void*
+#if __OBJC_GC__
+#   define gc_weak __weak
+#   define gc_strong __strong
+#else
+#   define gc_weak
+#   define gc_strong
+#endif
+
 #define OLD 1
 #include "ivarSlide.h"
 
@@ -47,8 +56,8 @@ uintptr_t CXX::count;
 @interface Sub : Super {
   @public 
     uintptr_t subIvar;
-    __strong void* subIvar2;
-    __weak void* subIvar3;
+    gc_strong void* subIvar2;
+    gc_weak void* subIvar3;
 #ifdef __cplusplus
     CXX cxx;
 #else
@@ -63,8 +72,8 @@ uintptr_t CXX::count;
 
 @interface Sub2 : ShrinkingSuper {
   @public 
-    __weak void* subIvar;
-    __strong void* subIvar2;
+    gc_weak void* subIvar;
+    gc_strong void* subIvar2;
 }
 @end
 
@@ -102,6 +111,10 @@ uintptr_t CXX::count;
 int main(int argc __attribute__((unused)), char **argv)
 {
 #if __OBJC2__
+
+#if __has_feature(objc_arc)
+    testwarn("fixme check ARC layouts too");
+#endif
 
     /* 
        Bitfield ivars.
@@ -165,20 +178,24 @@ int main(int argc __attribute__((unused)), char **argv)
     static Sub * volatile sub;
     sub = [Sub new];
     sub->subIvar = 10;
-    testassert(((uintptr_t *)sub)[2] == 10);
+    testassert(((uintptr_t *)objc_unretainedPointer(sub))[2] == 10);
 
 #ifdef __cplusplus
-    testassert(((uintptr_t *)sub)[5] == 1);
+    testassert(((uintptr_t *)objc_unretainedPointer(sub))[5] == 1);
     testassert(sub->cxx.magic == 1);
     sub->cxx.magic++;
-    testassert(((uintptr_t *)sub)[5] == 2);
+    testassert(((uintptr_t *)objc_unretainedPointer(sub))[5] == 2);
     testassert(sub->cxx.magic == 2);
+# if __has_feature(objc_arc)
+    sub = nil;
+# else
     if (! objc_collectingEnabled()) {
         [sub dealloc];
     } else {
         // hack - can't get collector to reliably delete the object
         object_dispose(sub);
     }
+# endif
     testassert(CXX::count == 2);
 #endif
 
@@ -247,7 +264,7 @@ int main(int argc __attribute__((unused)), char **argv)
     Sub2 *sub2 = [Sub2 new];
     sub2->isa = [Sub2 class];
     sub2->subIvar = (void *)10;
-    testassert(((uintptr_t *)sub2)[11] == 10);
+    testassert(((uintptr_t *)objc_unretainedPointer(sub2))[11] == 10);
 
     testassert(class_getInstanceSize([Sub2 class]) == 13*sizeof(void*));
 

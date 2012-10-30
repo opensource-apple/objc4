@@ -1,15 +1,14 @@
-// TEST_CONFIG
+// TEST_CFLAGS -Wl,-no_objc_category_merging
 
 #include "test.h"
+#include "testroot.i"
 #include <string.h>
-#include <objc/objc-runtime.h>
+#include <objc/runtime.h>
 
 static int state = 0;
 
-@interface Super { id isa; } @end
+@interface Super : TestRoot @end
 @implementation Super
-+(void)initialize { } 
-+class { return self; }
 -(void)instancemethod { fail("-instancemethod not overridden by category"); }
 +(void)method { fail("+method not overridden by category"); } 
 @end
@@ -70,13 +69,10 @@ static int state = 0;
 
 int main()
 {
-    id buf[10] = {0};
-    
     // methods introduced by category
     state = 0;
     [Super method];
-    buf[0] = [Super class];
-    [(Super *)buf instancemethod];
+    [[Super new] instancemethod];
     testassert(state == 2);
 
     // property introduced by category

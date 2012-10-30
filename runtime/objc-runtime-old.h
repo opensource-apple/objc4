@@ -115,6 +115,7 @@ struct old_protocol_ext {
     struct objc_method_description_list *optional_instance_methods;
     struct objc_method_description_list *optional_class_methods;
     struct old_property_list *instance_properties;
+    const char **extendedMethodTypes;
 };
 
 

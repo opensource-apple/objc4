@@ -9,7 +9,7 @@
 #import <Foundation/NSObject.h>
 
 @interface ARRBase : NSObject
-@property double number;
+@property long number;
 @property(retain) id object;
 @property void *pointer;
 @property(weak) __weak id delegate;

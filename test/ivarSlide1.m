@@ -5,13 +5,7 @@
 #define OLD 0
 #include "ivarSlide.h"
 
-@implementation Base
-+(void)initialize { } 
-+class { return self; }
-+new { return class_createInstance(self, 0); }
--(void)dealloc { object_dispose(self); } 
--(void)finalize { }
-@end
+#include "testroot.i"
 
 @implementation Super @end
 

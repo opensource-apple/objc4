@@ -86,8 +86,8 @@ static SyncCache *fetch_cache(BOOL create)
             return NULL;
         } else {
             int count = 4;
-            data->syncCache = calloc(1, sizeof(SyncCache) + 
-                                     count*sizeof(SyncCacheItem));
+            data->syncCache = (SyncCache *)
+                calloc(1, sizeof(SyncCache) + count*sizeof(SyncCacheItem));
             data->syncCache->allocated = count;
         }
     }
@@ -95,7 +95,7 @@ static SyncCache *fetch_cache(BOOL create)
     // Make sure there's at least one open slot in the list.
     if (data->syncCache->allocated == data->syncCache->used) {
         data->syncCache->allocated *= 2;
-        data->syncCache = 
+        data->syncCache = (SyncCache *)
             realloc(data->syncCache, sizeof(SyncCache) 
                     + data->syncCache->allocated * sizeof(SyncCacheItem));
     }
@@ -104,7 +104,7 @@ static SyncCache *fetch_cache(BOOL create)
 }
 
 
-PRIVATE_EXTERN void _destroySyncCache(struct SyncCache *cache)
+void _destroySyncCache(struct SyncCache *cache)
 {
     if (cache) free(cache);
 }
@@ -119,7 +119,7 @@ static SyncData* id2data(id object, enum usage why)
 #if SUPPORT_DIRECT_THREAD_KEYS
     // Check per-thread single-entry fast cache for matching object
     BOOL fastCacheOccupied = NO;
-    SyncData *data = tls_get_direct(SYNC_DATA_DIRECT_KEY);
+    SyncData *data = (SyncData *)tls_get_direct(SYNC_DATA_DIRECT_KEY);
     if (data) {
         fastCacheOccupied = YES;
 

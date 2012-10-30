@@ -72,6 +72,12 @@
 #   include <System/pthread_machdep.h>
 #   include "objc-probes.h"  // generated dtrace probe definitions.
 
+
+#if defined(__i386__) || defined(__x86_64__)
+
+// Inlined spinlock.
+// Not for arm on iOS because it hurts uniprocessor performance.
+
 #define ARR_SPINLOCK_INIT 0
 // XXX -- Careful: OSSpinLock isn't volatile, but should be
 typedef volatile int ARRSpinLock;
@@ -97,13 +103,21 @@ static inline void ARRSpinLockUnlock(ARRSpinLock *l)
 {
     __sync_lock_release(l);
 }
+__attribute__((always_inline))
+static inline int ARRSpinLockTry(ARRSpinLock *l)
+{
+    return __sync_bool_compare_and_swap(l, 0, 1);
+}
 
 #define OSSpinLock ARRSpinLock
-#define OSSpinLockTry(l) __sync_bool_compare_and_swap(l, 0, 1)
+#define OSSpinLockTry(l) ARRSpinLockTry(l)
 #define OSSpinLockLock(l) ARRSpinLockLock(l)
 #define OSSpinLockUnlock(l) ARRSpinLockUnlock(l)
 #undef OS_SPINLOCK_INIT
 #define OS_SPINLOCK_INIT ARR_SPINLOCK_INIT 
+
+#endif
+
 
 #if !TARGET_OS_IPHONE
 #   include <CrashReporterClient.h>
@@ -129,9 +143,8 @@ static inline void ARRSpinLockUnlock(ARRSpinLock *l)
 #   if __cplusplus
 #       include <vector>
 #       include <algorithm>
+#       include <functional>
         using namespace std;
-#       include <ext/hash_map>
-        using namespace __gnu_cxx;
 #   endif
 
 #   define PRIVATE_EXTERN __attribute__((visibility("hidden")))
@@ -143,8 +156,8 @@ static inline void ARRSpinLockUnlock(ARRSpinLock *l)
 /* Use this for functions that are intended to be breakpoint hooks.
    If you do not, the compiler may optimize them away.
    BREAKPOINT_FUNCTION( void stop_on_error(void) ); */
-#   define BREAKPOINT_FUNCTION(prototype)                \
-    __attribute__((noinline, visibility("hidden")))      \
+#   define BREAKPOINT_FUNCTION(prototype)                            \
+    OBJC_EXTERN __attribute__((noinline, visibility("hidden")))      \
     prototype { asm(""); }
 
 #elif TARGET_OS_WIN32
@@ -169,9 +182,8 @@ static inline void ARRSpinLockUnlock(ARRSpinLock *l)
 #   if __cplusplus
 #       include <vector>
 #       include <algorithm>
+#       include <functional>
         using namespace std;
-#       include <hash_map>
-        using namespace stdext;
 #       define __BEGIN_DECLS extern "C" {
 #       define __END_DECLS   }
 #   else
@@ -356,7 +368,7 @@ static __inline int _mutex_lock_nodebug(mutex_t *m) {
     EnterCriticalSection(m->lock); 
     return 0;
 }
-static __inline int _mutex_try_lock_nodebug(mutex_t *m) { 
+static __inline bool _mutex_try_lock_nodebug(mutex_t *m) { 
     // fixme error check
     if (!m->lock) {
         mutex_init(m);
@@ -386,7 +398,7 @@ static __inline int _recursive_mutex_lock_nodebug(recursive_mutex_t *m) {
     assert(m->mutex);
     return WaitForSingleObject(m->mutex, INFINITE);
 }
-static __inline int _recursive_mutex_try_lock_nodebug(recursive_mutex_t *m) { 
+static __inline bool _recursive_mutex_try_lock_nodebug(recursive_mutex_t *m) { 
     assert(m->mutex);
     return (WAIT_OBJECT_0 == WaitForSingleObject(m->mutex, 0));
 }
@@ -400,7 +412,7 @@ static __inline int _recursive_mutex_unlock_nodebug(recursive_mutex_t *m) {
 typedef HANDLE mutex_t;
 static inline void mutex_init(HANDLE *m) { *m = CreateMutex(NULL, FALSE, NULL); }
 static inline void _mutex_lock(mutex_t *m) { WaitForSingleObject(*m, INFINITE); }
-static inline int mutex_try_lock(mutex_t *m) { return WaitForSingleObject(*m, 0) == WAIT_OBJECT_0; }
+static inline bool mutex_try_lock(mutex_t *m) { return WaitForSingleObject(*m, 0) == WAIT_OBJECT_0; }
 static inline void _mutex_unlock(mutex_t *m) { ReleaseMutex(*m); }
 */
 
@@ -498,20 +510,6 @@ static inline int monitor_notifyAll(monitor_t *c) {
 #define _rwlock_unlock_write_nodebug(m) _mutex_unlock_nodebug(m)
 
 
-typedef struct {
-    struct objc_module **modules;
-    size_t moduleCount;
-    struct old_protocol **protocols;
-    size_t protocolCount;
-    void *imageinfo;
-    size_t imageinfoBytes;
-    SEL *selrefs;
-    size_t selrefCount;
-    struct objc_class **clsrefs;
-    size_t clsrefCount;    
-    TCHAR *moduleName;
-} os_header_info;
-
 typedef IMAGE_DOS_HEADER headerType;
 // fixme YES bundle? NO bundle? sometimes?
 #define headerIsBundle(hi) YES
@@ -568,10 +566,66 @@ static inline void tls_set(tls_key_t k, void *value) {
 }
 
 #if SUPPORT_DIRECT_THREAD_KEYS
+
+#if !NDEBUG
+static bool is_valid_direct_key(tls_key_t k) {
+    return (   k == SYNC_DATA_DIRECT_KEY
+            || k == SYNC_COUNT_DIRECT_KEY
+            || k == AUTORELEASE_POOL_KEY
+#   if SUPPORT_RETURN_AUTORELEASE
+            || k == AUTORELEASE_POOL_RECLAIM_KEY
+#   endif
+               );
+}
+#endif
+
+#if __arm__
+
+// rdar://9162780  _pthread_get/setspecific_direct are inefficient
+// copied from libdispatch
+
+__attribute__((always_inline)) __attribute__((const))
+static inline void**
+tls_base(void)
+{
+    uintptr_t p;
+#if defined(__arm__) && defined(_ARM_ARCH_6)
+    __asm__("mrc	p15, 0, %[p], c13, c0, 3" : [p] "=&r" (p));
+    return (void**)(p & ~0x3ul);
+#else
+#error tls_base not implemented
+#endif
+}
+
+__attribute__((always_inline))
+static inline void
+tls_set_direct(void **tsdb, tls_key_t k, void *v)
+{
+    assert(is_valid_direct_key(k));
+
+    tsdb[k] = v;
+}
+#define tls_set_direct(k, v)                    \
+        tls_set_direct(tls_base(), (k), (v))
+
+__attribute__((always_inline))
+static inline void *
+tls_get_direct(void **tsdb, tls_key_t k)
+{
+    assert(is_valid_direct_key(k));
+
+    return tsdb[k];
+}
+#define tls_get_direct(k)                       \
+        tls_get_direct(tls_base(), (k))
+
+// arm
+#else
+// not arm
+
 static inline void *tls_get_direct(tls_key_t k) 
 { 
-    assert(k == SYNC_DATA_DIRECT_KEY  ||
-           k == SYNC_COUNT_DIRECT_KEY);
+    assert(is_valid_direct_key(k));
 
     if (_pthread_has_direct_tsd()) {
         return _pthread_getspecific_direct(k);
@@ -581,8 +635,7 @@ static inline void *tls_get_direct(tls_key_t k)
 }
 static inline void tls_set_direct(tls_key_t k, void *value) 
 { 
-    assert(k == SYNC_DATA_DIRECT_KEY  ||
-           k == SYNC_COUNT_DIRECT_KEY);
+    assert(is_valid_direct_key(k));
 
     if (_pthread_has_direct_tsd()) {
         _pthread_setspecific_direct(k, value);
@@ -590,6 +643,11 @@ static inline void tls_set_direct(tls_key_t k, void *value)
         pthread_setspecific(k, value);
     }
 }
+
+// not arm
+#endif
+
+// SUPPORT_DIRECT_THREAD_KEYS
 #endif
 
 
@@ -610,12 +668,12 @@ static inline int _mutex_lock_nodebug(mutex_t *m) {
     }
     return pthread_mutex_lock(m); 
 }
-static inline int _mutex_try_lock_nodebug(mutex_t *m) { 
+static inline bool _mutex_try_lock_nodebug(mutex_t *m) { 
     if (DebuggerMode  &&  isManagedDuringDebugger(m)) {
         if (! isLockedDuringDebugger(m)) {
             gdb_objc_debuggerModeFailure();
         }
-        return 1;
+        return true;
     }
     return !pthread_mutex_trylock(m); 
 }
@@ -644,13 +702,13 @@ static inline int _recursive_mutex_lock_nodebug(recursive_mutex_t *m) {
     }
     return pthread_mutex_lock(m->mutex); 
 }
-static inline int _recursive_mutex_try_lock_nodebug(recursive_mutex_t *m) { 
+static inline bool _recursive_mutex_try_lock_nodebug(recursive_mutex_t *m) { 
     assert(m->mutex);
     if (DebuggerMode  &&  isManagedDuringDebugger(m)) {
         if (! isLockedDuringDebugger((mutex_t *)m)) {
             gdb_objc_debuggerModeFailure();
         }
-        return 1;
+        return true;
     }
     return !pthread_mutex_trylock(m->mutex); 
 }
@@ -721,10 +779,7 @@ static inline semaphore_t create_semaphore(void)
        z: readers allowed flag
 */
 typedef struct {
-    volatile int32_t state;
-    semaphore_t readersDone;
-    semaphore_t writerDone;
-    pthread_mutex_t writerMutex;
+    pthread_rwlock_t rwl;
 } rwlock_t;
 
 extern BOOL isReadingDuringDebugger(rwlock_t *lock);
@@ -732,10 +787,8 @@ extern BOOL isWritingDuringDebugger(rwlock_t *lock);
 
 static inline void rwlock_init(rwlock_t *l)
 {
-    l->state = 1;
-    l->readersDone = create_semaphore();
-    l->writerDone = create_semaphore();
-    l->writerMutex = (mutex_t)MUTEX_INITIALIZER;
+    int err __unused = pthread_rwlock_init(&l->rwl, NULL);
+    assert(err == 0);
 }
 
 static inline void _rwlock_read_nodebug(rwlock_t *l)
@@ -746,28 +799,8 @@ static inline void _rwlock_read_nodebug(rwlock_t *l)
         }
         return;
     }
-    while (1) {
-        // Increment "blocked readers" or "active readers" count.
-        int32_t old = l->state;
-        if (old % 2 == 1) {
-            // Readers OK. Increment active reader count.
-            if (OSAtomicCompareAndSwap32Barrier(old, old + 2, &l->state)) {
-                // Success. Read lock acquired.
-                return;
-            } else {
-                // CAS failed (writer or another reader). Redo from start.
-            }
-        }
-        else {
-            // Readers not OK. Increment blocked reader count.
-            if (OSAtomicCompareAndSwap32(old, old + 0x10000, &l->state)) {
-                // Success. Wait for writer to complete, then retry.
-                semaphore_wait(l->writerDone);
-            } else {
-                // CAS failed (writer or another reader). Redo from start.
-            }
-        }
-    }
+    int err __unused = pthread_rwlock_rdlock(&l->rwl);
+    assert(err == 0);
 }
 
 static inline void _rwlock_unlock_read_nodebug(rwlock_t *l)
@@ -775,45 +808,22 @@ static inline void _rwlock_unlock_read_nodebug(rwlock_t *l)
     if (DebuggerMode  &&  isManagedDuringDebugger(l)) {
         return;
     }
-    // Decrement "active readers" count.
-    int32_t newState = OSAtomicAdd32Barrier(-2, &l->state);
-    if ((newState & 0xffff) == 0) {
-        // No active readers, and readers OK flag is clear.
-        // We're the last reader out and there's a writer waiting. Wake it.
-        semaphore_signal(l->readersDone);
-    }
+    int err __unused = pthread_rwlock_unlock(&l->rwl);
+    assert(err == 0);
 }
 
 
-static inline int _rwlock_try_read_nodebug(rwlock_t *l)
+static inline bool _rwlock_try_read_nodebug(rwlock_t *l)
 {
-    int i;
     if (DebuggerMode  &&  isManagedDuringDebugger(l)) {
         if (! isReadingDuringDebugger(l)) {
             gdb_objc_debuggerModeFailure();
         }
-        return 1;
+        return true;
     }
-    for (i = 0; i < 16; i++) {
-        int32_t old = l->state;
-        if (old % 2 != 1) {
-            // Readers not OK. Fail.
-            return 0;
-        } else {
-            // Readers OK. 
-            if (OSAtomicCompareAndSwap32Barrier(old, old + 2, &l->state)) {
-                // Success. Read lock acquired.
-                return 1;
-            } else {
-                // CAS failed (writer or another reader). Redo from start.
-                // trylock will fail against writer, 
-                // but retry a few times against reader.
-            }
-        }
-    }
-
-    // Too many retries. Give up.
-    return 0;
+    int err = pthread_rwlock_tryrdlock(&l->rwl);
+    assert(err == 0  ||  err == EBUSY);
+    return (err == 0);
 }
 
 
@@ -825,20 +835,8 @@ static inline void _rwlock_write_nodebug(rwlock_t *l)
         }
         return;
     }
-
-    // Only one writer allowed at a time.
-    pthread_mutex_lock(&l->writerMutex);
-
-    // Clear "readers OK" bit and "blocked readers" count.
-    int32_t newState = OSAtomicAnd32(0x0000fffe, (uint32_t *)&l->state);
-    
-    if (newState == 0) {
-        // No "active readers". Success.
-        OSMemoryBarrier();
-    } else {
-        // Wait for "active readers" to complete.
-        semaphore_wait(l->readersDone);
-    }
+    int err __unused = pthread_rwlock_wrlock(&l->rwl);
+    assert(err == 0);
 }
 
 static inline void _rwlock_unlock_write_nodebug(rwlock_t *l)
@@ -846,54 +844,21 @@ static inline void _rwlock_unlock_write_nodebug(rwlock_t *l)
     if (DebuggerMode  &&  isManagedDuringDebugger(l)) {
         return;
     }
-
-    // Reinstate "readers OK" bit and clear reader counts.
-    int32_t oldState;
-    do {
-        oldState = l->state;
-    } while (!OSAtomicCompareAndSwap32Barrier(oldState, 0x1, &l->state));
-    
-    // Unblock any "blocked readers" that arrived while we held the lock
-    oldState = oldState >> 16;
-    while (oldState--) {
-        semaphore_signal(l->writerDone);
-    }
-
-    // Allow a new writer.
-    pthread_mutex_unlock(&l->writerMutex);
+    int err __unused = pthread_rwlock_unlock(&l->rwl);
+    assert(err == 0);
 }
 
-static inline int _rwlock_try_write_nodebug(rwlock_t *l)
+static inline bool _rwlock_try_write_nodebug(rwlock_t *l)
 {
     if (DebuggerMode  &&  isManagedDuringDebugger(l)) {
         if (! isWritingDuringDebugger(l)) {
             gdb_objc_debuggerModeFailure();
         }
-        return 1;
+        return true;
     }
-
-    if (pthread_mutex_trylock(&l->writerMutex)) {
-        // Some other writer is in the way - fail
-        return 0;
-    }
-
-    // Similar to _rwlock_write_nodebug, but less intrusive with readers active
-
-    int32_t oldState, newState;
-    oldState = l->state;
-    newState = oldState & 0x0000fffe;
-    if (newState != 0) {
-        // Readers active. Give up.
-        pthread_mutex_unlock(&l->writerMutex);
-        return 0;
-    }
-    if (!OSAtomicCompareAndSwap32Barrier(oldState, newState, &l->state)) {
-        // CAS failed (reader interupted). Give up.
-        pthread_mutex_unlock(&l->writerMutex);
-        return 0;
-    }
-
-    return 1;
+    int err = pthread_rwlock_trywrlock(&l->rwl);
+    assert(err == 0  ||  err == EBUSY);
+    return (err == 0);
 }
 
 
@@ -908,13 +873,6 @@ typedef struct section_64 sectionType;
 #endif
 #define headerIsBundle(hi) (hi->mhdr->filetype == MH_BUNDLE)
 #define libobjc_header ((headerType *)&_mh_dylib_header)
-
-typedef struct {
-    Dl_info             dl_info;
-#if !__OBJC2__
-    struct old_protocol **proto_refs;
-#endif
-} os_header_info;
 
 // Prototypes
 

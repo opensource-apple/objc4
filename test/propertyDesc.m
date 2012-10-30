@@ -1,16 +1,10 @@
 // TEST_CONFIG
 
 #include "test.h"
-
+#include "testroot.i"
 #include <stdint.h>
 #include <string.h>
 #include <objc/runtime.h>
-
-@interface Foo { id isa; } @end
-@implementation Foo
-+class { return self; }
-+(void)initialize { }
-@end
 
 struct objc_property {
     const char *name;
@@ -246,20 +240,20 @@ int main()
     objc_property_t prop2;
 
     // null name
-    ok = class_addProperty([Foo class], NULL, (objc_property_attribute_t *)1, 1);
+    ok = class_addProperty([TestRoot class], NULL, (objc_property_attribute_t *)1, 1);
     testassert(!ok);
 
     // null description
-    ok = class_addProperty([Foo class], "test-null-desc", NULL, 0);
+    ok = class_addProperty([TestRoot class], "test-null-desc", NULL, 0);
     testassert(ok);
-    prop2 = class_getProperty([Foo class], "test-null-desc");
+    prop2 = class_getProperty([TestRoot class], "test-null-desc");
     testassert(prop2);
     testassert(0 == strcmp(property_getAttributes(prop2), ""));
 
     // empty description
-    ok = class_addProperty([Foo class], "test-empty-desc", (objc_property_attribute_t*)1, 0);
+    ok = class_addProperty([TestRoot class], "test-empty-desc", (objc_property_attribute_t*)1, 0);
     testassert(ok);
-    prop2 = class_getProperty([Foo class], "test-empty-desc");
+    prop2 = class_getProperty([TestRoot class], "test-empty-desc");
     testassert(prop2);
     testassert(0 == strcmp(property_getAttributes(prop2), ""));
 
@@ -271,9 +265,9 @@ int main()
         { "?!?!", "YY" }, 
         { "''''", "" }
     };
-    ok = class_addProperty([Foo class], "test-unrecognized", attrs2, 5);
+    ok = class_addProperty([TestRoot class], "test-unrecognized", attrs2, 5);
     testassert(ok);
-    prop2 = class_getProperty([Foo class], "test-unrecognized");
+    prop2 = class_getProperty([TestRoot class], "test-unrecognized");
     testassert(prop2);
     testassert(0 == strcmp(property_getAttributes(prop2), "?XX,',\"?!?!\"YY,\"''''\""));
 
@@ -291,9 +285,9 @@ int main()
         { "V", "2222" }, 
         { "T", "11" }, 
     };
-    ok = class_addProperty([Foo class], "test-recognized", attrs3, 11);
+    ok = class_addProperty([TestRoot class], "test-recognized", attrs3, 11);
     testassert(ok);
-    prop2 = class_getProperty([Foo class], "test-recognized");
+    prop2 = class_getProperty([TestRoot class], "test-recognized");
     testassert(prop2);
     testassert(0 == strcmp(property_getAttributes(prop2), 
                            "&,C,N,R,D,P,W,G\"44444444,S333333\",V2222,T11"));
@@ -317,9 +311,9 @@ int main()
         { "?!?!", "YY" }, 
         { "''''", "" }
     };
-    ok = class_addProperty([Foo class], "test-sink", attrs4, 16);
+    ok = class_addProperty([TestRoot class], "test-sink", attrs4, 16);
     testassert(ok);
-    prop2 = class_getProperty([Foo class], "test-sink");
+    prop2 = class_getProperty([TestRoot class], "test-sink");
     testassert(prop2);
     testassert(0 == strcmp(property_getAttributes(prop2), 
                            "&,C,N,R,D,P,W,G\"44444444,S333333\",V2222,T11,"

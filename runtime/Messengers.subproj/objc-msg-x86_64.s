@@ -289,7 +289,7 @@ LSCIE1:
 	.byte	DW_CFA_def_cfa
 	.byte	DW_rsp
 	.byte	8
-	// RA is at 0(%rsp) aka -8(CFA)
+	// RA is at 0(%rsp) aka 1*-8(CFA)
 	.byte	DW_CFA_offset | DW_ra
 	.byte	1
 	
@@ -309,26 +309,67 @@ LSFDE$0:
 	.long 	LLENFDE$0		# FDE Length
 LASFDE$0:
 	.long 	LASFDE$0-CIE		# FDE CIE offset
-	.quad	LF0$0-.			# FDE address start
-	.quad	LLEN$0			# FDE address range
+	.quad	L_dw_start_$0-.		# FDE address start
+	.quad	L_dw_len_$0		# FDE address range
 	.byte	0x0			# uleb128 0x0; Augmentation size
 
 	// DW_START: set by CIE
 
-.if $2 == 1
+.if $1 == 1
+	// CacheLookup 
 
-	// pushq %rbp
+	// push
 	.byte 	DW_CFA_advance_loc4
-	.long	LFLEN0$0+1
-	.byte	DW_CFA_def_cfa_offset
+	.long	L_dw_push_$0 - L_dw_start_$0
+	.byte	DW_CFA_def_cfa_offset	// CFA = rsp+16
 	.byte	16
-	.byte	DW_CFA_offset | DW_rbp
-	.byte	-16/-8
-	// movq %rsp, %rbp
+	
+	// pop
 	.byte 	DW_CFA_advance_loc4
-	.long	3
-	.byte	DW_CFA_def_cfa_register
+	.long	L_dw_pop_$0 - L_dw_push_$0
+	.byte	DW_CFA_def_cfa_offset	// CFA = rsp+8
+	.byte	8
+
+	// cache miss: push is back in effect
+	.byte 	DW_CFA_advance_loc4
+	.long	L_dw_miss_$0 - L_dw_pop_$0
+	.byte	DW_CFA_def_cfa_offset	// CFA = rsp+16
+	.byte	16
+	
+	// pop during cache miss
+	.byte 	DW_CFA_advance_loc4
+	.long	L_dw_miss_pop_$0 - L_dw_miss_$0
+	.byte	DW_CFA_def_cfa_offset	// CFA = rsp+8
+	.byte	8
+
+.endif
+
+.if $2 == 1
+	// Save/RestoreRegisters or MethodTableLookup
+
+	// enter
+	.byte 	DW_CFA_advance_loc4
+.if $1 == 1
+	.long	L_dw_enter_$0 - L_dw_miss_pop_$0
+.else
+	.long	L_dw_enter_$0 - L_dw_start_$0
+.endif
+	.byte   DW_CFA_def_cfa_offset
+	.byte   16
+	.byte	DW_CFA_offset | DW_rbp	// rbp => 2*-8(CFA)
+	.byte	2
+	.byte	DW_CFA_def_cfa_register	// CFA = rbp+16 (offset unchanged)
 	.byte	DW_rbp
+	
+	// leave
+	.byte 	DW_CFA_advance_loc4
+	.long	L_dw_leave_$0 - L_dw_enter_$0
+
+	.byte 	DW_CFA_same_value	// rbp = original value
+	.byte	DW_rbp
+	.byte	DW_CFA_def_cfa		// CFA = rsp+8
+	.byte	DW_rsp
+	.byte	8
 
 .endif
 
@@ -339,23 +380,47 @@ LEFDE$0:
 .endmacro
 
 
+// Start of function
 .macro DW_START
-LF0$0:
-.endmacro
-	
-.macro DW_FRAME
-LF1$0:	
-	.set 	LFLEN0$0, LF1$0-LF0$0
-.endmacro
-	
-.macro DW_END
-	.set 	LLEN$0, .-LF0$0
-	EMIT_FDE $0, LLEN$0, 1
+L_dw_start_$0:
 .endmacro
 
-.macro DW_END2
-	.set 	LLEN$0, .-LF0$0
-	EMIT_FDE $0, LLEN$0, 2
+// After `push` in CacheLookup
+.macro DW_PUSH
+L_dw_push_$0:	
+.endmacro
+
+// After `pop` in CacheLookup
+.macro DW_POP
+L_dw_pop_$0:
+.endmacro
+
+// After cache miss label
+.macro DW_MISS
+L_dw_miss_$0:	
+.endmacro
+
+// After pop in MethodTableLookup
+.macro DW_MISS_POP
+L_dw_miss_pop_$0:	
+.endmacro
+	
+// After `enter` in SaveRegisters
+.macro DW_ENTER
+L_dw_enter_$0:	
+.endmacro
+
+// After `leave` in RestoreRegisters
+.macro DW_LEAVE
+L_dw_leave_$0:
+.endmacro
+	
+// End of function
+// $1 == 1 iff you called CacheLookup
+// $2 == 1 iff you called MethodTableLookup or Save/RestoreRegsters
+.macro DW_END
+	.set 	L_dw_len_$0, . - L_dw_start_$0
+	EMIT_FDE $0, $1, $2
 .endmacro
 
 
@@ -375,8 +440,11 @@ LF1$0:
 /////////////////////////////////////////////////////////////////////
 
 .macro SaveRegisters
-	DW_FRAME $0
+	// These instructions must match the DWARF data in EMIT_FDE.
+	
 	enter	$$0x80+8, $$0		// +8 for alignment
+	DW_ENTER $0
+
 	movdqa	%xmm0, -0x80(%rbp)
 	push	%rax			// might be xmm parameter count
 	movdqa	%xmm1, -0x70(%rbp)
@@ -392,6 +460,8 @@ LF1$0:
 	movdqa	%xmm6, -0x20(%rbp)
 	push	%a6
 	movdqa	%xmm7, -0x10(%rbp)
+	
+	// These instructions must match the DWARF data in EMIT_FDE.
 .endmacro
 
 /////////////////////////////////////////////////////////////////////
@@ -409,6 +479,8 @@ LF1$0:
 /////////////////////////////////////////////////////////////////////
 
 .macro RestoreRegisters
+	// These instructions must match the DWARF data in EMIT_FDE.
+
 	movdqa	-0x80(%rbp), %xmm0
 	pop	%a6
 	movdqa	-0x70(%rbp), %xmm1
@@ -424,19 +496,24 @@ LF1$0:
 	movdqa	-0x20(%rbp), %xmm6
 	pop	%rax
 	movdqa	-0x10(%rbp), %xmm7
+	
 	leave
+	DW_LEAVE $0
+
+	// These instructions must match the DWARF data in EMIT_FDE.
 .endmacro
 
 
 /////////////////////////////////////////////////////////////////////
 //
 //
-// CacheLookup	return-type
+// CacheLookup	return-type, caller
 //
 // Locate the implementation for a selector in a class method cache.
 //
 // Takes: 
 //	  $0 = NORMAL, FPRET, FP2RET, STRET
+//	  $1 = caller's symbol name for DWARF
 //	  a2 or a3 (STRET) = selector
 //	  %r11 = class whose cache is to be searched
 //
@@ -448,6 +525,8 @@ LF1$0:
 .macro	CacheLookup
 
 	push	%rax
+	DW_PUSH $1
+	
 	movq	cache(%r11), %r10	// cache = class->cache
 .if $0 != STRET
 	mov	%a2d, %eax		// index = sel
@@ -476,6 +555,7 @@ LF1$0:
 	// cache hit, r11 = method triplet
 	// restore saved registers
 	pop	%rax
+	DW_POP	$1
 
 .if $0 != STRET
 	// eq (non-stret) flag already set above
@@ -489,7 +569,7 @@ LF1$0:
 
 /////////////////////////////////////////////////////////////////////
 //
-// MethodTableLookup classRegister, selectorRegister, fn
+// MethodTableLookup classRegister, selectorRegister, caller
 //
 // Takes:	$0 = class to search (a1 or a2 or r10 ONLY)
 //		$1 = selector to search for (a2 or a3 ONLY)
@@ -505,6 +585,8 @@ LF1$0:
 .macro MethodTableLookup
 	
 	pop	%rax	// saved by CacheLookup
+	DW_MISS_POP $2
+	
 	SaveRegisters $2
 
 	// _class_lookupMethodAndLoadCache3(receiver, selector, class)
@@ -666,7 +748,7 @@ LNilTestSlow:
 
 // do lookup
 	movq	%a1, %r11		// move class to r11 for CacheLookup
-	CacheLookup NORMAL
+	CacheLookup NORMAL, __cache_getMethod
 
 // cache hit, method triplet in %r11
 	cmpq	method_imp(%r11), %a3	// if (imp==_objc_msgForward_internal)
@@ -678,12 +760,14 @@ LNilTestSlow:
 
 LCacheMiss:
 // cache miss, return nil
+	DW_MISS __cache_getMethod
 	pop	%rax		// pushed by CacheLookup
+	DW_MISS_POP __cache_getMethod
 	xorl	%eax, %eax
 	ret
 
 LGetMethodExit:
-	DW_END2		__cache_getMethod
+	DW_END		__cache_getMethod, 1, 0
 	END_ENTRY 	__cache_getMethod
 
 
@@ -702,7 +786,7 @@ LGetMethodExit:
 
 // do lookup
 	movq	%a1, %r11		// move class to r11 for CacheLookup
-	CacheLookup NORMAL
+	CacheLookup NORMAL, __cache_getImp
 
 // cache hit, method triplet in %r11
 	movq	method_imp(%r11), %rax	// return method imp address
@@ -710,12 +794,14 @@ LGetMethodExit:
 
 LCacheMiss:
 // cache miss, return nil
+	DW_MISS __cache_getImp
 	pop	%rax		// pushed by CacheLookup
+	DW_MISS_POP __cache_getImp
 	xorl	%eax, %eax
 	ret
 
 LGetImpExit:
-	DW_END2 	__cache_getImp
+	DW_END		__cache_getImp, 1, 0
 	END_ENTRY 	__cache_getImp
 
 
@@ -737,7 +823,7 @@ __objc_tagged_isa_table:
 	NilTest	NORMAL
 
 	GetIsaFast NORMAL		// r11 = self->isa
-	CacheLookup NORMAL		// r11 = method, eq set (nonstret fwd)
+	CacheLookup NORMAL, _objc_msgSend  // r11=method, eq set (nonstret fwd)
 	jmp	*method_imp(%r11)	// goto *imp
 
 	NilTestSupport	NORMAL
@@ -746,12 +832,13 @@ __objc_tagged_isa_table:
 
 // cache miss: go search the method lists
 LCacheMiss:
+	DW_MISS _objc_msgSend
 	GetIsa	NORMAL			// r11 = self->isa
 	MethodTableLookup %a1, %a2, _objc_msgSend	// r11 = IMP
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSend
+	DW_END 		_objc_msgSend, 1, 1
 	END_ENTRY	_objc_msgSend
 
 #if __OBJC2__
@@ -786,7 +873,7 @@ LCacheMiss:
 
 	NilTestSupport	NORMAL
 	
-	DW_END 		_objc_msgSend_fixup
+	DW_END 		_objc_msgSend_fixup, 0, 1
 	END_ENTRY 	_objc_msgSend_fixup
 
 
@@ -813,12 +900,13 @@ LCacheMiss:
 
 // search the cache (objc_super in %a1)
 	movq	class(%a1), %r11	// class = objc_super->class
-	CacheLookup NORMAL		// r11 = method, eq set (nonstret fwd)
+	CacheLookup NORMAL, _objc_msgSendSuper  // r11 = method, eq set (nonstret fwd)
 	movq	receiver(%a1), %a1	// load real receiver
 	jmp	*method_imp(%r11)	// goto *imp
 
 // cache miss: go search the method lists
 LCacheMiss:
+	DW_MISS _objc_msgSendSuper
 	movq	receiver(%a1), %r10
 	movq	class(%a1), %r11
 	MethodTableLookup %r10, %a2, _objc_msgSendSuper	// r11 = IMP
@@ -826,7 +914,7 @@ LCacheMiss:
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 	
-	DW_END 		_objc_msgSendSuper
+	DW_END 		_objc_msgSendSuper, 1, 1
 	END_ENTRY	_objc_msgSendSuper
 
 
@@ -857,7 +945,7 @@ LCacheMiss:
 	cmp	%r11, %r11		// set nonstret (eq) for forwarding
 	jmp 	*%r11
 	
-	DW_END 		_objc_msgSendSuper2_fixup
+	DW_END 		_objc_msgSendSuper2_fixup, 0, 1
 	END_ENTRY 	_objc_msgSendSuper2_fixup
 
 
@@ -874,12 +962,13 @@ LCacheMiss:
 // search the cache (objc_super in %a1)
 	movq	class(%a1), %r11	// cls = objc_super->class
 	movq	8(%r11), %r11		// cls = class->superclass
-	CacheLookup NORMAL		// r11 = method, eq set (nonstret fwd)
+	CacheLookup NORMAL, _objc_msgSendSuper2	// r11 = method, eq set (nonstret fwd)
 	movq	receiver(%a1), %a1	// load real receiver
 	jmp	*method_imp(%r11)	// goto *imp
 
 // cache miss: go search the method lists
 LCacheMiss:
+	DW_MISS _objc_msgSendSuper2
 	movq	receiver(%a1), %r10
 	movq	class(%a1), %r11
 	movq	8(%r11), %r11
@@ -888,7 +977,7 @@ LCacheMiss:
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 	
-	DW_END 		_objc_msgSendSuper2
+	DW_END 		_objc_msgSendSuper2, 1, 1
 	END_ENTRY	_objc_msgSendSuper2
 #endif
 
@@ -906,7 +995,7 @@ LCacheMiss:
 	NilTest	FPRET
 
 	GetIsaFast FPRET		// r11 = self->isa
-	CacheLookup FPRET		// r11 = method, eq set (nonstret fwd)
+	CacheLookup FPRET, _objc_msgSend_fpret	// r11 = method, eq set (nonstret fwd)
 	jmp	*method_imp(%r11)	// goto *imp
 
 	NilTestSupport	FPRET
@@ -915,12 +1004,13 @@ LCacheMiss:
 
 // cache miss: go search the method lists
 LCacheMiss:
+	DW_MISS _objc_msgSend_fpret
 	GetIsa	FPRET			// r11 = self->isa
 	MethodTableLookup %a1, %a2, _objc_msgSend_fpret	// r11 = IMP
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSend_fpret
+	DW_END 		_objc_msgSend_fpret, 1, 1
 	END_ENTRY	_objc_msgSend_fpret
 	
 #if __OBJC2__
@@ -955,7 +1045,7 @@ LCacheMiss:
 
 	NilTestSupport	FPRET
 	
-	DW_END 		_objc_msgSend_fpret_fixup
+	DW_END 		_objc_msgSend_fpret_fixup, 0, 1
 	END_ENTRY 	_objc_msgSend_fpret_fixup
 
 
@@ -980,7 +1070,7 @@ LCacheMiss:
 	NilTest	FP2RET
 
 	GetIsaFast FP2RET		// r11 = self->isa
-	CacheLookup FP2RET		// r11 = method, eq set (nonstret fwd)
+	CacheLookup FP2RET, _objc_msgSend_fp2ret	// r11 = method, eq set (nonstret fwd)
 	jmp	*method_imp(%r11)	// goto *imp
 
 	NilTestSupport	FP2RET
@@ -989,12 +1079,13 @@ LCacheMiss:
 	
 // cache miss: go search the method lists
 LCacheMiss:
+	DW_MISS _objc_msgSend_fp2ret
 	GetIsa	FP2RET			// r11 = self->isa
 	MethodTableLookup %a1, %a2, _objc_msgSend_fp2ret	// r11 = IMP
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSend_fp2ret
+	DW_END 		_objc_msgSend_fp2ret, 1, 1
 	END_ENTRY	_objc_msgSend_fp2ret
 
 #if __OBJC2__
@@ -1029,7 +1120,7 @@ LCacheMiss:
 
 	NilTestSupport	FP2RET
 	
-	DW_END 		_objc_msgSend_fp2ret_fixup
+	DW_END 		_objc_msgSend_fp2ret_fixup, 0, 1
 	END_ENTRY 	_objc_msgSend_fp2ret_fixup
 
 
@@ -1060,7 +1151,7 @@ LCacheMiss:
 	NilTest	STRET
 
 	GetIsaFast STRET		// r11 = self->isa
-	CacheLookup STRET		// r11 = method, ne set (stret fwd)
+	CacheLookup STRET, _objc_msgSend_stret	// r11 = method, ne set (stret fwd)
 	jmp	*method_imp(%r11)	// goto *imp
 
 	NilTestSupport	STRET
@@ -1069,12 +1160,13 @@ LCacheMiss:
 
 // cache miss: go search the method lists
 LCacheMiss:
+	DW_MISS _objc_msgSend_stret
 	GetIsa	STRET			// r11 = self->isa
 	MethodTableLookup %a2, %a3, _objc_msgSend_stret	// r11 = IMP
 	test	%r11, %r11		// set ne (stret) for forward; r11!=0
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSend_stret
+	DW_END 		_objc_msgSend_stret, 1, 1
 	END_ENTRY	_objc_msgSend_stret
 
 #if __OBJC2__
@@ -1109,7 +1201,7 @@ LCacheMiss:
 
 	NilTestSupport STRET
 	
-	DW_END 		_objc_msgSend_stret_fixup
+	DW_END 		_objc_msgSend_stret_fixup, 0, 1
 	END_ENTRY 	_objc_msgSend_stret_fixup
 
 
@@ -1145,12 +1237,13 @@ LCacheMiss:
 
 // search the cache (objc_super in %a2)
 	movq	class(%a2), %r11	// class = objc_super->class
-	CacheLookup STRET		// r11 = method, ne set (stret fwd)
+	CacheLookup STRET, _objc_msgSendSuper_stret	// r11 = method, ne set (stret fwd)
 	movq	receiver(%a2), %a2	// load real receiver
 	jmp	*method_imp(%r11)	// goto *imp
 
 // cache miss: go search the method lists
 LCacheMiss:
+	DW_MISS _objc_msgSendSuper_stret
 	movq	receiver(%a2), %r10
 	movq	class(%a2), %r11
 	MethodTableLookup %r10, %a3, _objc_msgSendSuper_stret	// r11 = IMP
@@ -1158,7 +1251,7 @@ LCacheMiss:
 	test	%r11, %r11		// set ne (stret) for forward; r11!=0
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSendSuper_stret
+	DW_END 		_objc_msgSendSuper_stret, 1, 1
 	END_ENTRY	_objc_msgSendSuper_stret
 
 
@@ -1187,7 +1280,7 @@ LCacheMiss:
 	test	%r11, %r11		// set stret (ne) for forward; r11!=0
 	jmp	*%r11			// goto *imp
 	
-	DW_END 		_objc_msgSendSuper2_stret_fixup
+	DW_END 		_objc_msgSendSuper2_stret_fixup, 0, 1
 	END_ENTRY 	_objc_msgSendSuper2_stret_fixup
 
 	
@@ -1203,12 +1296,13 @@ LCacheMiss:
 // search the cache (objc_super in %a2)
 	movq	class(%a2), %r11	// class = objc_super->class
 	movq	8(%r11), %r11		// class = class->super_class
-	CacheLookup STRET		// r11 = method, ne set (stret fwd)
+	CacheLookup STRET, _objc_msgSendSuper2_stret	// r11 = method, ne set (stret fwd)
 	movq	receiver(%a2), %a2	// load real receiver
 	jmp	*method_imp(%r11)	// goto *imp
 
 // cache miss: go search the method lists
 LCacheMiss:
+	DW_MISS _objc_msgSendSuper2_stret
 	movq	receiver(%a2), %r10
 	movq	class(%a2), %r11
 	movq	8(%r11), %r11
@@ -1217,7 +1311,7 @@ LCacheMiss:
 	test	%r11, %r11		// set ne (stret) for forward; r11!=0
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSendSuper2_stret
+	DW_END 		_objc_msgSendSuper2_stret, 1, 1
 	END_ENTRY	_objc_msgSendSuper2_stret
 #endif
 
@@ -1237,7 +1331,7 @@ _FwdSel: .quad 0
 
 	.cstring
 	.align 3
-LUnkSelStr: .ascii "Does not recognize selector %s\0"
+LUnkSelStr: .ascii "Does not recognize selector %s (while forwarding %s)\0"
 
 	.data
 	.align 3
@@ -1328,9 +1422,10 @@ __objc_forward_stret_handler:	.quad 0
 	ret
 
 LMsgForwardError:
-	// Tail-call __objc_error(receiver, "unknown selector %s", "forward::")
+	// Tail-call __objc_error(receiver, "unknown selector %s %s", "forward::", forwardedSel)
 	// %a1 is already the receiver
-	leaq	LUnkSelStr(%rip), %a2	// "unknown selector %s"
+	movq	%a3, %a4		// the forwarded selector
+	leaq	LUnkSelStr(%rip), %a2	// "unknown selector %s %s"
 	movq	_FwdSel(%rip), %a3	// forward::
 	jmp	___objc_error		// never returns
 
@@ -1402,9 +1497,10 @@ LMsgForwardError:
 	ret
 
 LMsgForwardStretError:
-	// Tail-call __objc_error(receiver, "unknown selector %s", "forward::")
+	// Tail-call __objc_error(receiver, "unknown selector %s %s", "forward::", forwardedSel)
+	// %a4 is already the forwarded selector
 	movq	%a2, %a1		// receiver
-	leaq	LUnkSelStr(%rip), %a2	// "unknown selector %s"
+	leaq	LUnkSelStr(%rip), %a2	// "unknown selector %s %s"
 	movq	_FwdSel(%rip), %a3	// forward::
 	jmp	___objc_error		// never returns
 

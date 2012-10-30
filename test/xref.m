@@ -1,6 +1,6 @@
-// TEST_CFLAGS -framework Foundation
+// TEST_CFLAGS
 
-#include <Foundation/Foundation.h>
+#include <Foundation/NSObject.h>
 #include <objc/runtime.h>
 #include <objc/objc-internal.h>
 
@@ -26,7 +26,7 @@ int main()
     testassert(_object_readExternalReference(xref) == object);
     _object_removeExternalReference(xref);
     
-    [object release];
+    RELEASE_VAR(object);
 
     succeed(__FILE__);
 }

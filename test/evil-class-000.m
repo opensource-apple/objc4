@@ -1,9 +1,6 @@
 /*
 rdar://8553305
 
-TEST_CONFIG 
-TEST_CRASHES
-
 TEST_BUILD
     $C{COMPILE} $DIR/evil-class-000.m -dynamiclib -o libevil.dylib
     $C{COMPILE} $DIR/evil-main.m -x none -DNOT_EVIL libevil.dylib -o evil-class-000.out

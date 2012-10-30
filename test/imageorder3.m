@@ -9,6 +9,12 @@ static void c3(void)
     cstate = 3;
 }
 
+
+#if __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
+#endif
+
 @implementation Super (cat3)
 +(void) method {
     state = 3;
@@ -21,3 +27,7 @@ static void c3(void)
     state = 3;
 }
 @end
+
+#if __clang__
+#pragma clang diagnostic pop
+#endif

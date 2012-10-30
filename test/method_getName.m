@@ -1,4 +1,4 @@
-// TEST_CFLAGS -framework Foundation
+// TEST_CONFIG
 
 #include "test.h"
 #include <Foundation/NSObject.h>

@@ -106,7 +106,7 @@ static const char *	SkipFirstType	   (const char *	type)
 /***********************************************************************
 * encoding_getNumberOfArguments.
 **********************************************************************/
-PRIVATE_EXTERN unsigned int 
+unsigned int 
 encoding_getNumberOfArguments(const char *typedesc)
 {
     unsigned nargs;
@@ -144,7 +144,7 @@ encoding_getNumberOfArguments(const char *typedesc)
 /***********************************************************************
 * encoding_getSizeOfArguments.
 **********************************************************************/
-PRIVATE_EXTERN unsigned 
+unsigned 
 encoding_getSizeOfArguments(const char *typedesc)
 {
     unsigned		stack_size;
@@ -166,8 +166,8 @@ encoding_getSizeOfArguments(const char *typedesc)
 /***********************************************************************
 * encoding_getArgumentInfo.
 **********************************************************************/
-PRIVATE_EXTERN unsigned int 
-encoding_getArgumentInfo(const char *typedesc, int arg,
+unsigned int 
+encoding_getArgumentInfo(const char *typedesc, unsigned int arg,
                          const char **type, int *offset)
 {
     unsigned nargs = 0;
@@ -270,7 +270,7 @@ encoding_getArgumentInfo(const char *typedesc, int arg,
 }
 
 
-PRIVATE_EXTERN void 
+void 
 encoding_getReturnType(const char *t, char *dst, size_t dst_len)
 {
     size_t len;
@@ -292,7 +292,7 @@ encoding_getReturnType(const char *t, char *dst, size_t dst_len)
 * encoding_copyReturnType.  Returns the method's return type string 
 * on the heap. 
 **********************************************************************/
-PRIVATE_EXTERN char *
+char *
 encoding_copyReturnType(const char *t)
 {
     size_t len;
@@ -303,14 +303,14 @@ encoding_copyReturnType(const char *t)
 
     end = SkipFirstType(t);
     len = end - t;
-    result = malloc(len + 1);
+    result = (char *)malloc(len + 1);
     strncpy(result, t, len);
     result[len] = '\0';
     return result;
 }
 
 
-PRIVATE_EXTERN void 
+void 
 encoding_getArgumentType(const char *t, unsigned int index, 
                          char *dst, size_t dst_len)
 {
@@ -342,7 +342,7 @@ encoding_getArgumentType(const char *t, unsigned int index,
 * encoding_copyArgumentType.  Returns a single argument's type string 
 * on the heap. Argument 0 is `self`; argument 1 is `_cmd`. 
 **********************************************************************/
-PRIVATE_EXTERN char *
+char *
 encoding_copyArgumentType(const char *t, unsigned int index)
 {
     size_t len;
@@ -358,7 +358,7 @@ encoding_copyArgumentType(const char *t, unsigned int index)
 
     end = SkipFirstType(t);
     len = end - t;
-    result = malloc(len + 1);
+    result = (char *)malloc(len + 1);
     strncpy(result, t, len);
     result[len] = '\0';
     return result;

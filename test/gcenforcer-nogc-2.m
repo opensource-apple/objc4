@@ -1,7 +1,7 @@
 // gc-on app loading gc-off dylib: should crash
 
 /*
-TEST_CONFIG GC=1 SDK=macos
+TEST_CONFIG MEM=gc SDK=macos
 TEST_CRASHES
 
 TEST_RUN_OUTPUT
@@ -12,7 +12,7 @@ END
 
 TEST_BUILD
     $C{COMPILE_C} $DIR/gc.c -dynamiclib -o libnoobjc.dylib
-    $C{COMPILE_NOGC} $DIR/gc.m -dynamiclib -o libnogc.dylib
+    $C{COMPILE_NOMEM} $DIR/gc.m -dynamiclib -o libnogc.dylib
     $C{COMPILE} $DIR/gc.m -dynamiclib -o libsupportsgc.dylib -fobjc-gc
     $C{COMPILE} $DIR/gc.m -dynamiclib -o librequiresgc.dylib -fobjc-gc-only
     $C{COMPILE} $DIR/gc.m -dynamiclib -o librequiresgc.fake.dylib -fobjc-gc -install_name librequiresgc.dylib

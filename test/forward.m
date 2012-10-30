@@ -1,12 +1,13 @@
+// TEST_CONFIG MEM=mrc,gc
 // TEST_CFLAGS -Wno-deprecated-declarations
 
 #include "test.h"
 
-#ifdef __cplusplus
+#if __cplusplus  &&  !__clang__
 
 int main()
 {
-    testwarn("c++ rdar://8366474 @selector(foo::)");
+    // llvm-g++ is confused by @selector(foo::) and will never be fixed
     succeed(__FILE__);
 }
 
@@ -15,28 +16,11 @@ int main()
 #include <objc/runtime.h>
 #include <objc/message.h>
 
-struct stret {
-    int a;
-    int b;
-    int c;
-    int d;
-    int e;
-};
-
-BOOL stret_equal(struct stret a, struct stret b)
-{
-    return (a.a == b.a  &&  
-            a.b == b.b  &&  
-            a.c == b.c  &&  
-            a.d == b.d  &&  
-            a.e == b.e);
-}
-
 id ID_RESULT = (id)0x12345678;
 long long LL_RESULT = __LONG_LONG_MAX__ - 2LL*__INT_MAX__;
-struct stret STRET_RESULT = {1, 2, 3, 4, 5};
 double FP_RESULT = __DBL_MIN__ + __DBL_EPSILON__;
 long double LFP_RESULT = __LDBL_MIN__ + __LDBL_EPSILON__;
+// STRET_RESULT in test.h
 
 
 static int state = 0;
@@ -229,7 +213,7 @@ struct stret forward_stret_handler(id self, SEL _cmd, long i1, long i2, long i3,
 
 @implementation Super
 +(void)initialize { }
-+class { return self; }
++(id)class { return self; }
 
 -(long long) forward:(SEL)sel :(marg_list)args
 {
@@ -251,7 +235,7 @@ struct stret forward_stret_handler(id self, SEL _cmd, long i1, long i2, long i3,
     testassert(self == receiver);
     testassert(_cmd == sel_registerName("forward::"));
 
-    p = args;
+    p = (char *)args;
 #if defined(__x86_64__)
     p += 8*16 + 4*8;  // skip over xmm and linkage
     if (sel == @selector(stret::::::::::::::::::::::::::::)  ||  
@@ -310,7 +294,7 @@ struct stret forward_stret_handler(id self, SEL _cmd, long i1, long i2, long i3,
 
 #elif defined(__x86_64__)
 
-    fp = args;  // xmm, double-wide
+    fp = (double *)args;  // xmm, double-wide
     testassert(*fp++ == 1.0); fp++;
     testassert(*fp++ == 2.0); fp++;
     testassert(*fp++ == 3.0); fp++;
@@ -396,8 +380,9 @@ typedef double (*fp_fn_t)(id self, SEL _cmd, long i1, long i2, long i3, long i4,
 
 typedef struct stret (*st_fn_t)(id self, SEL _cmd, long i1, long i2, long i3, long i4, long i5, long i6, long i7, long i8, long i9, long i10, long i11, long i12, long i13, double f1, double f2, double f3, double f4, double f5, double f6, double f7, double f8, double f9, double f10, double f11, double f12, double f13, double f14, double f15);
 
-
+__BEGIN_DECLS
 extern void *getSP(void);
+__END_DECLS
 
 #if defined(__x86_64__)
     asm(".text \n _getSP: movq %rsp, %rax \n retq \n");
@@ -636,7 +621,7 @@ int main()
 
     // Test user-defined forward handler
 
-    objc_setForwardHandler(&forward_handler, &forward_stret_handler);
+    objc_setForwardHandler((void*)&forward_handler, (void*)&forward_stret_handler);
 
     state = 11;
     sp1 = getSP();

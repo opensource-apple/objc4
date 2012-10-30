@@ -30,42 +30,37 @@
 
 #if TARGET_OS_WIN32
 
-PRIVATE_EXTERN const char *_getObjcHeaderName(const headerType *head)
-{
-    return "??";
-}
-
 /*
-PRIVATE_EXTERN Module 
+Module 
 _getObjcModules(const header_info *hi, size_t *nmodules)
 {
-    if (nmodules) *nmodules = hi->os.moduleCount;
-    return hi->os.modules;
+    if (nmodules) *nmodules = hi->moduleCount;
+    return hi->modules;
 }
 */
-PRIVATE_EXTERN SEL *
+SEL *
 _getObjcSelectorRefs(const header_info *hi, size_t *nmess)
 {
-    if (nmess) *nmess = hi->os.selrefCount;
-    return hi->os.selrefs;
+    if (nmess) *nmess = hi->selrefCount;
+    return hi->selrefs;
 }
 
-PRIVATE_EXTERN struct old_protocol **
+struct old_protocol **
 _getObjcProtocols(const header_info *hi, size_t *nprotos)
 {
-    if (nprotos) *nprotos = hi->os.protocolCount;
-    return hi->os.protocols;
+    if (nprotos) *nprotos = hi->protocolCount;
+    return hi->protocols;
 }
 
-PRIVATE_EXTERN struct old_class **
+struct old_class **
 _getObjcClassRefs(const header_info *hi, size_t *nclasses)
 {
-    if (nclasses) *nclasses = hi->os.clsrefCount;
-    return (struct old_class **)hi->os.clsrefs;
+    if (nclasses) *nclasses = hi->clsrefCount;
+    return (struct old_class **)hi->clsrefs;
 }
 
 // __OBJC,__class_names section only emitted by CodeWarrior  rdar://4951638
-PRIVATE_EXTERN const char *
+const char *
 _getObjcClassNames(const header_info *hi, size_t *size)
 {
     if (size) *size = 0;
@@ -75,7 +70,7 @@ _getObjcClassNames(const header_info *hi, size_t *size)
 #else
 
 #define GETSECT(name, type, sectname)                                   \
-    PRIVATE_EXTERN type *name(const header_info *hi, size_t *outCount)  \
+    type *name(const header_info *hi, size_t *outCount)  \
     {                                                                   \
         unsigned long byteCount = 0;                                    \
         type *data = (type *)                                           \
@@ -91,7 +86,7 @@ GETSECT(_getObjcClassNames,   const char,         "__class_names");
 // __OBJC,__class_names section only emitted by CodeWarrior  rdar://4951638
 
 
-PRIVATE_EXTERN objc_image_info *
+objc_image_info *
 _getObjcImageInfo(const headerType *mhdr, size_t *outBytes)
 {
     unsigned long byteCount = 0;
@@ -102,7 +97,7 @@ _getObjcImageInfo(const headerType *mhdr, size_t *outBytes)
 }
 
 
-PRIVATE_EXTERN struct old_protocol **
+struct old_protocol **
 _getObjcProtocols(const header_info *hi, size_t *nprotos)
 {
     unsigned long size = 0;
@@ -110,17 +105,17 @@ _getObjcProtocols(const header_info *hi, size_t *nprotos)
         getsectiondata(hi->mhdr, SEG_OBJC, "__protocol", &size);
     *nprotos = size / sizeof(struct old_protocol);
     
-    if (!hi->os.proto_refs  &&  *nprotos) {
+    if (!hi->proto_refs  &&  *nprotos) {
         size_t i;
         header_info *whi = (header_info *)hi;
-        whi->os.proto_refs = (struct old_protocol **)
-            malloc(*nprotos * sizeof(*hi->os.proto_refs));
+        whi->proto_refs = (struct old_protocol **)
+            malloc(*nprotos * sizeof(*hi->proto_refs));
         for (i = 0; i < *nprotos; i++) {
-            hi->os.proto_refs[i] = protos+i;
+            hi->proto_refs[i] = protos+i;
         }
     }
     
-    return hi->os.proto_refs;
+    return hi->proto_refs;
 }
 
 
@@ -142,7 +137,7 @@ getsegbynamefromheader(const headerType *head, const char *segname)
     return NULL;
 }
 
-PRIVATE_EXTERN BOOL
+BOOL
 _hasObjcContents(const header_info *hi)
 {
     // Look for an __OBJC,* section other than __OBJC,__image_info

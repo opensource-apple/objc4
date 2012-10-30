@@ -51,10 +51,6 @@ END
 @end
 
 @implementation TargetClass
-+(void)initialize { } 
-+(id)new {
-    return class_createInstance(self, 0);
-}
 - (void) m0 { fail("shoulda been loaded!"); }
 - (void) m1 { fail("shoulda been loaded!"); }
 - (void) m2 { fail("shoulda been loaded!"); }
@@ -69,45 +65,45 @@ void *threadFun(void *aTargetClassName) {
 
     objc_registerThreadWithCollector();
 
-    NSAutoreleasePool *p = [NSAutoreleasePool new];
-
-    Class targetSubclass = objc_getClass(className);
-    testassert(targetSubclass);
-
-    id target = [targetSubclass new];
-    testassert(target);
-
-    while(1) {
-	[target m0];
-	[target retain];
-	[target addObserver: target forKeyPath: @"m3" options: 0 context: NULL];
-	[target addObserver: target forKeyPath: @"m4" options: 0 context: NULL];
-	[target m1];
-	[target release];
-	[target m2];
-	[target autorelease];
-	[target m3];
-	[target retain];
-	[target removeObserver: target forKeyPath: @"m4"];
-	[target addObserver: target forKeyPath: @"m5" options: 0 context: NULL];
-	[target m4];
-	[target retain];
-	[target m5];
-	[target autorelease];
-	[target m6];
-	[target m7];
-	[target m8];
-	[target m9];
-	[target m10];
-	[target m11];
-	[target m12];
-	[target m13];
-	[target m14];
-	[target m15];
-	[target removeObserver: target forKeyPath: @"m3"];
-	[target removeObserver: target forKeyPath: @"m5"];
-    }
-    [p drain];
+    PUSH_POOL {
+        
+        Class targetSubclass = objc_getClass(className);
+        testassert(targetSubclass);
+        
+        id target = [targetSubclass new];
+        testassert(target);
+        
+        while(1) {
+            [target m0];
+            RETAIN(target);
+            [target addObserver: target forKeyPath: @"m3" options: 0 context: NULL];
+            [target addObserver: target forKeyPath: @"m4" options: 0 context: NULL];
+            [target m1];
+            RELEASE_VALUE(target);
+            [target m2];
+            AUTORELEASE(target);
+            [target m3];
+            RETAIN(target);
+            [target removeObserver: target forKeyPath: @"m4"];
+            [target addObserver: target forKeyPath: @"m5" options: 0 context: NULL];
+            [target m4];
+            RETAIN(target);
+            [target m5];
+            AUTORELEASE(target);
+            [target m6];
+            [target m7];
+            [target m8];
+            [target m9];
+            [target m10];
+            [target m11];
+            [target m12];
+            [target m13];
+            [target m14];
+            [target m15];
+            [target removeObserver: target forKeyPath: @"m3"];
+            [target removeObserver: target forKeyPath: @"m5"];
+        }
+    } POP_POOL;
     return NULL;
 }
 

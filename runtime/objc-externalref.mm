@@ -122,7 +122,8 @@ inline static external_ref_list *_list_for_type(objc_xref_type_t ref_type) {
 
 
 // create a GC external reference
-PRIVATE_EXTERN objc_xref_t _object_addExternalReference_gc(id obj, objc_xref_type_t ref_type) {
+OBJC_EXTERN
+objc_xref_t _object_addExternalReference_gc(id obj, objc_xref_type_t ref_type) {
     _initialize_gc();
     __block size_t index;
     objc_xref_t xref;
@@ -148,7 +149,8 @@ PRIVATE_EXTERN objc_xref_t _object_addExternalReference_gc(id obj, objc_xref_typ
     return xref;
 }
 
-PRIVATE_EXTERN id _object_readExternalReference_gc(objc_xref_t ref) {
+OBJC_EXTERN
+id _object_readExternalReference_gc(objc_xref_t ref) {
     _initialize_gc();
     __block id result;
     objc_xref_type_t ref_type = decode_type(ref);
@@ -174,7 +176,8 @@ PRIVATE_EXTERN id _object_readExternalReference_gc(objc_xref_t ref) {
     return result;
 }
 
-PRIVATE_EXTERN void _object_removeExternalReference_gc(objc_xref_t ref) {
+OBJC_EXTERN
+void _object_removeExternalReference_gc(objc_xref_t ref) {
     _initialize_gc();
     objc_xref_type_t ref_type = decode_type(ref);
     if (ref_type != OBJC_XREF_TYPE_STATIC) {
@@ -207,10 +210,11 @@ PRIVATE_EXTERN void _object_removeExternalReference_gc(objc_xref_t ref) {
 // SUPPORT_GC
 #endif
 
-PRIVATE_EXTERN objc_xref_t _object_addExternalReference_rr(id obj, objc_xref_type_t ref_type) {
+OBJC_EXTERN
+objc_xref_t _object_addExternalReference_rr(id obj, objc_xref_type_t ref_type) {
     switch (ref_type) {
         case OBJC_XREF_STRONG:
-            objc_msgSend(obj, SEL_retain);
+            ((id(*)(id, SEL))objc_msgSend)(obj, SEL_retain);
             break;
         case OBJC_XREF_WEAK:
             break;
@@ -221,17 +225,19 @@ PRIVATE_EXTERN objc_xref_t _object_addExternalReference_rr(id obj, objc_xref_typ
     return encode_pointer_and_type(obj, ref_type);
 }
 
-PRIVATE_EXTERN id _object_readExternalReference_rr(objc_xref_t ref) {
+OBJC_EXTERN
+id _object_readExternalReference_rr(objc_xref_t ref) {
     id obj = decode_pointer(ref);
     return obj;
 }
 
-PRIVATE_EXTERN void _object_removeExternalReference_rr(objc_xref_t ref) {
+OBJC_EXTERN
+void _object_removeExternalReference_rr(objc_xref_t ref) {
     id obj = decode_pointer(ref);
     objc_xref_type_t ref_type = decode_type(ref);
     switch (ref_type) {
         case OBJC_XREF_STRONG:
-            objc_msgSend(obj, SEL_release);
+            ((void(*)(id, SEL))objc_msgSend)(obj, SEL_release);
             break;
         case OBJC_XREF_WEAK:
             break;

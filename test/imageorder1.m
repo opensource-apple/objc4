@@ -12,6 +12,12 @@ static void c1(void)
     cstate = 1;
 }
 
+
+#if __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
+#endif
+
 @implementation Super (cat1)
 +(void) method {
     fail("+[Super(cat1) method] not replaced!");
@@ -24,6 +30,11 @@ static void c1(void)
     state = 1;
 }
 @end
+
+#if __clang__
+#pragma clang diagnostic pop
+#endif
+
 
 @implementation Super
 +(void) initialize { }

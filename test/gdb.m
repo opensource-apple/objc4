@@ -11,15 +11,9 @@ int main()
 
 #else
 
+#include "testroot.i"
 #include <objc/objc-gdb.h>
 #include <objc/runtime.h>
-
-@interface Super { @public id isa; } @end
-@implementation Super 
-+(void)initialize { } 
-+class { return self; }
-@end
-
 
 int main()
 {
@@ -30,17 +24,17 @@ int main()
 
     // Class should not be realized yet
     // fixme not true during class hash rearrangement
-    // result = NXMapGet(gdb_objc_realized_classes, "Super");
+    // result = NXMapGet(gdb_objc_realized_classes, "TestRoot");
     // testassert(!result);
 
-    [Super class];
+    [TestRoot class];
     // Now class should be realized
 
-    result = (Class)NXMapGet(gdb_objc_realized_classes, "Super");
+    result = (Class)objc_unretainedObject(NXMapGet(gdb_objc_realized_classes, "TestRoot"));
     testassert(result);
-    testassert(result == [Super class]);
+    testassert(result == [TestRoot class]);
 
-    result = (Class)NXMapGet(gdb_objc_realized_classes, "DoesNotExist");
+    result = (Class)objc_unretainedObject(NXMapGet(gdb_objc_realized_classes, "DoesNotExist"));
     testassert(!result);
 
 #else
@@ -48,10 +42,10 @@ int main()
     struct objc_class query;
     Class result;
 
-    query.name = "Super";
+    query.name = "TestRoot";
     result = (Class)NXHashGet(_objc_debug_class_hash, &query);
     testassert(result);
-    testassert((id)result == [Super class]);
+    testassert((id)result == [TestRoot class]);
 
     query.name = "DoesNotExist";
     result = (Class)NXHashGet(_objc_debug_class_hash, &query);

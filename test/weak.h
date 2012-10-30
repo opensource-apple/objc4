@@ -30,6 +30,11 @@ WEAK_IMPORT
 +(int) method;
 @end
 
+@interface MissingRoot (RR)
+-(id) retain;
+-(void) release;
+@end
+
 WEAK_IMPORT
 @interface MissingSuper : MissingRoot {
   @public
@@ -47,6 +52,11 @@ WEAK_IMPORT
 -(id) init;
 -(void) dealloc;
 +(int) method;
+@end
+
+@interface NotMissingRoot (RR)
+-(id) retain;
+-(void) release;
 @end
 
 @interface NotMissingSuper : NotMissingRoot {

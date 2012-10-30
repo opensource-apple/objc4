@@ -1,7 +1,8 @@
-// TEST_CFLAGS -Wno-deprecated-declarations
+// TEST_CFLAGS -Wno-deprecated-declarations -Wl,-no_objc_category_merging
 
 #include "test.h"
-#include <objc/objc-runtime.h>
+#include "testroot.i"
+#include <objc/runtime.h>
 #ifndef OBJC_NO_GC
 #include <objc/objc-auto.h>
 #include <auto_zone.h>
@@ -10,11 +11,11 @@
 static int state;
 
 @protocol Proto
-+class;
++(void)classMethod;
+-(void)instanceMethod;
 @end
 
-@interface Super<Proto> { 
-    id isa; 
+@interface Super : TestRoot <Proto> { 
     int i;
 } 
 @property int i;
@@ -22,11 +23,6 @@ static int state;
 
 @implementation Super 
 @synthesize i;
-
-+(void)initialize { } 
-+class { return self; }
-+new { return class_createInstance(self, 0); }
--(void)dealloc { object_dispose(self); }
 
 +(void)classMethod { 
     state = 1;
@@ -38,6 +34,11 @@ static int state;
 
 @end
 
+
+#if __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
+#endif
 
 @implementation Super (Category)
 
@@ -51,6 +52,10 @@ static int state;
 
 @end
 
+#if __clang__
+#pragma clang diagnostic pop
+#endif
+
 
 int main()
 {
@@ -63,14 +68,14 @@ int main()
     clone = objc_duplicateClass(cls, "Super_copy", 0);
 #ifndef OBJC_NO_GC
     if (objc_collectingEnabled()) {
-        testassert(auto_zone_size(objc_collectableZone(), clone));
+        testassert(auto_zone_size(objc_collectableZone(), objc_unretainedPointer(clone)));
         // objc_duplicateClass() doesn't duplicate the metaclass
         // no: testassert(auto_zone_size(objc_collectableZone(), clone->isa));
     }
 #endif
 
     testassert(clone != cls);
-    testassert(clone->isa == cls->isa);
+    testassert(object_getClass(clone) == object_getClass(cls));
     testassert(class_getSuperclass(clone) == class_getSuperclass(cls));
     testassert(class_getVersion(clone) == class_getVersion(cls));
     testassert(class_isMetaClass(clone) == class_isMetaClass(cls));
@@ -109,16 +114,16 @@ int main()
     free(i2);
 
     // Check protocol list
-    Protocol * const *p1 = class_copyProtocolList(cls, NULL);
-    Protocol * const *p2 = class_copyProtocolList(clone, NULL);
+    Protocol * __unsafe_unretained *p1 = class_copyProtocolList(cls, NULL);
+    Protocol * __unsafe_unretained *p2 = class_copyProtocolList(clone, NULL);
     testassert(p1);
     testassert(p2);
     for (i = 0; p1[i]  &&  p2[i]; i++) {
         testassert(p1[i] == p2[i]);  // protocols are not deep-copied
     }
     testassert(p1[i] == NULL  &&  p2[i] == NULL);
-    free((void*)p1);
-    free((void*)p2);
+    free(p1);
+    free(p2);
 
     // Check property list
     objc_property_t *o1 = class_copyPropertyList(cls, NULL);
@@ -147,13 +152,13 @@ int main()
     state = 0;
     [obj instanceMethod];
     testassert(state == 4);
-    [obj dealloc];
+    RELEASE_VAR(obj);
 
     obj = [clone new];
     state = 0;
     [obj instanceMethod];
     testassert(state == 4);
-    [obj dealloc];
+    RELEASE_VAR(obj);
 
     succeed(__FILE__);
 }

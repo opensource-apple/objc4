@@ -218,12 +218,12 @@ static void set_default_handlers() {
 }
 
 
-PRIVATE_EXTERN void exception_init(void)
+void exception_init(void)
 {
     // nothing to do
 }
 
-PRIVATE_EXTERN void _destroyAltHandlerList(struct alt_handler_list *list)
+void _destroyAltHandlerList(struct alt_handler_list *list)
 {
     // nothing to do
 }
@@ -272,27 +272,20 @@ struct dwarf_eh_bases
     uintptr_t func;
 };
 
-extern uintptr_t _Unwind_GetIP (struct _Unwind_Context *);
-extern uintptr_t _Unwind_GetCFA (struct _Unwind_Context *);
-extern uintptr_t _Unwind_GetLanguageSpecificData(struct _Unwind_Context *);
+OBJC_EXTERN uintptr_t _Unwind_GetIP (struct _Unwind_Context *);
+OBJC_EXTERN uintptr_t _Unwind_GetCFA (struct _Unwind_Context *);
+OBJC_EXTERN uintptr_t _Unwind_GetLanguageSpecificData(struct _Unwind_Context *);
 
 
 // C++ runtime types and functions
 // copied from cxxabi.h
 
-#if TARGET_OS_IPHONE
-typedef void (*terminate_handler) ();
-// mangled std::set_terminate()
-extern terminate_handler _ZSt13set_terminatePFvvE(terminate_handler);
-#else
-extern void (*__cxa_terminate_handler)(void);
-#endif
-extern void *__cxa_allocate_exception(size_t thrown_size);
-extern void __cxa_throw(void *exc, void *typeinfo, void (*destructor)(void *)) __attribute__((noreturn));
-extern void *__cxa_begin_catch(void *exc);
-extern void __cxa_end_catch(void);
-extern void __cxa_rethrow(void);
-extern void *__cxa_current_exception_type(void);
+OBJC_EXTERN void *__cxa_allocate_exception(size_t thrown_size);
+OBJC_EXTERN void __cxa_throw(void *exc, void *typeinfo, void (*destructor)(void *)) __attribute__((noreturn));
+OBJC_EXTERN void *__cxa_begin_catch(void *exc);
+OBJC_EXTERN void __cxa_end_catch(void);
+OBJC_EXTERN void __cxa_rethrow(void);
+OBJC_EXTERN void *__cxa_current_exception_type(void);
 
 #if SUPPORT_ZEROCOST_EXCEPTIONS
 #   define CXX_PERSONALITY __gxx_personality_v0
@@ -300,7 +293,7 @@ extern void *__cxa_current_exception_type(void);
 #   define CXX_PERSONALITY __gxx_personality_sj0
 #endif
 
-extern _Unwind_Reason_Code 
+OBJC_EXTERN _Unwind_Reason_Code 
 CXX_PERSONALITY(int version,
                 _Unwind_Action actions,
                 uint64_t exceptionClass,
@@ -315,7 +308,7 @@ struct objc_typeinfo {
     const void **vtable;  // always objc_ehtype_vtable+2
     const char *name;     // c++ typeinfo string
 
-    Class cls;
+    Class cls_unremapped;
 };
 
 struct objc_exception {
@@ -325,24 +318,29 @@ struct objc_exception {
 
 
 static void _objc_exception_noop(void) { } 
-static char _objc_exception_false(void) { return 0; } 
-static char _objc_exception_true(void) { return 1; } 
-static char _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo, 
+static bool _objc_exception_false(void) { return 0; } 
+// static bool _objc_exception_true(void) { return 1; } 
+static bool _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo, 
                                      struct objc_typeinfo *throw_tinfo, 
                                      void **throw_obj_p, 
                                      unsigned outer);
 
+// forward declaration
+OBJC_EXPORT struct objc_typeinfo OBJC_EHTYPE_id;
+
+OBJC_EXPORT
 const void *objc_ehtype_vtable[] = {
     NULL,  // typeinfo's vtable? - fixme 
-    NULL,  // typeinfo's typeinfo - fixme
-    _objc_exception_noop,      // in-place destructor?
-    _objc_exception_noop,      // destructor?
-    _objc_exception_true,      // __is_pointer_p
-    _objc_exception_false,     // __is_function_p
-    _objc_exception_do_catch,  // __do_catch
-    _objc_exception_false,     // __do_upcast
+    (void*)&OBJC_EHTYPE_id,  // typeinfo's typeinfo - hack
+    (void*)_objc_exception_noop,      // in-place destructor?
+    (void*)_objc_exception_noop,      // destructor?
+    (void*)_objc_exception_false,     // OLD __is_pointer_p
+    (void*)_objc_exception_false,     // OLD __is_function_p
+    (void*)_objc_exception_do_catch,  // OLD __do_catch, NEW can_catch
+    (void*)_objc_exception_false,     // OLD __do_upcast
 };
 
+OBJC_EXPORT
 struct objc_typeinfo OBJC_EHTYPE_id = {
     objc_ehtype_vtable+2, 
     "id", 
@@ -477,28 +475,32 @@ __objc_personality_v0(int version,
 **********************************************************************/
 
 static void _objc_exception_destructor(void *exc_gen) {
+#if SUPPORT_GC
     struct objc_exception *exc = (struct objc_exception *)exc_gen;
     if (UseGC  &&  auto_zone_is_valid_pointer(gc_zone, exc->obj)) {
         // retained by objc_exception_throw
         auto_zone_release(gc_zone, exc->obj);
     }
+#endif
 }
 
 
 void objc_exception_throw(id obj)
 {
-    struct objc_exception *exc = 
+    struct objc_exception *exc = (struct objc_exception *)
         __cxa_allocate_exception(sizeof(struct objc_exception));
 
     exc->obj = (*exception_preprocessor)(obj);
+#if SUPPORT_GC
     if (UseGC  &&  auto_zone_is_valid_pointer(gc_zone, obj)) {
         // exc is non-scanned memory. Retain the object for the duration.
         auto_zone_retain(gc_zone, obj);
     }
+#endif
 
     exc->tinfo.vtable = objc_ehtype_vtable+2;
     exc->tinfo.name = object_getClassName(obj);
-    exc->tinfo.cls = obj ? _object_getClass(obj) : Nil;
+    exc->tinfo.cls_unremapped = obj ? _object_getClass(obj) : Nil;
 
     if (PrintExceptions) {
         _objc_inform("EXCEPTIONS: throwing %p (object %p, a %s)", 
@@ -553,37 +555,47 @@ void objc_end_catch(void)
 }
 
 
-static char _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo, 
+// `outer` is not passed by the new libcxxabi
+static bool _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo, 
                                      struct objc_typeinfo *throw_tinfo, 
                                      void **throw_obj_p, 
-                                     unsigned outer)
+                                     unsigned outer UNAVAILABLE_ATTRIBUTE)
 {
     id exception;
 
     if (throw_tinfo->vtable != objc_ehtype_vtable+2) {
         // Only objc types can be caught here.
         if (PrintExceptions) _objc_inform("EXCEPTIONS: skipping catch(?)");
-        return 0;
+        return false;
     }
+
+    // Adjust exception pointer.
+    // Old libcppabi: we lied about __is_pointer_p() so we have to do it here
+    // New libcxxabi: we have to do it here regardless
+    *throw_obj_p = **(void***)throw_obj_p;
 
     // `catch (id)` always catches objc types.
     if (catch_tinfo == &OBJC_EHTYPE_id) {
         if (PrintExceptions) _objc_inform("EXCEPTIONS: catch(id)");
-        return 1;
+        return true;
     }
 
     exception = *(id *)throw_obj_p;
-    // fixme remapped catch_tinfo->cls
-    if ((*exception_matcher)(catch_tinfo->cls, exception)) {
+
+    Class handler_cls = _class_remap(catch_tinfo->cls_unremapped);
+    if (!handler_cls) {
+        // catch handler's class is weak-linked and missing. Not a match.
+    }
+    else if ((*exception_matcher)(handler_cls, exception)) {
         if (PrintExceptions) _objc_inform("EXCEPTIONS: catch(%s)", 
-                                          class_getName(catch_tinfo->cls));
-        return 1;
+                                          class_getName(handler_cls));
+        return true;
     }
 
     if (PrintExceptions) _objc_inform("EXCEPTIONS: skipping catch(%s)", 
-                                      class_getName(catch_tinfo->cls));
+                                      class_getName(handler_cls));
 
-    return 0;
+    return false;
 }
 
 
@@ -625,12 +637,24 @@ static void _objc_terminate(void)
 
 
 /***********************************************************************
+* objc_terminate
+* Calls std::terminate for clients who don't link to C++ themselves.
+* Called by the compiler if an exception is thrown 
+* from a context where exceptions may not be thrown. 
+**********************************************************************/
+void objc_terminate(void)
+{
+    std::terminate();
+}
+
+
+/***********************************************************************
 * alt handler support - zerocost implementation only
 **********************************************************************/
 
 #if !SUPPORT_ALT_HANDLERS
 
-PRIVATE_EXTERN void _destroyAltHandlerList(struct alt_handler_list *list)
+void _destroyAltHandlerList(struct alt_handler_list *list)
 {
 }
 
@@ -805,9 +829,22 @@ static uintptr_t read_address(uintptr_t *pp,
 }
 
 
+struct frame_ips {
+    uintptr_t start;
+    uintptr_t end;
+};
+struct frame_range {
+    uintptr_t ip_start;
+    uintptr_t ip_end;
+    uintptr_t cfa;
+    // precise ranges within ip_start..ip_end; NULL or {0,0} terminated
+    frame_ips *ips;
+};
+
+
 static bool isObjCExceptionCatcher(uintptr_t lsda, uintptr_t ip, 
                                    const struct dwarf_eh_bases* bases,
-                                   uintptr_t* try_start, uintptr_t* try_end)
+                                   struct frame_range *frame)
 {
     unsigned char LPStart_enc = *(const unsigned char *)lsda++;    
 
@@ -829,23 +866,28 @@ static bool isObjCExceptionCatcher(uintptr_t lsda, uintptr_t ip,
     uintptr_t action_record = 0;
     uintptr_t p = call_site_table;
 
-    while (p < call_site_table_end) {
-        uintptr_t start = read_address(&p, bases, call_site_enc);
-        uintptr_t len = read_address(&p, bases, call_site_enc);
-        uintptr_t pad = read_address(&p, bases, call_site_enc);
-        uintptr_t action = read_uleb(&p);
+    uintptr_t try_start;
+    uintptr_t try_end;
+    uintptr_t try_landing_pad;
 
-        if (ip < bases->func + start) {
+    while (p < call_site_table_end) {
+        uintptr_t start   = read_address(&p, bases, call_site_enc)+bases->func;
+        uintptr_t len     = read_address(&p, bases, call_site_enc);
+        uintptr_t pad     = read_address(&p, bases, call_site_enc);
+        uintptr_t action  = read_uleb(&p);
+
+        if (ip < start) {
             // no more source ranges
             return false;
         } 
-        else if (ip < bases->func + start + len) {
+        else if (ip < start + len) {
             // found the range
             if (!pad) return false;  // ...but it has no landing pad
             // found the landing pad
             action_record = action ? action_record_table + action - 1 : 0;
-            *try_start = bases->func + start;
-            *try_end = bases->func + start + len;
+            try_start = start;
+            try_end = start + len;
+            try_landing_pad = pad;
             break;
         }        
     }
@@ -873,16 +915,58 @@ static bool isObjCExceptionCatcher(uintptr_t lsda, uintptr_t ip,
             break;
         }
     } while (offset);
+
+    if (!has_handler) return false;
     
-    return has_handler;
+    // Count the number of source ranges with the same landing pad as our match
+    unsigned int range_count = 0;
+    p = call_site_table;
+    while (p < call_site_table_end) {
+                /*start*/  read_address(&p, bases, call_site_enc)/*+bases->func*/;
+                /*len*/    read_address(&p, bases, call_site_enc);
+        uintptr_t pad    = read_address(&p, bases, call_site_enc);
+                /*action*/ read_uleb(&p);
+        
+        if (pad == try_landing_pad) {
+            range_count++;
+        }
+    }
+
+    if (range_count == 1) {
+        // No other source ranges with the same landing pad. We're done here.
+        frame->ips = NULL;
+    }
+    else {
+        // Record all ranges with the same landing pad as our match.
+        frame->ips = (frame_ips *)
+            _malloc_internal((range_count + 1) * sizeof(frame->ips[0]));
+        unsigned int r = 0;
+        p = call_site_table;
+        while (p < call_site_table_end) {
+            uintptr_t start  = read_address(&p, bases, call_site_enc)+bases->func;
+            uintptr_t len    = read_address(&p, bases, call_site_enc);
+            uintptr_t pad    = read_address(&p, bases, call_site_enc);
+                    /*action*/ read_uleb(&p);
+            
+            if (pad == try_landing_pad) {
+                if (start < try_start) try_start = start;
+                if (start+len > try_end) try_end = start+len;
+                frame->ips[r].start = start;
+                frame->ips[r].end = start+len;
+                r++;
+            }
+        }
+
+        frame->ips[r].start = 0;
+        frame->ips[r].end = 0;
+    }
+
+    frame->ip_start = try_start;
+    frame->ip_end = try_end;
+
+    return true;
 }
 
-
-struct frame_range {
-    uintptr_t ip_start;
-    uintptr_t ip_end;
-    uintptr_t cfa;
-};
 
 static struct frame_range findHandler(void)
 {
@@ -907,16 +991,16 @@ static struct frame_range findHandler(void)
         unw_word_t ip;
         unw_get_reg(&cursor, UNW_REG_IP, &ip);
         ip -= 1;
-        uintptr_t try_start;
-        uintptr_t try_end;
-        if ( isObjCExceptionCatcher(info.lsda, ip, &bases, &try_start, &try_end) ) {
+        struct frame_range try_range = {0, 0, 0, 0};
+        if ( isObjCExceptionCatcher(info.lsda, ip, &bases, &try_range) ) {
             unw_word_t cfa;
             unw_get_reg(&cursor, UNW_REG_SP, &cfa);
-            return (struct frame_range){try_start, try_end, cfa};
+            try_range.cfa = cfa;
+            return try_range;
         }
     }
 
-    return (struct frame_range){0, 0, 0};
+    return (struct frame_range){0, 0, 0, 0};
 }
 
 
@@ -935,9 +1019,7 @@ struct alt_handler_debug {
 };
 
 struct alt_handler_data {
-    uintptr_t ip_start;
-    uintptr_t ip_end;
-    uintptr_t cfa;
+    struct frame_range frame;
     objc_exception_handler fn;
     void *context;
     struct alt_handler_debug *debug;
@@ -954,7 +1036,7 @@ static pthread_mutex_t DebugLock = PTHREAD_MUTEX_INITIALIZER;
 static struct alt_handler_list *DebugLists;
 static uintptr_t DebugCounter;
 
-PRIVATE_EXTERN void alt_handler_error(uintptr_t token) __attribute__((noinline));
+void alt_handler_error(uintptr_t token) __attribute__((noinline));
 
 static struct alt_handler_list *
 fetch_handler_list(BOOL create)
@@ -965,7 +1047,7 @@ fetch_handler_list(BOOL create)
     struct alt_handler_list *list = data->handlerList;
     if (!list) {
         if (!create) return NULL;
-        list = _calloc_internal(1, sizeof(*list));
+        list = (struct alt_handler_list *)_calloc_internal(1, sizeof(*list));
         data->handlerList = list;
 
         if (DebugAltHandlers) {
@@ -981,7 +1063,7 @@ fetch_handler_list(BOOL create)
 }
 
 
-PRIVATE_EXTERN void _destroyAltHandlerList(struct alt_handler_list *list)
+void _destroyAltHandlerList(struct alt_handler_list *list)
 {
     if (list) {
         if (DebugAltHandlers) {
@@ -994,6 +1076,11 @@ PRIVATE_EXTERN void _destroyAltHandlerList(struct alt_handler_list *list)
         }
 
         if (list->handlers) {
+            for (unsigned int i = 0; i < list->allocated; i++) {
+                if (list->handlers[i].frame.ips) {
+                    _free_internal(list->handlers[i].frame.ips);
+                }
+            }
             _free_internal(list->handlers);
         }
         _free_internal(list);
@@ -1016,15 +1103,17 @@ uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
 
     if (list->used == list->allocated) {
         list->allocated = list->allocated*2 ?: 4;
-        list->handlers = _realloc_internal(list->handlers, list->allocated * sizeof(list->handlers[0]));
+        list->handlers = (struct alt_handler_data *)
+            _realloc_internal(list->handlers, 
+                              list->allocated * sizeof(list->handlers[0]));
         bzero(&list->handlers[list->used], (list->allocated - list->used) * sizeof(list->handlers[0]));
         i = list->used;
     }
     else {
         for (i = 0; i < list->allocated; i++) {
-            if (list->handlers[i].ip_start == 0  &&  
-                list->handlers[i].ip_end == 0  &&  
-                list->handlers[i].cfa == 0) 
+            if (list->handlers[i].frame.ip_start == 0  &&  
+                list->handlers[i].frame.ip_end == 0  &&  
+                list->handlers[i].frame.cfa == 0) 
             {
                 break;
             }
@@ -1036,9 +1125,7 @@ uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
 
     struct alt_handler_data *data = &list->handlers[i];
 
-    data->ip_start = target_frame.ip_start;
-    data->ip_end = target_frame.ip_end;
-    data->cfa = target_frame.cfa;
+    data->frame = target_frame;
     data->fn = fn;
     data->context = context;
     list->used++;
@@ -1053,7 +1140,8 @@ uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
         if (token == 0) token = DebugCounter++;
 
         if (!data->debug) {
-            data->debug = _calloc_internal(sizeof(*data->debug), 1);
+            data->debug = (struct alt_handler_debug *)
+                _calloc_internal(sizeof(*data->debug), 1);
         } else {
             bzero(data->debug, sizeof(*data->debug));
         }
@@ -1072,8 +1160,19 @@ uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
     if (PrintAltHandlers) {
         _objc_inform("ALT HANDLERS: installing alt handler #%lu %p(%p) on "
                      "frame [ip=%p..%p sp=%p]", (unsigned long)token, 
-                     data->fn, data->context, (void *)data->ip_start, 
-                     (void *)data->ip_end, (void *)data->cfa);
+                     data->fn, data->context, (void *)data->frame.ip_start, 
+                     (void *)data->frame.ip_end, (void *)data->frame.cfa);
+        if (data->frame.ips) {
+            unsigned int r = 0;
+            while (1) {
+                uintptr_t start = data->frame.ips[r].start;
+                uintptr_t end = data->frame.ips[r].end;
+                r++;
+                if (start == 0  &&  end == 0) break;
+                _objc_inform("ALT HANDLERS:     ip=%p..%p", 
+                             (void*)start, (void*)end);
+            }
+        }
     }
 
     if (list->used > 1000) {
@@ -1121,7 +1220,7 @@ void objc_removeExceptionHandler(uintptr_t token)
 
     struct alt_handler_data *data = &list->handlers[i];
 
-    if (data->ip_start == 0  &&  data->ip_end == 0  &&  data->cfa == 0) {
+    if (data->frame.ip_start == 0  &&  data->frame.ip_end == 0  &&  data->frame.cfa == 0) {
         // token in range, but invalid
         alt_handler_error(token);
         __builtin_trap();
@@ -1130,18 +1229,19 @@ void objc_removeExceptionHandler(uintptr_t token)
     if (PrintAltHandlers) {
         _objc_inform("ALT HANDLERS: removing   alt handler #%lu %p(%p) on "
                      "frame [ip=%p..%p sp=%p]", (unsigned long)token, 
-                     data->fn, data->context, (void *)data->ip_start, 
-                     (void *)data->ip_end, (void *)data->cfa);
+                     data->fn, data->context, (void *)data->frame.ip_start, 
+                     (void *)data->frame.ip_end, (void *)data->frame.cfa);
     }
 
     if (data->debug) _free_internal(data->debug);
+    if (data->frame.ips) _free_internal(data->frame.ips);
     bzero(data, sizeof(*data));
     list->used--;
 }
 
-PRIVATE_EXTERN void objc_alt_handler_error(void) __attribute__((noinline));
+void objc_alt_handler_error(void) __attribute__((noinline));
 
-PRIVATE_EXTERN void alt_handler_error(uintptr_t token)
+void alt_handler_error(uintptr_t token)
 {
     if (!DebugAltHandlers) {
         _objc_inform_now_and_on_crash
@@ -1157,7 +1257,7 @@ PRIVATE_EXTERN void alt_handler_error(uintptr_t token)
     // Search other threads' alt handler lists for this handler.
     struct alt_handler_list *list;
     for (list = DebugLists; list; list = list->next_DEBUGONLY) {
-        int h;
+        unsigned h;
         for (h = 0; h < list->allocated; h++) {
             struct alt_handler_data *data = &list->handlers[h];
             if (data->debug  &&  data->debug->token == token) {
@@ -1173,7 +1273,7 @@ PRIVATE_EXTERN void alt_handler_error(uintptr_t token)
                 for (i = 0; i < data->debug->backtraceSize; i++){
                     len += 4 + strlen(symbols[i]) + 1;
                 }
-                symbolString = _calloc_internal(len, 1);
+                symbolString = (char *)_calloc_internal(len, 1);
                 for (i = 0; i < data->debug->backtraceSize; i++){
                     strcat(symbolString, "    ");
                     strcat(symbolString, symbols[i]);
@@ -1207,7 +1307,7 @@ PRIVATE_EXTERN void alt_handler_error(uintptr_t token)
     objc_alt_handler_error();
 }
 
-PRIVATE_EXTERN void objc_alt_handler_error(void)
+void objc_alt_handler_error(void)
 {
     __builtin_trap();
 }
@@ -1225,8 +1325,27 @@ static void call_alt_handlers(struct _Unwind_Context *ctx)
 
     for (i = 0; i < list->allocated; i++) {
         struct alt_handler_data *data = &list->handlers[i];
-        if (ip >= data->ip_start  &&  ip < data->ip_end  &&  data->cfa == cfa) 
+        if (ip >= data->frame.ip_start  &&  ip < data->frame.ip_end  &&  data->frame.cfa == cfa) 
         {
+            if (data->frame.ips) {
+                unsigned int r = 0;
+                bool found;
+                while (1) {
+                    uintptr_t start = data->frame.ips[r].start;
+                    uintptr_t end = data->frame.ips[r].end;
+                    r++;
+                    if (start == 0  &&  end == 0) {
+                        found = false;
+                        break;
+                    }
+                    if (ip >= start  &&  ip < end) {
+                        found = true; 
+                        break;
+                    }
+                }
+                if (!found) continue;
+            }
+
             // Copy and clear before the callback, in case the 
             // callback manipulates the alt handler list.
             struct alt_handler_data copy = *data;
@@ -1235,10 +1354,12 @@ static void call_alt_handlers(struct _Unwind_Context *ctx)
             if (PrintExceptions || PrintAltHandlers) {
                 _objc_inform("EXCEPTIONS: calling alt handler %p(%p) from "
                              "frame [ip=%p..%p sp=%p]", copy.fn, copy.context, 
-                             (void *)copy.ip_start, (void *)copy.ip_end, 
-                             (void *)copy.cfa);
+                             (void *)copy.frame.ip_start, 
+                             (void *)copy.frame.ip_end, 
+                             (void *)copy.frame.cfa);
             }
             if (copy.fn) (*copy.fn)(nil, copy.context);
+            if (copy.frame.ips) _free_internal(copy.frame.ips);
         }
     }
 }
@@ -1252,14 +1373,9 @@ static void call_alt_handlers(struct _Unwind_Context *ctx)
 * Initialize libobjc's exception handling system.
 * Called by map_images().
 **********************************************************************/
-PRIVATE_EXTERN void exception_init(void)
+void exception_init(void)
 {
-#if TARGET_OS_IPHONE
-    old_terminate = _ZSt13set_terminatePFvvE(&_objc_terminate);
-#else
-    old_terminate = __cxa_terminate_handler;
-    __cxa_terminate_handler = &_objc_terminate;
-#endif
+    old_terminate = std::set_terminate(&_objc_terminate);
 }
 
 

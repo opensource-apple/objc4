@@ -1,3 +1,4 @@
+// TEST_CONFIG MEM=mrc,gc
 // TEST_CFLAGS -Wno-deprecated-declarations
 
 #import <objc/runtime.h>

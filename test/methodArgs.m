@@ -1,15 +1,14 @@
 // TEST_CFLAGS -Wno-deprecated-declarations
 
 #include "test.h"
+#include "testroot.i"
 #include <string.h>
 #include <objc/objc-runtime.h>
 
-@interface Super { id isa; } @end
+@interface Super : TestRoot @end
 @implementation Super 
-+(void)initialize { } 
-+class { return self; }
-+(id)method:(int)arg :(void(^)(void))arg2 { 
-    return (id)((intptr_t)arg+(intptr_t)arg2); 
++(id)method:(int)__unused arg :(void(^)(void)) __unused arg2 { 
+    return 0;
 }
 @end
 

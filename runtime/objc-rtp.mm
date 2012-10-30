@@ -21,8 +21,8 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#import "objc-private.h"
-#import <objc/message.h>
+#include "objc-private.h"
+#include <objc/message.h>
 
 
 #if defined(__i386__)
@@ -51,7 +51,7 @@ static void rtp_swap_imp(unsigned *address, void *code, const char *name)
 }
 
 
-PRIVATE_EXTERN void rtp_init(void)
+void rtp_init(void)
 {
     // At load time, the page on which the objc_assign_* routines live is not
     // marked as executable. We fix that here, regardless of the GC choice.
@@ -59,13 +59,13 @@ PRIVATE_EXTERN void rtp_init(void)
     if (UseGC)
     {
         rtp_swap_imp((unsigned*)objc_assign_ivar,
-            objc_assign_ivar_gc, "objc_assign_ivar");
+                     (void*)objc_assign_ivar_gc, "objc_assign_ivar");
         rtp_swap_imp((unsigned*)objc_assign_global,
-            objc_assign_global_gc, "objc_assign_global");
+                     (void*)objc_assign_global_gc, "objc_assign_global");
         rtp_swap_imp((unsigned*)objc_assign_threadlocal,
-            objc_assign_threadlocal_gc, "objc_assign_threadlocal");
+                     (void*)objc_assign_threadlocal_gc, "objc_assign_threadlocal");
         rtp_swap_imp((unsigned*)objc_assign_strongCast,
-            objc_assign_strongCast_gc, "objc_assign_strongCast");
+                     (void*)objc_assign_strongCast_gc, "objc_assign_strongCast");
     }
     else
 #endif
@@ -80,7 +80,7 @@ PRIVATE_EXTERN void rtp_init(void)
 #else
 
 
-PRIVATE_EXTERN void rtp_init(void)
+void rtp_init(void)
 {
     if (PrintRTP) {
         _objc_inform("RTP: no rtp implementation for this platform");

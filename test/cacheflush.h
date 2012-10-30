@@ -1,7 +1,7 @@
 #include <objc/objc.h>
+#include "test.h"
 
-@interface Super { id isa; } 
-+class;
+@interface TestRoot(cat)
 +(int)classMethod;
 -(int)instanceMethod;
 @end

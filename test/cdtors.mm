@@ -1,8 +1,10 @@
 // TEST_CONFIG
 
-#include <pthread.h>
 #include "test.h"
+
+#include <pthread.h>
 #include "objc/objc-internal.h"
+#include "testroot.i"
 
 static unsigned ctors1 = 0;
 static unsigned dtors1 = 0;
@@ -30,7 +32,7 @@ class cxx2 {
 
 /*
   Class hierarchy:
-  Base
+  TestRoot
    CXXBase
     NoCXXSub
      CXXSub
@@ -39,21 +41,7 @@ class cxx2 {
 */
 
 
-@interface Base { id isa; } 
-+class;
-+new;
--(void)dealloc;
-@end
-@implementation Base
-+(void)initialize { } 
-+class { return self; }
--class { return self->isa; }
-+new { return class_createInstance(self, 0); }
--(void)dealloc { object_dispose(self); } 
--(void)finalize { }
-@end
-
-@interface CXXBase : Base {
+@interface CXXBase : TestRoot {
     cxx1 baseIvar;
 }
 @end
@@ -72,132 +60,136 @@ class cxx2 {
 @implementation CXXSub @end
 
 
-void *test_single(void *arg __unused) 
+void test_single(void) 
 {
-    volatile id o;
-
     // Single allocation
 
-    objc_registerThreadWithCollector();
-
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
-    o = [Base new];
-    testassert(ctors1 == 0  &&  dtors1 == 0  &&  
-               ctors2 == 0  &&  dtors2 == 0);
-    testassert([o class] == [Base class]);
-    [o dealloc], o = nil;
+    testonthread(^{
+        id o = [TestRoot new];
+        testassert(ctors1 == 0  &&  dtors1 == 0  &&  
+                   ctors2 == 0  &&  dtors2 == 0);
+        testassert([o class] == [TestRoot class]);
+        RELEASE_VAR(o);
+    });
     testcollect();
     testassert(ctors1 == 0  &&  dtors1 == 0  &&  
                ctors2 == 0  &&  dtors2 == 0);
 
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
-    o = [CXXBase new];
-    testassert(ctors1 == 1  &&  dtors1 == 0  &&  
-               ctors2 == 0  &&  dtors2 == 0);
-    testassert([o class] == [CXXBase class]);
-    [o dealloc], o = nil;
+    testonthread(^{
+        id o = [CXXBase new];
+        testassert(ctors1 == 1  &&  dtors1 == 0  &&  
+                   ctors2 == 0  &&  dtors2 == 0);
+        testassert([o class] == [CXXBase class]);
+        RELEASE_VAR(o);
+    });
     testcollect();
     testassert(ctors1 == 1  &&  dtors1 == 1  &&  
                ctors2 == 0  &&  dtors2 == 0);
 
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
-    o = [NoCXXSub new];
-    testassert(ctors1 == 1  &&  dtors1 == 0  &&  
-               ctors2 == 0  &&  dtors2 == 0);
-    testassert([o class] == [NoCXXSub class]);
-    [o dealloc], o = nil;
+    testonthread(^{
+        id o = [NoCXXSub new];
+        testassert(ctors1 == 1  &&  dtors1 == 0  &&  
+                   ctors2 == 0  &&  dtors2 == 0);
+        testassert([o class] == [NoCXXSub class]);
+        RELEASE_VAR(o);
+    });
     testcollect();
     testassert(ctors1 == 1  &&  dtors1 == 1  &&  
                ctors2 == 0  &&  dtors2 == 0);
 
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
-    o = [CXXSub new];
-    testassert(ctors1 == 1  &&  dtors1 == 0  &&  
-               ctors2 == 1  &&  dtors2 == 0);
-    testassert([o class] == [CXXSub class]);
-    [o dealloc], o = nil;
+    testonthread(^{
+        id o = [CXXSub new];
+        testassert(ctors1 == 1  &&  dtors1 == 0  &&  
+                   ctors2 == 1  &&  dtors2 == 0);
+        testassert([o class] == [CXXSub class]);
+        RELEASE_VAR(o);
+    });
     testcollect();
     testassert(ctors1 == 1  &&  dtors1 == 1  &&  
                ctors2 == 1  &&  dtors2 == 1);
-
-    return NULL;
 }
 
-void *test_inplace(void *arg __unused) 
+void test_inplace(void) 
 {
-    volatile id o;
+    __unsafe_unretained volatile id o;
     char o2[64];
+
+    id (*objc_constructInstance_fn)(Class, void*) = (id(*)(Class, void*))dlsym(RTLD_DEFAULT, "objc_constructInstance");
+    void (*objc_destructInstance_fn)(id) = (void(*)(id))dlsym(RTLD_DEFAULT, "objc_destructInstance");
 
     // In-place allocation
 
-    objc_registerThreadWithCollector();
-
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
-    o = objc_constructInstance([Base class], o2);
+    o = objc_constructInstance_fn([TestRoot class], o2);
     testassert(ctors1 == 0  &&  dtors1 == 0  &&  
                ctors2 == 0  &&  dtors2 == 0);
-    testassert([o class] == [Base class]);
-    objc_destructInstance(o), o = nil;
+    testassert([o class] == [TestRoot class]);
+    objc_destructInstance_fn(o), o = nil;
     testcollect();
     testassert(ctors1 == 0  &&  dtors1 == 0  &&  
                ctors2 == 0  &&  dtors2 == 0);
 
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
-    o = objc_constructInstance([CXXBase class], o2);
+    o = objc_constructInstance_fn([CXXBase class], o2);
     testassert(ctors1 == 1  &&  dtors1 == 0  &&  
                ctors2 == 0  &&  dtors2 == 0);
     testassert([o class] == [CXXBase class]);
-    objc_destructInstance(o), o = nil;
+    objc_destructInstance_fn(o), o = nil;
     testcollect();
     testassert(ctors1 == 1  &&  dtors1 == 1  &&  
                ctors2 == 0  &&  dtors2 == 0);
 
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
-    o = objc_constructInstance([NoCXXSub class], o2);
+    o = objc_constructInstance_fn([NoCXXSub class], o2);
     testassert(ctors1 == 1  &&  dtors1 == 0  &&  
                ctors2 == 0  &&  dtors2 == 0);
     testassert([o class] == [NoCXXSub class]);
-    objc_destructInstance(o), o = nil;
+    objc_destructInstance_fn(o), o = nil;
     testcollect();
     testassert(ctors1 == 1  &&  dtors1 == 1  &&  
                ctors2 == 0  &&  dtors2 == 0);
 
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
-    o = objc_constructInstance([CXXSub class], o2);
+    o = objc_constructInstance_fn([CXXSub class], o2);
     testassert(ctors1 == 1  &&  dtors1 == 0  &&  
                ctors2 == 1  &&  dtors2 == 0);
     testassert([o class] == [CXXSub class]);
-    objc_destructInstance(o), o = nil;
+    objc_destructInstance_fn(o), o = nil;
     testcollect();
     testassert(ctors1 == 1  &&  dtors1 == 1  &&  
                ctors2 == 1  &&  dtors2 == 1);
-
-    return NULL;
 }
 
 
-void *test_batch(void *arg __unused) 
+void test_batch(void) 
 {
+#if __has_feature(objc_arc) 
+    // not converted to ARC yet
+    return;
+#else
+
     id o2[100];
     unsigned int count, i;
 
     // Batch allocation
 
-    objc_registerThreadWithCollector();
-
     for (i = 0; i < 100; i++) {
-        o2[i] = (id)malloc(class_getInstanceSize([Base class]));
+        o2[i] = (id)malloc(class_getInstanceSize([TestRoot class]));
     }
     for (i = 0; i < 100; i++) {
         free(o2[i]);
     }
 
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
-    count = class_createInstances([Base class], 0, o2, 10);
+    count = class_createInstances([TestRoot class], 0, o2, 10);
     testassert(count > 0);
     testassert(ctors1 == 0  &&  dtors1 == 0  &&  
                ctors2 == 0  &&  dtors2 == 0);
-    for (i = 0; i < count; i++) testassert([o2[i] class] == [Base class]);
+    for (i = 0; i < count; i++) testassert([o2[i] class] == [TestRoot class]);
     for (i = 0; i < count; i++) object_dispose(o2[i]), o2[i] = nil;
     testcollect();
     testassert(ctors1 == 0  &&  dtors1 == 0  &&  
@@ -205,7 +197,7 @@ void *test_batch(void *arg __unused)
 
     for (i = 0; i < 100; i++) {
         // prime batch allocator
-        free(malloc(class_getInstanceSize([Base class])));
+        free(malloc(class_getInstanceSize([TestRoot class])));
     }
     
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
@@ -221,7 +213,7 @@ void *test_batch(void *arg __unused)
 
     for (i = 0; i < 100; i++) {
         // prime batch allocator
-        free(malloc(class_getInstanceSize([Base class])));
+        free(malloc(class_getInstanceSize([TestRoot class])));
     }
     
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
@@ -237,7 +229,7 @@ void *test_batch(void *arg __unused)
 
     for (i = 0; i < 100; i++) {
         // prime batch allocator
-        free(malloc(class_getInstanceSize([Base class])));
+        free(malloc(class_getInstanceSize([TestRoot class])));
     }
     
     ctors1 = dtors1 = ctors2 = dtors2 = 0;
@@ -250,24 +242,17 @@ void *test_batch(void *arg __unused)
     testcollect();
     testassert(ctors1 == count  &&  dtors1 == count  &&  
                ctors2 == count  &&  dtors2 == count);
-
-    return NULL;
+#endif
 }
 
 int main()
 {
-    pthread_t th;
-
-    testassert(0 == pthread_create(&th, NULL, test_single, NULL));
-    pthread_join(th, NULL);
-
-    testassert(0 == pthread_create(&th, NULL, test_inplace, NULL));
-    pthread_join(th, NULL);
+    testonthread(^{ test_single(); });
+    testonthread(^{ test_inplace(); });
 
     leak_mark();
 
-    testassert(0 == pthread_create(&th, NULL, test_batch, NULL));
-    pthread_join(th, NULL);
+    testonthread(^{ test_batch(); });
 
     // fixme can't get this to zero; may or may not be a real leak
     leak_check(64);

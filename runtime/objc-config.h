@@ -21,6 +21,9 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+#ifndef _OBJC_CONFIG_H_
+#define _OBJC_CONFIG_H_
+
 #include <TargetConditionals.h>
 
 // Define SUPPORT_GC=1 to enable garbage collection.
@@ -52,11 +55,11 @@
 #   define SUPPORT_MOD 1
 #endif
 
-// Define SUPPORT_BUILTINS=1 to enable the builtin selector table from dyld
-#if TARGET_OS_WIN32
-#   define SUPPORT_BUILTINS 0
+// Define SUPPORT_PREOPT=1 to enable dyld shared cache optimizations
+#if TARGET_OS_WIN32  ||  TARGET_IPHONE_SIMULATOR
+#   define SUPPORT_PREOPT 0
 #else
-#   define SUPPORT_BUILTINS 1
+#   define SUPPORT_PREOPT 1
 #endif
 
 // Define SUPPORT_DEBUGGER_MODE=1 to enable lock-avoiding execution for debuggers
@@ -137,9 +140,4 @@
 // because objc-class.h is public and objc-config.h is not.
 //#define OBJC_INSTRUMENTED
 
-// Get the nice macros for subroutine calling, etc.
-// Not available on all architectures.  Not needed
-// (by us) on some configurations.
-#if defined (__i386__) || defined (i386)
-#   include <architecture/i386/asm_help.h>
 #endif

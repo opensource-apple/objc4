@@ -33,22 +33,9 @@
 #define _OBJC_OBJECT_H_
 
 #include <stdarg.h>
-#import <objc/objc-runtime.h>
+#include <objc/objc-runtime.h>
 
-#if __OBJC2__
-
-__OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_NA)
-@interface Object
-{
-	Class isa;	/* A pointer to the instance's class structure */
-}
-
-+class;
--(BOOL) isEqual:anObject;
-
-@end
-
-#else
+#if ! __OBJC2__
 
 __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_NA)
 @interface Object
@@ -58,32 +45,32 @@ __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_NA)
 
 /* Initializing classes and instances */
 
-+ initialize;
-- init;
++ (id)initialize;
+- (id)init;
 
 /* Creating, copying, and freeing instances */
 
-+ new;
-+ free;
-- free;
-+ alloc;
-- copy;
-+ allocFromZone:(void *)zone;
-- copyFromZone:(void *)zone;
++ (id)new;
++ (id)free;
+- (id)free;
++ (id)alloc;
+- (id)copy;
++ (id)allocFromZone:(void *)zone;
+- (id)copyFromZone:(void *)zone;
 - (void *)zone;
 
 /* Identifying classes */
 
-+ class;
-+ superclass;
++ (id)class;
++ (id)superclass;
 + (const char *) name;
-- class;
-- superclass;
+- (id)class;
+- (id)superclass;
 - (const char *) name;
 
 /* Identifying and comparing instances */
 
-- self;
+- (id)self;
 - (unsigned int) hash;
 - (BOOL) isEqual:anObject;
 
@@ -116,23 +103,23 @@ __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_NA)
 
 /* Sending messages determined at run time */
 
-- perform:(SEL)aSelector;
-- perform:(SEL)aSelector with:anObject;
-- perform:(SEL)aSelector with:object1 with:object2;
+- (id)perform:(SEL)aSelector;
+- (id)perform:(SEL)aSelector with:anObject;
+- (id)perform:(SEL)aSelector with:object1 with:object2;
 
 /* Posing */
 
-+ poseAs: aClassObject;
++ (id)poseAs: aClassObject;
 
 /* Enforcing intentions */
  
-- subclassResponsibility:(SEL)aSelector;
-- notImplemented:(SEL)aSelector;
+- (id)subclassResponsibility:(SEL)aSelector;
+- (id)notImplemented:(SEL)aSelector;
 
 /* Error handling */
 
-- doesNotRecognize:(SEL)aSelector;
-- error:(const char *)aString, ...;
+- (id)doesNotRecognize:(SEL)aSelector;
+- (id)error:(const char *)aString, ...;
 
 /* Debugging */
 
@@ -140,16 +127,16 @@ __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_NA)
 
 /* Archiving */
 
-- awake;
-- write:(void *)stream;
-- read:(void *)stream;
+- (id)awake;
+- (id)write:(void *)stream;
+- (id)read:(void *)stream;
 + (int) version;
-+ setVersion: (int) aVersion;
++ (id)setVersion: (int) aVersion;
 
 /* Forwarding */
 
-- forward: (SEL)sel : (marg_list)args;
-- performv: (SEL)sel : (marg_list)args;
+- (id)forward: (SEL)sel : (marg_list)args;
+- (id)performv: (SEL)sel : (marg_list)args;
 
 @end
 
@@ -157,8 +144,8 @@ __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_NA)
 
 @interface Object (Archiving)
 
-- startArchiving: (void *)stream;
-- finishUnarchiving;
+- (id)startArchiving: (void *)stream;
+- (id)finishUnarchiving;
 
 @end
 
@@ -167,8 +154,9 @@ __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_NA)
 @interface Object (DynamicLoading)
 
 //+ finishLoading:(headerType *)header;
-+ finishLoading:(struct mach_header *)header;
-+ startUnloading;
+struct mach_header;
++ (id)finishLoading:(struct mach_header *)header;
++ (id)startUnloading;
 
 @end
 

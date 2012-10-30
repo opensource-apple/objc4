@@ -1,13 +1,13 @@
 // TEST_CONFIG
 
 #include "test.h"
+#include "testroot.i"
 #include <stdint.h>
 #include <string.h>
 #include <objc/objc-runtime.h>
 
-@interface Super { 
+@interface Super : TestRoot { 
   @public
-    id isa;
     char superIvar;
 }
 
@@ -16,8 +16,6 @@
 
 @implementation Super 
 @synthesize superProp = superIvar;
-+(void)initialize { } 
-+class { return self; }
 @end
 
 
@@ -54,7 +52,7 @@ int main()
     prop = class_getProperty([Super class], "subProp");
     testassert(!prop);
 
-    prop = class_getProperty([Sub class]->isa, "subProp");
+    prop = class_getProperty(object_getClass([Sub class]), "subProp");
     testassert(!prop);
 
 

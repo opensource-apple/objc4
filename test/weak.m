@@ -120,11 +120,10 @@
 #   define TESTIVAR(cond) /* rdar */
 #endif
 
-static BOOL classInList(Class *classes, const char *name)
+static BOOL classInList(__unsafe_unretained Class classes[], const char *name)
 {
-    Class *cp;
-    for (cp = classes; *cp; cp++) {
-        if (0 == strcmp(class_getName(*cp), name)) return YES;
+    for (int i = 0; classes[i] != nil; i++) {
+        if (0 == strcmp(class_getName(classes[i]), name)) return YES;
     }
     return NO;
 }
@@ -160,10 +159,10 @@ int main(int argc __unused, char **argv)
     testassert([MyNotMissingSuper class]);
     testassert([MyNotMissingSub class]);
     if (weakMissing) {
-        testassert(! [MissingRoot class]);
-        testassert(! [MissingSuper class]);
-        testassert(! [MyMissingSuper class]);
-        testassert(! [MyMissingSub class]);
+        testassert([MissingRoot class] == nil);
+        testassert([MissingSuper class] == nil);
+        testassert([MyMissingSuper class] == nil);
+        testassert([MyMissingSub class] == nil);
     } else {
         testassert([MissingRoot class]);
         testassert([MissingSuper class]);
@@ -177,10 +176,10 @@ int main(int argc __unused, char **argv)
     testassert(objc_getClass("MyNotMissingSuper"));
     testassert(objc_getClass("MyNotMissingSub"));
     if (weakMissing) {
-        testassert(! objc_getClass("MissingRoot"));
-        testassert(! objc_getClass("MissingSuper"));
-        testassert(! objc_getClass("MyMissingSuper"));
-        testassert(! objc_getClass("MyMissingSub"));
+        testassert(objc_getClass("MissingRoot") == nil);
+        testassert(objc_getClass("MissingSuper") == nil);
+        testassert(objc_getClass("MyMissingSuper") == nil);
+        testassert(objc_getClass("MyMissingSub") == nil);
     } else {
         testassert(objc_getClass("MissingRoot"));
         testassert(objc_getClass("MissingSuper"));
@@ -189,23 +188,27 @@ int main(int argc __unused, char **argv)
     }
 
     // class list
-    Class *classes = objc_copyClassList(NULL);
-    testassert(classInList(classes, "NotMissingRoot"));
-    testassert(classInList(classes, "NotMissingSuper"));
-    testassert(classInList(classes, "MyNotMissingSuper"));
-    testassert(classInList(classes, "MyNotMissingSub"));
+    union {
+        Class *c;
+        void *v;
+    } classes;
+    classes.c = objc_copyClassList(NULL);
+    testassert(classInList(classes.c, "NotMissingRoot"));
+    testassert(classInList(classes.c, "NotMissingSuper"));
+    testassert(classInList(classes.c, "MyNotMissingSuper"));
+    testassert(classInList(classes.c, "MyNotMissingSub"));
     if (weakMissing) {
-        testassert(! classInList(classes, "MissingRoot"));
-        testassert(! classInList(classes, "MissingSuper"));
-        testassert(! classInList(classes, "MyMissingSuper"));
-        testassert(! classInList(classes, "MyMissingSub"));
+        testassert(! classInList(classes.c, "MissingRoot"));
+        testassert(! classInList(classes.c, "MissingSuper"));
+        testassert(! classInList(classes.c, "MyMissingSuper"));
+        testassert(! classInList(classes.c, "MyMissingSub"));
     } else {
-        testassert(classInList(classes, "MissingRoot"));
-        testassert(classInList(classes, "MissingSuper"));
-        testassert(classInList(classes, "MyMissingSuper"));
-        testassert(classInList(classes, "MyMissingSub"));
+        testassert(classInList(classes.c, "MissingRoot"));
+        testassert(classInList(classes.c, "MissingSuper"));
+        testassert(classInList(classes.c, "MyMissingSuper"));
+        testassert(classInList(classes.c, "MyMissingSub"));
     }
-    free(classes);
+    free(classes.v);
 
     // class name list
     const char *image = class_getImageName(objc_getClass("NotMissingRoot"));
@@ -277,33 +280,33 @@ int main(int argc __unused, char **argv)
     NotMissingSuper *obj2;
     MissingSuper *obj3;
     testassert((obj = [[NotMissingRoot alloc] init])); 
-    [obj dealloc];
+    RELEASE_VAR(obj);
     testassert((obj2 = [[NotMissingSuper alloc] init]));
     TESTIVAR(obj2->ivar == 200); 
-    [obj2 dealloc];
+    RELEASE_VAR(obj2);
     testassert((obj2 = [[MyNotMissingSuper alloc] init]));
     TESTIVAR(obj2->ivar == 200); 
-    [obj2 dealloc];
+    RELEASE_VAR(obj2);
     testassert((obj2 = [[MyNotMissingSub alloc] init]));
     TESTIVAR(obj2->ivar == 200); 
-    [obj2 dealloc];
+    RELEASE_VAR(obj2);
     if (weakMissing) {
-        testassert(! [[MissingRoot alloc] init]);
-        testassert(! [[MissingSuper alloc] init]);
-        testassert(! [[MyMissingSuper alloc] init]);
-        testassert(! [[MyMissingSub alloc] init]);
+        testassert([[MissingRoot alloc] init] == nil);
+        testassert([[MissingSuper alloc] init] == nil);
+        testassert([[MyMissingSuper alloc] init] == nil);
+        testassert([[MyMissingSub alloc] init] == nil);
     } else {
         testassert((obj = [[MissingRoot alloc] init])); 
-        [obj dealloc];
+        RELEASE_VAR(obj);
         testassert((obj3 = [[MissingSuper alloc] init])); 
         TESTIVAR(obj3->ivar == 100); 
-        [obj3 dealloc];
+        RELEASE_VAR(obj3);
         testassert((obj3 = [[MyMissingSuper alloc] init])); 
         TESTIVAR(obj3->ivar == 100); 
-        [obj3 dealloc];
+        RELEASE_VAR(obj3);
         testassert((obj3 = [[MyMissingSub alloc] init])); 
         TESTIVAR(obj3->ivar == 100); 
-        [obj3 dealloc];
+        RELEASE_VAR(obj3);
     }
 
     *strrchr(argv[0], '.') = 0;

@@ -107,8 +107,8 @@ WINBOOL APIENTRY DllMain( HMODULE hModule,
         environ_init();
         tls_init();
         lock_init();
-        sel_init(NO);
-        exception_init();        
+        sel_init(NO, 3500);  // old selector heuristic
+        exception_init();
         break;
 
     case DLL_THREAD_ATTACH:
@@ -129,40 +129,40 @@ OBJC_EXPORT void *_objc_init_image(HMODULE image, const objc_sections *sects)
     hi->mhdr = (const headerType *)image;
     hi->info = sects->iiStart;
     hi->allClassesRealized = NO;
-    hi->os.modules = sects->modStart ? (Module *)((void **)sects->modStart+1) : 0;
-    hi->os.moduleCount = (Module *)sects->modEnd - hi->os.modules;
-    hi->os.protocols = sects->protoStart ? (struct old_protocol **)((void **)sects->protoStart+1) : 0;
-    hi->os.protocolCount = (struct old_protocol **)sects->protoEnd - hi->os.protocols;
-    hi->os.imageinfo = NULL;
-    hi->os.imageinfoBytes = 0;
-    // hi->os.imageinfo = sects->iiStart ? (uint8_t *)((void **)sects->iiStart+1) : 0;;
-//     hi->os.imageinfoBytes = (uint8_t *)sects->iiEnd - hi->os.imageinfo;
-    hi->os.selrefs = sects->selrefsStart ? (SEL *)((void **)sects->selrefsStart+1) : 0;
-    hi->os.selrefCount = (SEL *)sects->selrefsEnd - hi->os.selrefs;
-    hi->os.clsrefs = sects->clsrefsStart ? (Class *)((void **)sects->clsrefsStart+1) : 0;
-    hi->os.clsrefCount = (Class *)sects->clsrefsEnd - hi->os.clsrefs;
+    hi->modules = sects->modStart ? (Module *)((void **)sects->modStart+1) : 0;
+    hi->moduleCount = (Module *)sects->modEnd - hi->modules;
+    hi->protocols = sects->protoStart ? (struct old_protocol **)((void **)sects->protoStart+1) : 0;
+    hi->protocolCount = (struct old_protocol **)sects->protoEnd - hi->protocols;
+    hi->imageinfo = NULL;
+    hi->imageinfoBytes = 0;
+    // hi->imageinfo = sects->iiStart ? (uint8_t *)((void **)sects->iiStart+1) : 0;;
+//     hi->imageinfoBytes = (uint8_t *)sects->iiEnd - hi->imageinfo;
+    hi->selrefs = sects->selrefsStart ? (SEL *)((void **)sects->selrefsStart+1) : 0;
+    hi->selrefCount = (SEL *)sects->selrefsEnd - hi->selrefs;
+    hi->clsrefs = sects->clsrefsStart ? (Class *)((void **)sects->clsrefsStart+1) : 0;
+    hi->clsrefCount = (Class *)sects->clsrefsEnd - hi->clsrefs;
 
     count = 0;
-    for (i = 0; i < hi->os.moduleCount; i++) {
-        if (hi->os.modules[i]) count++;
+    for (i = 0; i < hi->moduleCount; i++) {
+        if (hi->modules[i]) count++;
     }
     hi->mod_count = 0;
     hi->mod_ptr = 0;
     if (count > 0) {
         hi->mod_ptr = malloc(count * sizeof(struct objc_module));
-        for (i = 0; i < hi->os.moduleCount; i++) {
-            if (hi->os.modules[i]) memcpy(&hi->mod_ptr[hi->mod_count++], hi->os.modules[i], sizeof(struct objc_module));
+        for (i = 0; i < hi->moduleCount; i++) {
+            if (hi->modules[i]) memcpy(&hi->mod_ptr[hi->mod_count++], hi->modules[i], sizeof(struct objc_module));
         }
     }
     
-    hi->os.moduleName = malloc(MAX_PATH * sizeof(TCHAR));
-    GetModuleFileName((HMODULE)(hi->mhdr), hi->os.moduleName, MAX_PATH * sizeof(TCHAR));
+    hi->moduleName = malloc(MAX_PATH * sizeof(TCHAR));
+    GetModuleFileName((HMODULE)(hi->mhdr), hi->moduleName, MAX_PATH * sizeof(TCHAR));
 
-    _objc_appendHeader(hi);
+    appendHeader(hi);
 
     if (PrintImages) {
         _objc_inform("IMAGES: loading image for %s%s%s\n", 
-            _nameForHeader(hi->mhdr), 
+            hi->fname, 
             headerIsBundle(hi) ? " (bundle)" : "", 
             _objcHeaderIsReplacement(hi) ? " (replacement)":"");
     }
@@ -184,7 +184,7 @@ OBJC_EXPORT void _objc_unload_image(HMODULE image, header_info *hinfo)
 }
 
 
-PRIVATE_EXTERN bool crashlog_header_name(header_info *hi)
+bool crashlog_header_name(header_info *hi)
 {
     return true;
 }
@@ -197,13 +197,13 @@ PRIVATE_EXTERN bool crashlog_header_name(header_info *hi)
 #include "objc-file-old.h"
 #endif
 
-PRIVATE_EXTERN void mutex_init(mutex_t *m)
+void mutex_init(mutex_t *m)
 {
     pthread_mutex_init(m, NULL);
 }
 
 
-PRIVATE_EXTERN void recursive_mutex_init(recursive_mutex_t *m)
+void recursive_mutex_init(recursive_mutex_t *m)
 {
     // fixme error checking
     pthread_mutex_t *newmutex;
@@ -211,7 +211,7 @@ PRIVATE_EXTERN void recursive_mutex_init(recursive_mutex_t *m)
     // Build recursive mutex attributes, if needed
     static pthread_mutexattr_t *attr;
     if (!attr) {
-        pthread_mutexattr_t *newattr = 
+        pthread_mutexattr_t *newattr = (pthread_mutexattr_t *)
             _malloc_internal(sizeof(pthread_mutexattr_t));
         pthread_mutexattr_init(newattr);
         pthread_mutexattr_settype(newattr, PTHREAD_MUTEX_RECURSIVE);
@@ -227,7 +227,7 @@ PRIVATE_EXTERN void recursive_mutex_init(recursive_mutex_t *m)
  attr_done:
 
     // Build the mutex itself
-    newmutex = _malloc_internal(sizeof(pthread_mutex_t));
+    newmutex = (pthread_mutex_t *)_malloc_internal(sizeof(pthread_mutex_t));
     pthread_mutex_init(newmutex, attr);
     while (!m->mutex) {
         if (OSAtomicCompareAndSwapPtrBarrier(0, newmutex, (void**)&m->mutex)) {
@@ -245,88 +245,100 @@ PRIVATE_EXTERN void recursive_mutex_init(recursive_mutex_t *m)
 * bad_magic.
 * Return YES if the header has invalid Mach-o magic.
 **********************************************************************/
-PRIVATE_EXTERN BOOL bad_magic(const headerType *mhdr)
+BOOL bad_magic(const headerType *mhdr)
 {
     return (mhdr->magic != MH_MAGIC  &&  mhdr->magic != MH_MAGIC_64  &&  
             mhdr->magic != MH_CIGAM  &&  mhdr->magic != MH_CIGAM_64);
 }
 
 
-static header_info * _objc_addHeader(const headerType *mhdr)
+static header_info * addHeader(const headerType *mhdr)
 {
-    size_t info_size = 0;
-    unsigned long seg_size;
-    const uint8_t *objc_segment;
-    const objc_image_info *image_info;
-    header_info *result;
+    header_info *hi;
 
     if (bad_magic(mhdr)) return NULL;
 
-    // Weed out duplicates
-    for (result = FirstHeader; result; result = result->next) {
-        if (mhdr == result->mhdr) return NULL;
+#if __OBJC2__
+    // Look for hinfo from the dyld shared cache.
+    hi = preoptimizedHinfoForHeader(mhdr);
+    if (hi) {
+        // Found an hinfo in the dyld shared cache.
+
+        // Weed out duplicates.
+        if (hi->loaded) {
+            return NULL;
+        }
+
+        // Initialize fields not set by the shared cache
+        // hi->next is set by appendHeader
+        hi->fname = dyld_image_path_containing_address(hi->mhdr);
+        hi->loaded = true;
+        hi->inSharedCache = true;
+
+        if (PrintPreopt) {
+            _objc_inform("PREOPTIMIZATION: honoring preoptimized header info at %p for %s", hi, hi->fname);
+        }
+
+# if !NDEBUG
+        // Verify image_info
+        size_t info_size = 0;
+        const objc_image_info *image_info = _getObjcImageInfo(mhdr,&info_size);
+        assert(image_info == hi->info);
+# endif
     }
-
-    // Locate the __OBJC segment
-    image_info = _getObjcImageInfo(mhdr, &info_size);
-    objc_segment = getsegmentdata(mhdr, SEG_OBJC, &seg_size);
-    if (!objc_segment  &&  !image_info) return NULL;
-
-    // Allocate a header_info entry.
-    result = _calloc_internal(sizeof(header_info), 1);
-
-    // Set up the new header_info entry.
-    result->mhdr = mhdr;
-#if !__OBJC2__
-    // mhdr must already be set
-    result->mod_count = 0;
-    result->mod_ptr = _getObjcModules(result, &result->mod_count);
+    else 
 #endif
-    result->info = image_info;
-    dladdr(result->mhdr, &result->os.dl_info);
-    result->allClassesRealized = NO;
+    {
+        // Didn't find an hinfo in the dyld shared cache.
+
+        // Weed out duplicates
+        for (hi = FirstHeader; hi; hi = hi->next) {
+            if (mhdr == hi->mhdr) return NULL;
+        }
+
+        // Locate the __OBJC segment
+        size_t info_size = 0;
+        unsigned long seg_size;
+        const objc_image_info *image_info = _getObjcImageInfo(mhdr,&info_size);
+        const uint8_t *objc_segment = getsegmentdata(mhdr,SEG_OBJC,&seg_size);
+        if (!objc_segment  &&  !image_info) return NULL;
+
+        // Allocate a header_info entry.
+        hi = (header_info *)_calloc_internal(sizeof(header_info), 1);
+
+        // Set up the new header_info entry.
+        hi->mhdr = mhdr;
+#if !__OBJC2__
+        // mhdr must already be set
+        hi->mod_count = 0;
+        hi->mod_ptr = _getObjcModules(hi, &hi->mod_count);
+#endif
+        hi->info = image_info;
+        hi->fname = dyld_image_path_containing_address(hi->mhdr);
+        hi->loaded = true;
+        hi->inSharedCache = false;
+        hi->allClassesRealized = NO;
+    }
 
     // dylibs are not allowed to unload
     // ...except those with image_info and nothing else (5359412)
-    if (result->mhdr->filetype == MH_DYLIB  &&  _hasObjcContents(result)) {
-        dlopen(result->os.dl_info.dli_fname, RTLD_NOLOAD);
+    if (hi->mhdr->filetype == MH_DYLIB  &&  _hasObjcContents(hi)) {
+        dlopen(hi->fname, RTLD_NOLOAD);
     }
 
-    // Make sure every copy of objc_image_info in this image is the same.
-    // This means same version and same bitwise contents.
-    if (result->info) {
-        const objc_image_info *start = result->info;
-        const objc_image_info *end = 
-            (objc_image_info *)(info_size + (uint8_t *)start);
-        const objc_image_info *info = start;
-        while (info < end) {
-            // version is byte size, except for version 0
-            size_t struct_size = info->version;
-            if (struct_size == 0) struct_size = 2 * sizeof(uint32_t);
-            if (info->version != start->version  ||  
-                0 != memcmp(info, start, struct_size))
-            {
-                _objc_inform("'%s' has inconsistently-compiled Objective-C "
-                            "code. Please recompile all code in it.", 
-                            _nameForHeader(mhdr));
-            }
-            info = (objc_image_info *)(struct_size + (uint8_t *)info);
-        }
-    }
-
-    _objc_appendHeader(result);
+    appendHeader(hi);
     
-    return result;
+    return hi;
 }
 
 
 #if !SUPPORT_GC
 
-PRIVATE_EXTERN const char *_gcForHInfo(const header_info *hinfo)
+const char *_gcForHInfo(const header_info *hinfo)
 {
     return "";
 }
-PRIVATE_EXTERN const char *_gcForHInfo2(const header_info *hinfo)
+const char *_gcForHInfo2(const header_info *hinfo)
 {
     return "";
 }
@@ -336,7 +348,7 @@ PRIVATE_EXTERN const char *_gcForHInfo2(const header_info *hinfo)
 /***********************************************************************
 * _gcForHInfo.
 **********************************************************************/
-PRIVATE_EXTERN const char *_gcForHInfo(const header_info *hinfo)
+const char *_gcForHInfo(const header_info *hinfo)
 {
     if (_objcHeaderRequiresGC(hinfo)) {
         if (_objcHeaderSupportsCompaction(hinfo))
@@ -352,7 +364,7 @@ PRIVATE_EXTERN const char *_gcForHInfo(const header_info *hinfo)
         return "does not support GC";
     }
 }
-PRIVATE_EXTERN const char *_gcForHInfo2(const header_info *hinfo)
+const char *_gcForHInfo2(const header_info *hinfo)
 {
     if (_objcHeaderRequiresGC(hinfo)) {
         if (_objcHeaderSupportsCompaction(hinfo))
@@ -381,7 +393,7 @@ static void check_wants_gc(BOOL *appWantsGC, BOOL *appSupportsCompaction)
 
     // Environment variables can override the following.
     if (DisableGC) {
-        _objc_inform("GC: forcing GC OFF because OBJC_DISABLE_GC is set");
+        _objc_inform_on_crash("GC: forcing GC OFF because OBJC_DISABLE_GC is set");
         *appWantsGC = NO;
         *appSupportsCompaction = NO;
     }
@@ -398,7 +410,7 @@ static void check_wants_gc(BOOL *appWantsGC, BOOL *appSupportsCompaction)
                 *appSupportsCompaction = (*appWantsGC && _objcHeaderSupportsCompaction(hi)) ? YES : NO;
                 if (PrintGC) {
                     _objc_inform("GC: executable '%s' %s",
-                                 _nameForHeader(hi->mhdr), _gcForHInfo(hi));
+                                 hi->fname, _gcForHInfo(hi));
                 }
             }
         }
@@ -432,7 +444,7 @@ static void verify_gc_readiness(BOOL wantsGC, BOOL *wantsCompaction,
             _objc_inform_now_and_on_crash
                 ("'%s' was not compiled with -fobjc-gc or -fobjc-gc-only, "
                  "but the application requires GC",
-                 _nameForHeader(hi->mhdr));
+                 hi->fname);
             busted = YES;
         } 
         else if (!wantsGC  &&  _objcHeaderRequiresGC(hi)) {
@@ -440,7 +452,7 @@ static void verify_gc_readiness(BOOL wantsGC, BOOL *wantsCompaction,
             _objc_inform_now_and_on_crash
                 ("'%s' was compiled with -fobjc-gc-only, "
                  "but the application does not support GC",
-                 _nameForHeader(hi->mhdr));
+                 hi->fname);
             busted = YES;            
         }
         
@@ -449,7 +461,7 @@ static void verify_gc_readiness(BOOL wantsGC, BOOL *wantsCompaction,
             _objc_inform_now_and_on_crash
                 ("'%s' was not linked with -Xlinker -objc_gc_compaction, "
                  "but the application wants compaction.",
-                 _nameForHeader(hi->mhdr));
+                 hi->fname);
             // Simply warn for now until radars are filed. Eventually,
             // objc_disableCompaction() will block until any current compaction completes.
             objc_disableCompaction();
@@ -458,7 +470,7 @@ static void verify_gc_readiness(BOOL wantsGC, BOOL *wantsCompaction,
 
         if (PrintGC) {
             _objc_inform("GC: library '%s' %s", 
-                         _nameForHeader(hi->mhdr), _gcForHInfo(hi));
+                         hi->fname, _gcForHInfo(hi));
         }
     }
     
@@ -576,7 +588,13 @@ static const char *gc_enforcer(enum dyld_image_states state,
 *
 * Locking: loadMethodLock(old) or runtimeLock(new) acquired by map_images.
 **********************************************************************/
-PRIVATE_EXTERN const char *
+#if __OBJC2__
+#include "objc-file.h"
+#else
+#include "objc-file-old.h"
+#endif
+
+const char *
 map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
                   const struct dyld_image_info infoList[])
 {
@@ -587,11 +605,13 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
     header_info *hi;
     header_info *hList[infoCount];
     uint32_t hCount;
+    size_t selrefCount = 0;
 
     // Perform first-time initialization if necessary.
     // This function is called before ordinary library initializers. 
     // fixme defer initialization until an objc-using image is found?
     if (firstTime) {
+        preopt_init();
 #if SUPPORT_GC
         InitialDyldRegistration = YES;
         dyld_register_image_state_change_handler(dyld_image_state_mapped, 0 /* batch */, &gc_enforcer);
@@ -610,10 +630,21 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
     while (i--) {
         const headerType *mhdr = (headerType *)infoList[i].imageLoadAddress;
 
-        hi = _objc_addHeader(mhdr);
+        hi = addHeader(mhdr);
         if (!hi) {
             // no objc data in this entry
             continue;
+        }
+        if (mhdr->filetype == MH_EXECUTE) {
+#if __OBJC2__
+            size_t count;
+            _getObjc2SelectorRefs(hi, &count);
+            selrefCount += count;
+            _getObjc2MessageRefs(hi, &count);
+            selrefCount += count;
+#else
+            _getObjcSelectorRefs(hi, &selrefCount);
+#endif
         }
 
         hList[hCount++] = hi;
@@ -621,7 +652,7 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
 
         if (PrintImages) {
             _objc_inform("IMAGES: loading image for %s%s%s%s%s\n", 
-                         _nameForHeader(mhdr), 
+                         hi->fname, 
                          mhdr->filetype == MH_BUNDLE ? " (bundle)" : "", 
                          _objcHeaderIsReplacement(hi) ? " (replacement)" : "",
                          _objcHeaderOptimizedByDyld(hi)?" (preoptimized)" : "",
@@ -673,7 +704,7 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
 
     if (firstTime) {
         extern SEL FwdSel;  // in objc-msg-*.s
-        sel_init(wantsGC);
+        sel_init(wantsGC, selrefCount);
         FwdSel = sel_registerName("forward::");
 
         arr_init();
@@ -694,7 +725,7 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
 *
 * Locking: loadMethodLock(both) and runtimeLock(new) acquired by load_images
 **********************************************************************/
-PRIVATE_EXTERN BOOL 
+BOOL 
 load_images_nolock(enum dyld_image_states state,uint32_t infoCount,
                    const struct dyld_image_info infoList[])
 {
@@ -725,7 +756,7 @@ load_images_nolock(enum dyld_image_states state,uint32_t infoCount,
 * 
 * Locking: loadMethodLock(both) and runtimeLock(new) acquired by unmap_image.
 **********************************************************************/
-PRIVATE_EXTERN void 
+void 
 unmap_image_nolock(const struct mach_header *mh)
 {
     if (PrintImages) {
@@ -745,7 +776,7 @@ unmap_image_nolock(const struct mach_header *mh)
 
     if (PrintImages) { 
         _objc_inform("IMAGES: unloading image for %s%s%s%s\n", 
-                     _nameForHeader(hi->mhdr), 
+                     hi->fname, 
                      hi->mhdr->filetype == MH_BUNDLE ? " (bundle)" : "", 
                      _objcHeaderIsReplacement(hi) ? " (replacement)" : "", 
                      _gcForHInfo2(hi));
@@ -767,18 +798,26 @@ unmap_image_nolock(const struct mach_header *mh)
     _unload_image(hi);
 
     // Remove header_info from header list
-    _objc_removeHeader(hi);
+    removeHeader(hi);
     _free_internal(hi);
 }
 
 
 /***********************************************************************
 * _objc_init
-* Static initializer. Registers our image notifier with dyld.
+* Bootstrap initialization. Registers our image notifier with dyld.
+* Old ABI: called by dyld as a library initializer
+* New ABI: called by libSystem BEFORE library initialization time
 **********************************************************************/
+#if !__OBJC2__
 static __attribute__((constructor))
+#endif
 void _objc_init(void)
 {
+    static bool initialized = false;
+    if (initialized) return;
+    initialized = true;
+    
     // fixme defer initialization until an objc-using image is found?
     environ_init();
     tls_init();
@@ -830,7 +869,7 @@ static const header_info *_headerForAddress(void *addr)
 * Return the image header containing this class, or NULL.
 * Returns NULL on runtime-constructed classes, and the NSCF classes.
 **********************************************************************/
-PRIVATE_EXTERN const header_info *_headerForClass(Class cls)
+const header_info *_headerForClass(Class cls)
 {
     return _headerForAddress(cls);
 }
@@ -847,7 +886,7 @@ PRIVATE_EXTERN const header_info *_headerForClass(Class cls)
 *   4. link count == 1
 * Returns a file descriptor or -1. Errno may or may not be set on error.
 **********************************************************************/
-PRIVATE_EXTERN int secure_open(const char *filename, int flags, uid_t euid)
+int secure_open(const char *filename, int flags, uid_t euid)
 {
     struct stat fs, ls;
     int fd = -1;
@@ -926,7 +965,7 @@ PRIVATE_EXTERN int secure_open(const char *filename, int flags, uid_t euid)
 * By default this is the default malloc zone, but a dedicated zone is 
 * used if environment variable OBJC_USE_INTERNAL_ZONE is set.
 **********************************************************************/
-PRIVATE_EXTERN malloc_zone_t *_objc_internal_zone(void)
+malloc_zone_t *_objc_internal_zone(void)
 {
     static malloc_zone_t *z = (malloc_zone_t *)-1;
     if (z == (malloc_zone_t *)-1) {
@@ -941,26 +980,12 @@ PRIVATE_EXTERN malloc_zone_t *_objc_internal_zone(void)
 }
 
 
-PRIVATE_EXTERN const char *
-_getObjcHeaderName(const headerType *header)
+bool crashlog_header_name(header_info *hi)
 {
-    Dl_info info;
-
-    if (dladdr(header, &info)) {
-        return info.dli_fname;
-    }
-    else {
-        return (*_NSGetArgv())[0];
-    }
+    return crashlog_header_name_string(hi ? hi->fname : NULL);
 }
 
-
-PRIVATE_EXTERN bool crashlog_header_name(header_info *hi)
-{
-    return crashlog_header_name_string(hi ? hi->os.dl_info.dli_fname : NULL);
-}
-
-PRIVATE_EXTERN bool crashlog_header_name_string(const char *name)
+bool crashlog_header_name_string(const char *name)
 {
     CRSetCrashLogMessage2(name);
     return true;
@@ -969,19 +994,19 @@ PRIVATE_EXTERN bool crashlog_header_name_string(const char *name)
 
 #if TARGET_OS_IPHONE
 
-PRIVATE_EXTERN const char *__crashreporter_info__ = NULL;
+const char *__crashreporter_info__ = NULL;
 
-PRIVATE_EXTERN const char *CRSetCrashLogMessage(const char *msg)
+const char *CRSetCrashLogMessage(const char *msg)
 {
     __crashreporter_info__ = msg;
     return msg;
 }
-PRIVATE_EXTERN const char *CRGetCrashLogMessage(void)
+const char *CRGetCrashLogMessage(void)
 {
     return __crashreporter_info__;
 }
 
-PRIVATE_EXTERN const char *CRSetCrashLogMessage2(const char *msg)
+const char *CRSetCrashLogMessage2(const char *msg)
 {
     // sorry
     return msg;

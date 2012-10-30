@@ -1,21 +1,22 @@
 // Define FOUNDATION=1 for NSObject and NSAutoreleasePool
 // Define FOUNDATION=0 for _objc_root* and _objc_autoreleasePool*
 
+#include "test.h"
+
 #if FOUNDATION
-#   define PUSH() [[NSAutoreleasePool alloc] init]
-#   define POP(p) [(id)p release]
-#   define RETAIN(o) [o retain]
-#   define RELEASE(o) [o release]
-#   define AUTORELEASE(o) [o autorelease]
+#   define RR_PUSH() [[NSAutoreleasePool alloc] init]
+#   define RR_POP(p) [(id)p release]
+#   define RR_RETAIN(o) [o retain]
+#   define RR_RELEASE(o) [o release]
+#   define RR_AUTORELEASE(o) [o autorelease]
 #else
-#   define PUSH() _objc_autoreleasePoolPush()
-#   define POP(p) _objc_autoreleasePoolPop(p)
-#   define RETAIN(o) _objc_rootRetain((id)o)
-#   define RELEASE(o) _objc_rootRelease((id)o)
-#   define AUTORELEASE(o) _objc_rootAutorelease((id)o)
+#   define RR_PUSH() _objc_autoreleasePoolPush()
+#   define RR_POP(p) _objc_autoreleasePoolPop(p)
+#   define RR_RETAIN(o) _objc_rootRetain((id)o)
+#   define RR_RELEASE(o) _objc_rootRelease((id)o)
+#   define RR_AUTORELEASE(o) _objc_rootAutorelease((id)o)
 #endif
 
-#include "test.h"
 #include <objc/objc-internal.h>
 #include <Foundation/Foundation.h>
 
@@ -38,7 +39,7 @@ static int state;
 -(void) dealloc
 {
     state++;
-    AUTORELEASE([[Deallocator alloc] init]);
+    RR_AUTORELEASE([[Deallocator alloc] init]);
     [super dealloc];
 }
 @end
@@ -49,19 +50,19 @@ static int state;
 {
     // caller's pool
     for (int i = 0; i < NESTED_COUNT; i++) {
-        AUTORELEASE([[Deallocator alloc] init]);
+        RR_AUTORELEASE([[Deallocator alloc] init]);
     }
 
     // local pool, popped
-    void *pool = PUSH();
+    void *pool = RR_PUSH();
     for (int i = 0; i < NESTED_COUNT; i++) {
-        AUTORELEASE([[Deallocator alloc] init]);
+        RR_AUTORELEASE([[Deallocator alloc] init]);
     }
-    POP(pool);
+    RR_POP(pool);
 
     // caller's pool again
     for (int i = 0; i < NESTED_COUNT; i++) {
-        AUTORELEASE([[Deallocator alloc] init]);
+        RR_AUTORELEASE([[Deallocator alloc] init]);
     }
 
 #if FOUNDATION
@@ -73,23 +74,15 @@ static int state;
     state += NESTED_COUNT;
 #else
     // local pool, not popped
-    PUSH();
+    RR_PUSH();
     for (int i = 0; i < NESTED_COUNT; i++) {
-        AUTORELEASE([[Deallocator alloc] init]);
+        RR_AUTORELEASE([[Deallocator alloc] init]);
     }
 #endif
 
     [super dealloc];
 }
 @end
-
-void *nopop_fn(void *arg __unused)
-{
-    PUSH();
-    AUTORELEASE([[Deallocator alloc] init]);
-    // pool not popped
-    return NULL;
-}
 
 void *autorelease_lots_fn(void *singlePool)
 {
@@ -99,42 +92,37 @@ void *autorelease_lots_fn(void *singlePool)
 
     int p = 0;
     void **pools = (void**)malloc((COUNT+1) * sizeof(void*));
-    pools[p++] = PUSH();
+    pools[p++] = RR_PUSH();
 
-    id obj = AUTORELEASE([[Deallocator alloc] init]);
+    id obj = RR_AUTORELEASE([[Deallocator alloc] init]);
 
     for (int i = 0; i < COUNT; i++) {
         if (rand() % 1000 == 0  &&  !singlePool) {
-            pools[p++] = PUSH();
+            pools[p++] = RR_PUSH();
         } else {
-            AUTORELEASE(RETAIN(obj));
+            RR_AUTORELEASE(RR_RETAIN(obj));
         }
     }
 
     testassert(state == 0);
     while (--p) {
-        POP(pools[p]);
+        RR_POP(pools[p]);
     }
     testassert(state == 0);
-    POP(pools[0]);
+    RR_POP(pools[0]);
     testassert(state == 1);
     free(pools);
 
     return NULL;
 }
 
-void *pop_fn(void *arg __unused)
-{
-    void *pool = PUSH();
-    AUTORELEASE([[Deallocator alloc] init]);
-    POP(pool);
-    return NULL;
-}
-
-void *nsthread_fn(void *arg)
+void *nsthread_fn(void *arg __unused)
 {
     [NSThread currentThread];
-    return pop_fn(arg);
+    void *pool = RR_PUSH();
+    RR_AUTORELEASE([[Deallocator alloc] init]);
+    RR_POP(pool);
+    return NULL;
 }
 
 void cycle(void)
@@ -142,11 +130,11 @@ void cycle(void)
     // Normal autorelease.
     testprintf("-- Normal autorelease.\n");
     {
-        void *pool = PUSH();
+        void *pool = RR_PUSH();
         state = 0;
-        AUTORELEASE([[Deallocator alloc] init]);
+        RR_AUTORELEASE([[Deallocator alloc] init]);
         testassert(state == 0);
-        POP(pool);
+        RR_POP(pool);
         testassert(state == 1);
     }
 
@@ -154,22 +142,22 @@ void cycle(void)
     // That autorelease is handled by the popping pool, not the one above it.
     testprintf("-- Autorelease during dealloc during autoreleasepool-pop.\n");
     {
-        void *pool = PUSH();
+        void *pool = RR_PUSH();
         state = 0;
-        AUTORELEASE([[AutoreleaseDuringDealloc alloc] init]);
+        RR_AUTORELEASE([[AutoreleaseDuringDealloc alloc] init]);
         testassert(state == 0);
-        POP(pool);
+        RR_POP(pool);
         testassert(state == 2);
     }
 
     // Autorelease pool during dealloc during autoreleasepool-pop.
     testprintf("-- Autorelease pool during dealloc during autoreleasepool-pop.\n");
     {
-        void *pool = PUSH();
+        void *pool = RR_PUSH();
         state = 0;
-        AUTORELEASE([[AutoreleasePoolDuringDealloc alloc] init]);
+        RR_AUTORELEASE([[AutoreleasePoolDuringDealloc alloc] init]);
         testassert(state == 0);
-        POP(pool);
+        RR_POP(pool);
         testassert(state == 4 * NESTED_COUNT);
     }
 
@@ -177,9 +165,11 @@ void cycle(void)
     testprintf("-- Thread-level pool popped normally.\n");
     {
         state = 0;
-        pthread_t th;
-        pthread_create(&th, NULL, &pop_fn, NULL);
-        pthread_join(th, NULL);
+        testonthread(^{ 
+            void *pool = RR_PUSH();
+            RR_AUTORELEASE([[Deallocator alloc] init]);
+            RR_POP(pool);
+        });
         testassert(state == 1);
     }
 
@@ -195,9 +185,11 @@ void cycle(void)
     testprintf("-- Thread-level pool not popped.\n");
     {
         state = 0;
-        pthread_t th;
-        pthread_create(&th, NULL, &nopop_fn, NULL);
-        pthread_join(th, NULL);
+        testonthread(^{
+            RR_PUSH();
+            RR_AUTORELEASE([[Deallocator alloc] init]);
+            // pool not popped
+        });
         testassert(state == 1);
     }
 #endif
@@ -213,12 +205,12 @@ void cycle(void)
 #else
     testprintf("-- Intermediate pool not popped.\n");
     {
-        void *pool = PUSH();
-        void *pool2 = PUSH();
-        AUTORELEASE([[Deallocator alloc] init]);
+        void *pool = RR_PUSH();
+        void *pool2 = RR_PUSH();
+        RR_AUTORELEASE([[Deallocator alloc] init]);
         state = 0;
         (void)pool2; // pool2 not popped
-        POP(pool);
+        RR_POP(pool);
         testassert(state == 1);
     }
 #endif
@@ -235,11 +227,11 @@ void cycle(void)
     /*
     testprintf("-- pop(0).\n");
     {
-        PUSH();
+        RR_PUSH();
         state = 0;
-        AUTORELEASE([[AutoreleaseDuringDealloc alloc] init]);
+        RR_AUTORELEASE([[AutoreleaseDuringDealloc alloc] init]);
         testassert(state == 0);
-        POP(0);
+        RR_POP(0);
         testassert(state == 2);
     }
     */
@@ -253,11 +245,11 @@ int main()
         int count = 10000;
         id *objs = (id *)malloc(count*sizeof(id));
         for (int i = 0; i < count; i++) {
-            objs[i] = RETAIN([NSObject new]);
+            objs[i] = RR_RETAIN([NSObject new]);
         }
         for (int i = 0; i < count; i++) {
-            RELEASE(objs[i]);
-            RELEASE(objs[i]);
+            RR_RELEASE(objs[i]);
+            RR_RELEASE(objs[i]);
         }
         free(objs);
     }
@@ -315,8 +307,7 @@ int main()
         pthread_join(th, NULL);
     }
 
-    testwarn("rdar://9158789 leak slop due to false in-use from malloc");
-    leak_check(8192 /* should be 0 */);
+    leak_check(0);
 
 
     // NSThread.

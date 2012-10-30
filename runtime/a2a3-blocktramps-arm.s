@@ -6,7 +6,15 @@
 
 .text
 
-#ifdef _ARM_ARCH_7
+
+// This must match a1a2-blocktramps-arm.s
+#if defined(_ARM_ARCH_7)
+#   define THUMB2 1
+#else
+#   define THUMB2 0
+#endif
+
+#if THUMB2
 	.thumb
 	.thumb_func __a2a3_tramphead
 	.thumb_func __a2a3_firsttramp
@@ -19,6 +27,7 @@
 	
 .align 12
 .private_extern __a2a3_tramphead
+__a2a3_tramphead_nt:	
 __a2a3_tramphead:
 	/*
 	 r0 == stret
@@ -28,7 +37,7 @@ __a2a3_tramphead:
 	 */
 
 	// calculate the trampoline's index (512 entries, 8 bytes each)
-#ifdef _ARM_ARCH_7
+#if THUMB2
 	// PC bias is only 4, no need to correct with 8-byte trampolines
 	ubfx r2, r2, #3, #9
 #else
@@ -38,7 +47,8 @@ __a2a3_tramphead:
 #endif
 
 	// load block pointer from trampoline's data
-	adr  r12, __a2a3_tramphead    // text page
+	// nt label works around thumb integrated asm bug rdar://11315197
+	adr  r12, __a2a3_tramphead_nt // text page
 	sub  r12, r12, #4096          // data page precedes text page
 	ldr  r12, [r12, r2, LSL #3]   // load block pointer from data + index*8
 
@@ -52,7 +62,7 @@ __a2a3_tramphead:
 
 	// Make v6 and v7 match so they have the same number of TrampolineEntry
 	// below. Debug asserts in objc-block-trampoline.m check this.
-#ifdef _ARM_ARCH_7
+#if THUMB2
 	.space 16
 #endif
 

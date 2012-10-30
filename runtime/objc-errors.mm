@@ -31,11 +31,11 @@
 
 #include <conio.h>
 
-PRIVATE_EXTERN void _objc_inform_on_crash(const char *fmt, ...)
+void _objc_inform_on_crash(const char *fmt, ...)
 {
 }
 
-PRIVATE_EXTERN void _objc_inform(const char *fmt, ...)
+void _objc_inform(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -44,7 +44,7 @@ PRIVATE_EXTERN void _objc_inform(const char *fmt, ...)
     _cprintf("\n");
 }
 
-PRIVATE_EXTERN void _objc_fatal(const char *fmt, ...)
+void _objc_fatal(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -55,7 +55,7 @@ PRIVATE_EXTERN void _objc_fatal(const char *fmt, ...)
     abort();
 }
 
-PRIVATE_EXTERN void __objc_error(id rcv, const char *fmt, ...) 
+void __objc_error(id rcv, const char *fmt, ...) 
 {
     va_list args;
     va_start(args, fmt);
@@ -65,7 +65,7 @@ PRIVATE_EXTERN void __objc_error(id rcv, const char *fmt, ...)
     abort();
 }
 
-PRIVATE_EXTERN void _objc_error(id rcv, const char *fmt, va_list args) 
+void _objc_error(id rcv, const char *fmt, va_list args) 
 {
     _vcprintf(fmt, args);
 
@@ -74,6 +74,7 @@ PRIVATE_EXTERN void _objc_error(id rcv, const char *fmt, va_list args)
 
 #else
 
+#include <vproc_priv.h>
 
 OBJC_EXPORT void	(*_error)(id, const char *, va_list);
 
@@ -119,17 +120,32 @@ static void _objc_crashlog(const char *message)
     mutex_unlock(&crashlog_lock);
 }
 
+// Returns true if logs should be sent to stderr as well as syslog.
+// Copied from CFUtilities.c
+static bool also_do_stderr(void) 
+{
+    struct stat st;
+    int ret = fstat(STDERR_FILENO, &st);
+    if (ret < 0) return false;
+    mode_t m = st.st_mode & S_IFMT;
+    if (m == S_IFREG  ||  m == S_IFSOCK) return true;
+    if (!(m == S_IFIFO  ||  m == S_IFCHR)) return false;
+
+    // if it could be a pipe back to launchd, fail
+    int64_t val = 0;
+    vproc_swap_integer(NULL, VPROC_GSK_IS_MANAGED, NULL, &val);
+    if (val) return false;
+    
+    return true;
+}
+
 // Print "message" to the console.
 static void _objc_syslog(const char *message)
 {
-    if (fcntl(STDERR_FILENO, F_GETFL, 0) != -1) {
-        // stderr is open - use it
+    syslog(LOG_ERR, "%s", message);
+
+    if (also_do_stderr()) {
         write(STDERR_FILENO, message, strlen(message));
-        if (message[strlen(message)-1] != '\n') {
-            write(STDERR_FILENO, "\n", 1);
-        }
-    } else {
-        syslog(LOG_ERR, "%s", message);
     }
 }
 
@@ -137,7 +153,7 @@ static void _objc_syslog(const char *message)
  * _objc_error is the default *_error handler.
  */
 #if __OBJC2__
-PRIVATE_EXTERN __attribute__((noreturn))
+__attribute__((noreturn))
 #else
 // used by ExceptionHandling.framework
 #endif
@@ -158,7 +174,7 @@ void _objc_error(id self, const char *fmt, va_list ap)
 /*
  * this routine handles errors that involve an object (or class).
  */
-PRIVATE_EXTERN void __objc_error(id rcv, const char *fmt, ...) 
+void __objc_error(id rcv, const char *fmt, ...) 
 { 
     va_list vp; 
 
@@ -174,7 +190,7 @@ PRIVATE_EXTERN void __objc_error(id rcv, const char *fmt, ...)
  * this routine handles severe runtime errors...like not being able
  * to read the mach headers, allocate space, etc...very uncommon.
  */
-PRIVATE_EXTERN void _objc_fatal(const char *fmt, ...)
+void _objc_fatal(const char *fmt, ...)
 {
     va_list ap; 
     char *buf1;
@@ -195,7 +211,7 @@ PRIVATE_EXTERN void _objc_fatal(const char *fmt, ...)
  * this routine handles soft runtime errors...like not being able
  * add a category to a class (because it wasn't linked in).
  */
-PRIVATE_EXTERN void _objc_inform(const char *fmt, ...)
+void _objc_inform(const char *fmt, ...)
 {
     va_list ap; 
     char *buf1;
@@ -217,7 +233,7 @@ PRIVATE_EXTERN void _objc_inform(const char *fmt, ...)
  * Like _objc_inform(), but prints the message only in any 
  * forthcoming crash log, not to the console.
  */
-PRIVATE_EXTERN void _objc_inform_on_crash(const char *fmt, ...)
+void _objc_inform_on_crash(const char *fmt, ...)
 {
     va_list ap; 
     char *buf1;
@@ -238,7 +254,7 @@ PRIVATE_EXTERN void _objc_inform_on_crash(const char *fmt, ...)
 /* 
  * Like calling both _objc_inform and _objc_inform_on_crash.
  */
-PRIVATE_EXTERN void _objc_inform_now_and_on_crash(const char *fmt, ...)
+void _objc_inform_now_and_on_crash(const char *fmt, ...)
 {
     va_list ap; 
     char *buf1;
@@ -279,7 +295,7 @@ BREAKPOINT_FUNCTION(
     void _objc_warn_deprecated(void)
 );
 
-PRIVATE_EXTERN void _objc_inform_deprecated(const char *oldf, const char *newf)
+void _objc_inform_deprecated(const char *oldf, const char *newf)
 {
     if (PrintDeprecation) {
         if (newf) {

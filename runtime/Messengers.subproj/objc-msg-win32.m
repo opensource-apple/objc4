@@ -176,13 +176,14 @@ HIT:
 MISS:
         pop esi
         pop edi
-        mov eax, SELF
-        mov eax, isa[eax]
+        mov edx, SELF
+        mov eax, isa[edx]
 
         // MethodTableLookup WORD_RETURN, MSG_SEND
-        push ecx
         push eax
-        call _class_lookupMethodAndLoadCache
+        push ecx
+        push edx
+        call _class_lookupMethodAndLoadCache3
 
         mov edx, kFwdMsgSend
         leave
@@ -249,13 +250,14 @@ HIT:
 MISS:
         pop esi
         pop edi
-        mov eax, SELF
-        mov eax, isa[eax]
+        mov edx, SELF
+        mov eax, isa[edx]
 
         // MethodTableLookup WORD_RETURN, MSG_SEND
-        push ecx
         push eax
-        call _class_lookupMethodAndLoadCache
+        push ecx
+        push edx
+        call _class_lookupMethodAndLoadCache3
 
         mov edx, kFwdMsgSend
         leave
@@ -320,15 +322,16 @@ MISS:
 
         pop esi
         pop edi
-        mov edx, SUPER
-        mov eax, super_receiver[edx]
-        mov SUPER, eax
-        mov eax, super_class[edx]
+        mov eax, SUPER
+        mov edx, super_receiver[eax]
+        mov SUPER, edx
+        mov eax, super_class[eax]
 
         // MethodTableLookup WORD_RETURN, MSG_SENDSUPER
-        push ecx
         push eax
-        call _class_lookupMethodAndLoadCache
+        push ecx
+        push edx
+        call _class_lookupMethodAndLoadCache3
 
         mov edx, kFwdMsgSend
         leave
@@ -388,13 +391,14 @@ HIT:
 MISS:
         pop esi
         pop edi
-        mov eax, SELF_STRET
-        mov eax, isa[eax]
+        mov edx, SELF_STRET
+        mov eax, isa[edx]
 
         // MethodTableLookup WORD_RETURN, MSG_SEND
-        push ecx
         push eax
-        call _class_lookupMethodAndLoadCache
+        push ecx
+        push edx
+        call _class_lookupMethodAndLoadCache3
 
         mov edx, kFwdMsgSendStret
         leave
@@ -460,15 +464,16 @@ MISS:
 
         pop esi
         pop edi
-        mov edx, SUPER_STRET
-        mov eax, super_receiver[edx]
-        mov SUPER_STRET, eax
-        mov eax, super_class[edx]
+        mov eax, SUPER_STRET
+        mov edx, super_receiver[eax]
+        mov SUPER_STRET, edx
+        mov eax, super_class[eax]
 
         // MethodTableLookup WORD_RETURN, MSG_SENDSUPER
-        push ecx
         push eax
-        call _class_lookupMethodAndLoadCache
+        push ecx
+        push edx
+        call _class_lookupMethodAndLoadCache3
 
         mov edx, kFwdMsgSendStret
         leave

@@ -9,31 +9,43 @@ TEST_RUN_OUTPUT
 objc\[\d+\]: \+\[Sub resolveClassMethod:lyingClassMethod\] returned YES, but no new implementation of \+\[Sub lyingClassMethod\] was found
 objc\[\d+\]: \+\[Sub resolveInstanceMethod:lyingInstanceMethod\] returned YES, but no new implementation of -\[Sub lyingInstanceMethod\] was found
 OK: resolve\.m
+OR
+confused by Foundation
+OK: resolve\.m
 END
 */
   
 #include "test.h"
+#include "testroot.i"
 #include <objc/objc.h>
 #include <objc/objc-runtime.h>
 #include <unistd.h>
 
+#if __has_feature(objc_arc)
+
+int main()
+{
+    testwarn("rdar://11368528 confused by Foundation");
+    fprintf(stderr, "confused by Foundation\n");
+    succeed(__FILE__);
+}
+
+#else
+
 static int state = 0;
 
-@interface Super { id isa; } @end
+@interface Super : TestRoot @end
 @interface Sub : Super @end
 
 
 @implementation Super
-+class { return self; }
 +(void)initialize { 
     if (self == [Super class]) {
         testassert(state == 1);
         state = 2;
     }
 }
-+new { return class_createInstance(self, 0); }
--(void)dealloc { object_dispose(self); }
--forward:(SEL)sel :(marg_list)args
++(id)forward:(SEL)sel :(marg_list)__unused args
 {
     if (sel == @selector(missingClassMethod)) {
         testassert(state == 21  ||  state == 25  ||  state == 80);
@@ -46,7 +58,13 @@ static int state = 0;
         if (state == 31) state = 32;
         if (state == 35) state = 36;
         return nil;
-    } else if (sel == @selector(missingInstanceMethod)) {
+    }
+    fail("+forward:: shouldn't be called with sel %s", sel_getName(sel));
+    return nil;
+}
+-(id)forward:(SEL)sel :(marg_list)__unused args
+{
+    if (sel == @selector(missingInstanceMethod)) {
         testassert(state == 61  ||  state == 65);
         if (state == 61) state = 62;
         if (state == 65) state = 66;
@@ -57,27 +75,25 @@ static int state = 0;
         if (state == 75) state = 76;
         return nil;
     }
-    fail("forward:: shouldn't be called (sel %s)", sel_getName(sel));
-    return (id)args;  // unused
+    fail("-forward:: shouldn't be called with sel %s", sel_getName(sel));
+    return nil;
 }
 @end
 
 
-static id classMethod_c(id self, SEL sel)
+static id classMethod_c(id __unused self, SEL __unused sel)
 {
     testassert(state == 4  ||  state == 10);
     if (state == 4) state = 5;
     if (state == 10) state = 11;
-    self = (id)sel;  // unused
     return [Super class];
 }
 
-static id instanceMethod_c(id self, SEL sel)
+static id instanceMethod_c(id __unused self, SEL __unused sel)
 {
     testassert(state == 41  ||  state == 50);
     if (state == 41) state = 42;
     if (state == 50) state = 51;
-    self = (id)sel;  // unused
     return [Sub class];
 }
 
@@ -101,7 +117,7 @@ static id instanceMethod_c(id self, SEL sel)
     if (sel == @selector(classMethod)) {
         testassert(state == 3);
         state = 4;
-        class_addMethod(self->isa, sel, (IMP)&classMethod_c, "");
+        class_addMethod(object_getClass(self), sel, (IMP)&classMethod_c, "");
         return YES;
     } else if (sel == @selector(missingClassMethod)) {
         testassert(state == 20);
@@ -143,16 +159,16 @@ static id instanceMethod_c(id self, SEL sel)
 @end
 
 @interface Super (MissingMethods)
-+missingClassMethod;
++(id)missingClassMethod;
 @end
 
 @interface Sub (ResolvedMethods)
-+classMethod;
--instanceMethod;
-+missingClassMethod;
--missingInstanceMethod;
-+lyingClassMethod;
--lyingInstanceMethod;
++(id)classMethod;
+-(id)instanceMethod;
++(id)missingClassMethod;
+-(id)missingInstanceMethod;
++(id)lyingClassMethod;
+-(id)lyingInstanceMethod;
 @end
 
 
@@ -160,11 +176,14 @@ int main()
 {
     Sub *s;
     id ret;
+
+    // Be ready for ARC to retain the class object and call +initialize early
+    state = 1;
+
     Class dup = objc_duplicateClass(objc_getClass("Sub"), "Sub_copy", 0);
 
     // Resolve a class method
-    // +initialize should fire first
-    state = 1;
+    // +initialize should fire first (if it hasn't already)
     ret = [Sub classMethod];
     testassert(state == 5);
     testassert(ret == [Super class]);
@@ -176,7 +195,7 @@ int main()
     testassert(state == 11);
     testassert(ret == [Super class]);
 
-    _objc_flush_caches([Sub class]->isa);
+    _objc_flush_caches(object_getClass([Sub class]));
 
     // Call a method that won't get resolved
     state = 20;
@@ -191,7 +210,7 @@ int main()
     testassert(state == 26);
     testassert(ret == nil);
 
-    _objc_flush_caches([Sub class]->isa);
+    _objc_flush_caches(object_getClass([Sub class]));
 
     // Call a method that won't get resolved but the resolver lies about it
     state = 30;
@@ -206,7 +225,7 @@ int main()
     testassert(state == 36);
     testassert(ret == nil);
 
-    _objc_flush_caches([Sub class]->isa);
+    _objc_flush_caches(object_getClass([Sub class]));
 
 
     // Resolve an instance method
@@ -260,7 +279,7 @@ int main()
     ret = [Super missingClassMethod];
     testassert(state == 81);
     testassert(ret == nil);
-    [s dealloc];
+    RELEASE_VAR(s);
 
     // Resolve an instance method on a class duplicated before resolving
     s = [dup new];
@@ -275,8 +294,11 @@ int main()
     ret = [s instanceMethod];
     testassert(state == 51);
     testassert(ret == [Sub class]);
-    [s dealloc];
+    RELEASE_VAR(s);
 
     succeed(__FILE__);
     return 0;
 }
+
+#endif
+

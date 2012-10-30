@@ -1,15 +1,14 @@
 // TEST_CONFIG
 
 #include "test.h"
+#include "testroot.i"
 #include <objc/runtime.h>
 #include <objc/message.h>
 
 static int state = 0;
 
-@interface Super { id isa; } @end
+@interface Super : TestRoot @end
 @implementation Super
-+class { return self; }
-+(void)initialize { } 
 +(void)classMethod { state = 1; }
 -(void)instanceMethod { state = 4; } 
 +(void)classMethodSuperOnly { state = 3; }
@@ -22,6 +21,7 @@ static int state = 0;
 -(void)instanceMethod { state = 5; } 
 @end
 
+typedef void (*imp_t)(id, SEL);
 
 int main()
 {
@@ -40,9 +40,9 @@ int main()
     testassert(m);
     testassert(sel == method_getName(m));
     imp = method_getImplementation(m);
-    testassert(imp == class_getMethodImplementation(Super_cls->isa, sel));
+    testassert(imp == class_getMethodImplementation(object_getClass(Super_cls), sel));
     state = 0;
-    (*imp)(Super_cls, sel);
+    (*(imp_t)imp)(Super_cls, sel);
     testassert(state == 1);
 
     sel = sel_registerName("classMethod");
@@ -50,9 +50,9 @@ int main()
     testassert(m);
     testassert(sel == method_getName(m));
     imp = method_getImplementation(m);
-    testassert(imp == class_getMethodImplementation(Sub_cls->isa, sel));
+    testassert(imp == class_getMethodImplementation(object_getClass(Sub_cls), sel));
     state = 0;
-    (*imp)(Sub_cls, sel);
+    (*(imp_t)imp)(Sub_cls, sel);
     testassert(state == 2);
 
     sel = sel_registerName("classMethodSuperOnly");
@@ -60,9 +60,9 @@ int main()
     testassert(m);
     testassert(sel == method_getName(m));
     imp = method_getImplementation(m);
-    testassert(imp == class_getMethodImplementation(Sub_cls->isa, sel));
+    testassert(imp == class_getMethodImplementation(object_getClass(Sub_cls), sel));
     state = 0;
-    (*imp)(Sub_cls, sel);
+    (*(imp_t)imp)(Sub_cls, sel);
     testassert(state == 3);
     
     sel = sel_registerName("instanceMethod");
@@ -73,7 +73,7 @@ int main()
     testassert(imp == class_getMethodImplementation(Super_cls, sel));
     state = 0;
     buf[0] = Super_cls;
-    (*imp)((Super *)buf, sel);
+    (*(imp_t)imp)(objc_unretainedObject(buf), sel);
     testassert(state == 4);
 
     sel = sel_registerName("instanceMethod");
@@ -84,7 +84,7 @@ int main()
     testassert(imp == class_getMethodImplementation(Sub_cls, sel));
     state = 0;
     buf[0] = Sub_cls;
-    (*imp)((Sub *)buf, sel);
+    (*(imp_t)imp)(objc_unretainedObject(buf), sel);
     testassert(state == 5);
 
     sel = sel_registerName("instanceMethodSuperOnly");
@@ -95,12 +95,12 @@ int main()
     testassert(imp == class_getMethodImplementation(Sub_cls, sel));
     state = 0;
     buf[0] = Sub_cls;
-    (*imp)((Sub *)buf, sel);
+    (*(imp_t)imp)(objc_unretainedObject(buf), sel);
     testassert(state == 6);
 
     // check class_getClassMethod(cls) == class_getInstanceMethod(cls->isa)
     sel = sel_registerName("classMethod");
-    testassert(class_getClassMethod(Sub_cls, sel) == class_getInstanceMethod(Sub_cls->isa, sel));
+    testassert(class_getClassMethod(Sub_cls, sel) == class_getInstanceMethod(object_getClass(Sub_cls), sel));
 
     sel = sel_registerName("nonexistent");
     testassert(! class_getInstanceMethod(Sub_cls, sel));

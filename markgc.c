@@ -24,12 +24,14 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#import <stdio.h>
+#include <stdio.h>
+#include <stdbool.h>
 #include <fcntl.h>
-#import <sys/stat.h>
-#import <mach-o/fat.h>
-#import <mach-o/arch.h>
-#import <mach-o/loader.h>
+#include <limits.h>
+#include <sys/stat.h>
+#include <mach-o/fat.h>
+#include <mach-o/arch.h>
+#include <mach-o/loader.h>
 
 // from "objc-private.h"
 // masks for objc_image_info.flags
@@ -38,10 +40,6 @@
 #define OBJC_IMAGE_REQUIRES_GC (1<<2)
 #define OBJC_IMAGE_OPTIMIZED_BY_DYLD (1<<3)
 #define OBJC_IMAGE_SUPPORTS_COMPACTION (1<<4)
-
-typedef char bool;
-#define true 1
-#define false 0
 
 bool debug;
 bool verbose;
@@ -145,7 +143,7 @@ uint32_t iiflags(struct imageInfo *ii, size_t size, bool needsFlip) {
         if (needsFlip) newvalue = OSSwapInt32(newvalue);
         patchFile(newvalue, (char*)(&ii->flags) - FileBase);
     }
-    for(int niis = 1; niis < size/sizeof(struct imageInfo); ++niis) {
+    for(unsigned niis = 1; niis < size/sizeof(struct imageInfo); ++niis) {
         if (needsFlip) ii[niis].flags = OSSwapInt32(ii[niis].flags);
         if (ii[niis].flags != flags) {
             // uh, oh.
@@ -333,7 +331,7 @@ void doofile(void *start, size_t size, struct gcinfo *gcip) {
     if (debug) printf("filetype -> %d\n", mh->filetype);
     if (debug) printf("ncmds -> %d\n", mh->ncmds);
     struct load_command *lc = (is32 ? (struct load_command *)(mh + 1) : (struct load_command *)((struct mach_header_64 *)start + 1));
-    int ncmds;
+    unsigned ncmds;
     for (ncmds = 0; ncmds < mh->ncmds; ++ncmds) {
         lc = doloadcommand(start, lc, isFlipped, is32, gcip);
     }
@@ -383,7 +381,7 @@ void dofat(void *start) {
         needsFlip = true;
     }
     if (debug) printf("%d architectures\n", fh->nfat_arch);
-    int narchs;
+    unsigned narchs;
     struct fat_arch *arch_ptr = (struct fat_arch *)(fh + 1);
     for (narchs = 0; narchs < fh->nfat_arch; ++narchs) {
         if (debug) printf("doing arch %d\n", narchs);
@@ -411,6 +409,11 @@ bool openFile(const char *filename) {
         close(fd);
         return false;
     }
+	if ((sizeof(size_t) == 4) && ((size_t)statb.st_size > SIZE_T_MAX)) {
+        printf("couldn't malloc %llu bytes\n", statb.st_size);
+        close(fd);
+        return false;
+	}
     FileSize = (size_t)statb.st_size;
     FileBase = malloc(FileSize);
     if (!FileBase) {
@@ -418,8 +421,8 @@ bool openFile(const char *filename) {
         close(fd);
         return false;
     }
-    off_t readsize = read(fd, FileBase, FileSize);
-    if (readsize != FileSize) {
+    ssize_t readsize = read(fd, FileBase, FileSize);
+    if ((readsize == -1) || ((size_t)readsize != FileSize)) {
         printf("read %ld bytes, wanted %ld\n", (size_t)readsize, FileSize);
         close(fd);
         return false;

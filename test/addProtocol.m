@@ -22,7 +22,7 @@ END
 int main()
 {
     Protocol *proto, *proto2;
-    Protocol * const *protolist;
+    Protocol * __unsafe_unretained *protolist;
     struct objc_method_description *desclist;
     objc_property_t *proplist;
     unsigned int count;
@@ -96,7 +96,7 @@ int main()
     testassert(protolist[0] == @protocol(SuperProto)  &&  
                protolist[1] == @protocol(SuperProto2)  &&  
                protolist[2] == proto2);
-    free((void*)protolist);
+    free(protolist);
 
     testassert(protocol_conformsToProtocol(proto, proto2));
     testassert(protocol_conformsToProtocol(proto, @protocol(SuperProto)));
@@ -185,8 +185,8 @@ int main()
 
     // NULL protocols ignored
 
-    protocol_addProtocol((Protocol *)1, NULL);
-    protocol_addProtocol(NULL, (Protocol *)1);
+    protocol_addProtocol((Protocol *)objc_unretainedObject((void*)1), NULL);
+    protocol_addProtocol(NULL, (Protocol *)objc_unretainedObject((void*)1));
     protocol_addProtocol(NULL, NULL);
     protocol_addMethodDescription(NULL, @selector(foo), "", YES, YES);
 

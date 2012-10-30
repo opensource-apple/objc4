@@ -27,33 +27,72 @@
 
 #if __OBJC2__
 
-#import "Object.h"
+#include "objc-private.h"
 
-@implementation Object 
+__OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_NA)
+@interface Object { 
+    Class isa; 
+} 
+@end
 
-+ initialize
+@implementation Object
+
++ (id)initialize
 {
     return self; 
 }
 
-+ class 
++ (id)class
 {
     return self;
 }
 
+-(id) retain
+{
+    return _objc_rootRetain(self);
+}
+
+-(void) release
+{
+    _objc_rootRelease(self);
+}
+
+-(id) autorelease
+{
+    return _objc_rootAutorelease(self);
+}
+
++(id) retain
+{
+    return self;
+}
+
++(void) release
+{
+}
+
++(id) autorelease
+{
+    return self;
+}
+
+
 @end
 
+
+// __OBJC2__
 #else
+// not __OBJC2__
 
-#import <stdlib.h>
-#import <stdarg.h> 
-#import <string.h> 
-#import <malloc/malloc.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <string.h>
+#include <malloc/malloc.h>
 
-#import "Object.h"
-#import "Protocol.h"
-#import "objc-runtime.h"
-#import "objc-auto.h"
+#include "Object.h"
+#include "Protocol.h"
+#include "objc-runtime.h"
+#include "objc-auto.h"
 
 // hack
 extern void _objc_error(id, const char *, va_list);
@@ -68,25 +107,25 @@ static const char
 	_errDoesntRecognize[] = "does not recognize selector %c%s";
 
 
-@implementation Object 
+@implementation Object
 
 
-+ initialize
++ (id)initialize
 {
 	return self; 
 }
 
-- awake 
+- (id)awake
 {
 	return self; 
 }
 
-+ poseAs: aFactory
++ (id)poseAs: aFactory
 { 
 	return class_poseAs(self, aFactory); 
 }
 
-+ new
++ (id)new
 {
 	id newObject = (*_alloc)((Class)self, 0);
 	Class metaClass = self->isa;
@@ -96,17 +135,17 @@ static const char
 	    return newObject;
 }
 
-+ alloc
++ (id)alloc
 {
 	return (*_zoneAlloc)((Class)self, 0, malloc_default_zone()); 
 }
 
-+ allocFromZone:(void *) z
++ (id)allocFromZone:(void *) z
 {
 	return (*_zoneAlloc)((Class)self, 0, z); 
 }
 
-- init
+- (id)init
 {
     return self;
 }
@@ -131,27 +170,28 @@ static const char
 	return anObject == self; 
 }
 
-- free 
+- (id)free
 { 
 	return (*_dealloc)(self); 
 }
 
-+ free
++ (id)free
 {
 	return nil; 
 }
 
-- self
+- (id)self
 {
 	return self; 
 }
 
-- class
+
+-(id)class
 {
 	return (id)isa; 
 }
 
-+ class 
++ (id)class
 {
 	return self;
 }
@@ -162,12 +202,12 @@ static const char
 	return z ? z : malloc_default_zone();
 }
 
-+ superclass 
++ (id)superclass
 { 
 	return class_getSuperclass((Class)self); 
 }
 
-- superclass 
+- (id)superclass
 { 
 	return class_getSuperclass(isa); 
 }
@@ -177,7 +217,7 @@ static const char
 	return class_getVersion((Class)self);
 }
 
-+ setVersion: (int) aVersion
++ (id)setVersion: (int) aVersion
 {
         class_setVersion((Class)self, aVersion);
 	return self;
@@ -206,82 +246,82 @@ static const char
 	return NO;
 }
 
-- (BOOL)isMemberOfClassNamed:(const char *)aClassName 
+- (BOOL)isMemberOfClassNamed:(const char *)aClassName
 {
 	return strcmp(aClassName, class_getName(isa)) == 0;
 }
 
-+ (BOOL)instancesRespondTo:(SEL)aSelector 
++ (BOOL)instancesRespondTo:(SEL)aSelector
 {
 	return class_respondsToMethod((Class)self, aSelector);
 }
 
-- (BOOL)respondsTo:(SEL)aSelector 
+- (BOOL)respondsTo:(SEL)aSelector
 {
 	return class_respondsToMethod(isa, aSelector);
 }
 
-- copy 
+- (id)copy
 {
 	return [self copyFromZone: [self zone]];
 }
 
-- copyFromZone:(void *)z
+- (id)copyFromZone:(void *)z
 {
 	return (*_zoneCopy)(self, 0, z); 
 }
 
-- (IMP)methodFor:(SEL)aSelector 
+- (IMP)methodFor:(SEL)aSelector
 {
 	return class_lookupMethod(isa, aSelector);
 }
 
-+ (IMP)instanceMethodFor:(SEL)aSelector 
++ (IMP)instanceMethodFor:(SEL)aSelector
 {
 	return class_lookupMethod(self, aSelector);
 }
 
-- perform:(SEL)aSelector 
+- (id)perform:(SEL)aSelector
 { 
 	if (aSelector)
-		return objc_msgSend(self, aSelector); 
+		return ((id(*)(id, SEL))objc_msgSend)(self, aSelector); 
 	else
 		return [self error:_errBadSel, sel_getName(_cmd), aSelector];
 }
 
-- perform:(SEL)aSelector with:anObject 
+- (id)perform:(SEL)aSelector with:anObject
 {
 	if (aSelector)
-		return objc_msgSend(self, aSelector, anObject); 
+		return ((id(*)(id, SEL, id))objc_msgSend)(self, aSelector, anObject); 
 	else
 		return [self error:_errBadSel, sel_getName(_cmd), aSelector];
 }
 
-- perform:(SEL)aSelector with:obj1 with:obj2 
+- (id)perform:(SEL)aSelector with:obj1 with:obj2
 {
 	if (aSelector)
-		return objc_msgSend(self, aSelector, obj1, obj2); 
+		return ((id(*)(id, SEL, id, id))objc_msgSend)(self, aSelector, obj1, obj2); 
 	else
 		return [self error:_errBadSel, sel_getName(_cmd), aSelector];
 }
 
-- subclassResponsibility:(SEL)aSelector 
+- (id)subclassResponsibility:(SEL)aSelector
 {
 	return [self error:_errShouldHaveImp, sel_getName(aSelector)];
 }
 
-- notImplemented:(SEL)aSelector
+- (id)notImplemented:(SEL)aSelector
 {
 	return [self error:_errLeftUndone, sel_getName(aSelector)];
 }
 
-- doesNotRecognize:(SEL)aMessage
+- (id)doesNotRecognize:(SEL)aMessage
 {
 	return [self error:_errDoesntRecognize, 
 		class_isMetaClass(isa) ? '+' : '-', sel_getName(aMessage)];
 }
 
-- error:(const char *)aCStr, ... 
+- (id)error:(const char *)aCStr, ... 
 {
 	va_list ap;
 	va_start(ap,aCStr); 
@@ -295,31 +335,31 @@ static const char
 {
 }
 
-- write:(void *) stream 
+- (id)write:(void *) stream
 {
 	return self;
 }
 
-- read:(void *) stream 
+- (id)read:(void *) stream
 {
 	return self;
 }
 
-- forward: (SEL) sel : (marg_list) args 
+- (id)forward: (SEL) sel : (marg_list) args
 {
     return [self doesNotRecognize: sel];
 }
 
 /* this method is not part of the published API */
 
-- (unsigned)methodArgSize:(SEL)sel 
+- (unsigned)methodArgSize:(SEL)sel
 {
     Method	method = class_getInstanceMethod((Class)isa, sel);
     if (! method) return 0;
     return method_getSizeOfArguments(method);
 }
 
-- performv: (SEL) sel : (marg_list) args 
+- (id)performv: (SEL) sel : (marg_list) args
 {
     unsigned	size;
 
@@ -406,7 +446,6 @@ static const char
         while ( (mlist = class_nextMethodList( cls, &iterator )) ) {
             for (i = 0; i < mlist->method_count; i++)
                 if (mlist->method_list[i].method_name == aSelector) {
-		    struct objc_method_description *m;
 		    m = (struct objc_method_description *)&mlist->method_list[i];
                     return m;
 		}
@@ -467,12 +506,12 @@ static const char
 
 /* Obsolete methods (for binary compatibility only). */
 
-+ superClass
++ (id)superClass
 {
 	return [self superclass];
 }
 
-- superClass
+- (id)superClass
 {
 	return [self superclass];
 }
@@ -482,7 +521,7 @@ static const char
 	return [self isKindOfClassNamed: aClassName];
 }
 
-- (BOOL)isMemberOfGivenName:(const char *)aClassName 
+- (BOOL)isMemberOfGivenName:(const char *)aClassName
 {
 	return [self isMemberOfClassNamed: aClassName];
 }
@@ -497,12 +536,12 @@ static const char
   return [self descriptionForInstanceMethod: aSelector];
 }
 
-- findClass:(const char *)aClassName
+- (id)findClass:(const char *)aClassName
 {
 	return objc_lookUpClass(aClassName);
 }
 
-- shouldNotImplement:(SEL)aSelector
+- (id)shouldNotImplement:(SEL)aSelector
 {
 	return [self error:_errShouldNotImp, sel_getName(aSelector)];
 }

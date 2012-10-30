@@ -21,14 +21,14 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#import "objc-weak.h"
-#import "objc-os.h"
-#import "objc-private.h"
+#include "objc-weak.h"
+#include "objc-os.h"
+#include "objc-private.h"
 
-#import <stdint.h>
-#import <stdbool.h>
-#import <sys/types.h>
-#import <libkern/OSAtomic.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <sys/types.h>
+#include <libkern/OSAtomic.h>
 
 
 template <typename T> struct WeakAllocator {
@@ -90,19 +90,19 @@ public:
     //
     // Accessors
     //
-    inline       Range&   range()                                       { return *this; }
-    inline       void     *address()                              const { return _address; }
-    inline       void     *end()                                  const { return _end; }
-    inline const size_t   size()                                  const { return (uintptr_t)_end - (uintptr_t)_address; }
-    inline       void     set_address(void *address)                    { _address = address; }
-    inline       void     set_end(void *end)                            { _end = end; }
-    inline       void     set_size(size_t size)                         { _end = displace(_address, size); }
-    inline       void     set_range(void *address, void *end)           { _address = address; _end = end; }
-    inline       void     set_range(void *address, size_t size)         { _address = address; _end = displace(address, size); }
-    inline       void     set_range(Range range)                        { _address = range.address(); _end = range.end(); }
-    inline       void     adjust_address(intptr_t delta)                { _address = displace(_address, delta); }
-    inline       void     adjust_end(intptr_t delta)                    { _end = displace(_end, delta); }
-    inline       void     adjust(intptr_t delta)                        { _address = displace(_address, delta), _end = displace(_end, delta); }
+    inline Range& range()                                       { return *this; }
+    inline void   *address()                              const { return _address; }
+    inline void   *end()                                  const { return _end; }
+    inline size_t size()                                  const { return (uintptr_t)_end - (uintptr_t)_address; }
+    inline void   set_address(void *address)                    { _address = address; }
+    inline void   set_end(void *end)                            { _end = end; }
+    inline void   set_size(size_t size)                         { _end = displace(_address, size); }
+    inline void   set_range(void *address, void *end)           { _address = address; _end = end; }
+    inline void   set_range(void *address, size_t size)         { _address = address; _end = displace(address, size); }
+    inline void   set_range(Range range)                        { _address = range.address(); _end = range.end(); }
+    inline void   adjust_address(intptr_t delta)                { _address = displace(_address, delta); }
+    inline void   adjust_end(intptr_t delta)                    { _end = displace(_end, delta); }
+    inline void   adjust(intptr_t delta)                        { _address = displace(_address, delta), _end = displace(_end, delta); }
     
     
     //
@@ -119,22 +119,22 @@ public:
     // Returns true if the specified address is in range.
     // This form reduces the number of branches.  Works well with invariant lo and hi.
     //
-    static inline const bool in_range(void *lo, void *hi, void *address) {
+    static inline bool in_range(void *lo, void *hi, void *address) {
         uintptr_t lo_as_int = (uintptr_t)lo;
         uintptr_t hi_as_int = (uintptr_t)hi;
         uintptr_t diff = hi_as_int - lo_as_int;
         uintptr_t address_as_int = (uintptr_t)address;
         return (address_as_int - lo_as_int) < diff;
     }
-    inline const bool in_range(void *address) const { return in_range(_address, _end, address); }
+    inline bool in_range(void *address) const { return in_range(_address, _end, address); }
     
     
     //
     // operator ==
     //
     // Used to locate entry in list or hash table (use is_range for exaxt match.)
-    inline const bool operator==(const Range *range)  const { return _address == range->_address; }
-    inline const bool operator==(const Range &range)  const { return _address == range._address; }
+    inline bool operator==(const Range *range)  const { return _address == range->_address; }
+    inline bool operator==(const Range &range)  const { return _address == range._address; }
     
 
     //
@@ -142,7 +142,7 @@ public:
     //
     // Return true if the ranges are equivalent.
     //
-    inline const bool is_range(const Range& range) const { return _address == range._address && _end == range._end; }
+    inline bool is_range(const Range& range) const { return _address == range._address && _end == range._end; }
     
     
     //
@@ -358,9 +358,9 @@ static void weak_entry_remove_no_lock(weak_table_t *weak_table, weak_entry_t *en
     do {
         index++; if (index == table_size) index = 0;
         if (!weak_entries[index].referent) return;
-        weak_entry_t entry = weak_entries[index];
+        weak_entry_t slot = weak_entries[index];
         weak_entries[index].referent = NULL;
-        weak_entry_insert_no_lock(weak_table, &entry);
+        weak_entry_insert_no_lock(weak_table, &slot);
     } while (index != hash_index);
 }
 
@@ -418,7 +418,7 @@ static weak_entry_t *weak_entry_for_referent(weak_table_t *weak_table, id refere
 // Does not zero referrer.
 // fixme currently requires old referent value to be passed in (lame)
 // fixme unregistration should be automatic if referrer is collected
-PRIVATE_EXTERN void weak_unregister_no_lock(weak_table_t *weak_table, id referent, id *referrer)
+void weak_unregister_no_lock(weak_table_t *weak_table, id referent, id *referrer)
 {
     weak_entry_t *entry;
 
@@ -434,7 +434,8 @@ PRIVATE_EXTERN void weak_unregister_no_lock(weak_table_t *weak_table, id referen
     // value not change.
 }
 
-PRIVATE_EXTERN void 
+
+void 
 arr_clear_deallocating(weak_table_t *weak_table, id referent) {
     {
         weak_entry_t *entry = weak_entry_for_referent(weak_table, referent);
@@ -444,7 +445,7 @@ arr_clear_deallocating(weak_table_t *weak_table, id referent) {
             return;
         }
         // zero out references
-        for (int i = 0; i < entry->referrers.num_allocated; ++i) {
+        for (size_t i = 0; i < entry->referrers.num_allocated; ++i) {
             id *referrer = entry->referrers.refs[i].referrer;
             if (referrer) {
                 if (*referrer == referent) {
@@ -462,7 +463,7 @@ arr_clear_deallocating(weak_table_t *weak_table, id referent) {
 }
 
 
-PRIVATE_EXTERN id weak_register_no_lock(weak_table_t *weak_table, id referent, id *referrer) {
+id weak_register_no_lock(weak_table_t *weak_table, id referent, id *referrer) {
     if (referent && !OBJC_IS_TAGGED_PTR(referent)) {
         // ensure that the referenced object is viable
         BOOL (*allowsWeakReference)(id, SEL) = (BOOL(*)(id, SEL))
@@ -503,7 +504,7 @@ PRIVATE_EXTERN id weak_register_no_lock(weak_table_t *weak_table, id referent, i
 
 // Automated Retain Release (ARR) support
 
-PRIVATE_EXTERN id 
+id 
 arr_read_weak_reference(weak_table_t *weak_table, id *referrer) {
     id referent;
     // find entry and mark that it needs retaining

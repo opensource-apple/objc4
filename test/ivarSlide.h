@@ -1,14 +1,4 @@
-@interface Base {
-  @public
-    id isa;
-}
-
-+class;
-+new;
--(void)dealloc;
-@end
-
-@interface Super : Base { 
+@interface Super : TestRoot { 
   @public 
 #if OLD
     // nothing
@@ -19,7 +9,7 @@
 @end
 
 
-@interface ShrinkingSuper : Base {
+@interface ShrinkingSuper : TestRoot {
   @public
 #if OLD
     id superIvar[5];
@@ -31,7 +21,7 @@
 @end;
 
 
-@interface MoreStrongSuper : Base {
+@interface MoreStrongSuper : TestRoot {
   @public
 #if OLD
     void *superIvar;
@@ -42,7 +32,7 @@
 @end;
 
 
-@interface MoreWeakSuper : Base {
+@interface MoreWeakSuper : TestRoot {
   @public
 #if OLD
     id superIvar;
@@ -52,7 +42,7 @@
 }
 @end;
 
-@interface MoreWeak2Super : Base {
+@interface MoreWeak2Super : TestRoot {
   @public
 #if OLD
     void *superIvar;
@@ -62,7 +52,7 @@
 }
 @end;
 
-@interface LessStrongSuper : Base {
+@interface LessStrongSuper : TestRoot {
   @public
 #if OLD
     id superIvar;
@@ -72,7 +62,7 @@
 }
 @end;
 
-@interface LessWeakSuper : Base {
+@interface LessWeakSuper : TestRoot {
   @public
 #if OLD
     __weak id superIvar;
@@ -82,7 +72,7 @@
 }
 @end;
 
-@interface LessWeak2Super : Base {
+@interface LessWeak2Super : TestRoot {
   @public
 #if OLD
     __weak id superIvar;
@@ -92,7 +82,7 @@
 }
 @end;
 
-@interface NoGCChangeSuper : Base {
+@interface NoGCChangeSuper : TestRoot {
   @public
     intptr_t d;
     char superc1;
@@ -104,7 +94,7 @@
 }
 @end
 
-@interface RunsOf15 : Base {
+@interface RunsOf15 : TestRoot {
   @public
     id scan1;
     intptr_t skip15[15];

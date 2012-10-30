@@ -1,19 +1,11 @@
 // TEST_CONFIG
 
 #include "test.h"
-
+#include "testroot.i"
 #include <objc/runtime.h>
 
 
-@interface Super { id isa; } @end
-@implementation Super 
-+(void)initialize { } 
-+class { return self; }
-+new { return class_createInstance(self, 0); }
--(void)dealloc { object_dispose(self); }
-@end
-
-@interface Sub1 : Super {
+@interface Sub1 : TestRoot {
     // id isa;  // 0..4
     BOOL b;     // 4..5
 }
@@ -41,25 +33,27 @@
 
 int main()
 {
-    testassert(sizeof(id) == class_getInstanceSize([Super class]));
+    testassert(sizeof(id) == class_getInstanceSize([TestRoot class]));
     testassert(2*sizeof(id) == class_getInstanceSize([Sub1 class]));
     testassert(3*sizeof(id) == class_getInstanceSize([Sub2 class]));
     testassert(4*sizeof(id) == class_getInstanceSize([Sub3 class]));
 
+#if !__has_feature(objc_arc)
     id o;
 
-    o = [Super new];
-    testassert(object_getIndexedIvars(o) == (char *)o + class_getInstanceSize(o->isa));
-    [o dealloc];
+    o = [TestRoot new];
+    testassert(object_getIndexedIvars(o) == (char *)o + class_getInstanceSize(object_getClass(o)));
+    RELEASE_VAR(o);
     o = [Sub1 new];
-    testassert(object_getIndexedIvars(o) == (char *)o + class_getInstanceSize(o->isa));
-    [o dealloc];
+    testassert(object_getIndexedIvars(o) == (char *)o + class_getInstanceSize(object_getClass(o)));
+    RELEASE_VAR(o);
     o = [Sub2 new];
-    testassert(object_getIndexedIvars(o) == (char *)o + class_getInstanceSize(o->isa));
-    [o dealloc];
+    testassert(object_getIndexedIvars(o) == (char *)o + class_getInstanceSize(object_getClass(o)));
+    RELEASE_VAR(o);
     o = [Sub3 new];
-    testassert(object_getIndexedIvars(o) == (char *)o + class_getInstanceSize(o->isa));
-    [o dealloc];
+    testassert(object_getIndexedIvars(o) == (char *)o + class_getInstanceSize(object_getClass(o)));
+    RELEASE_VAR(o);
+#endif
 
     succeed(__FILE__);
 }

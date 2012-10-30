@@ -33,37 +33,22 @@
 #include "objc-auto.h"
 #include "objc-sel-set.h"
 
-#if SUPPORT_BUILTINS
-#include "objc-selopt.h"
+#if SUPPORT_PREOPT
+#include <objc-shared-cache.h>
+using namespace objc_opt;
+static const objc_selopt_t *builtins = NULL;
 #endif
 
 __BEGIN_DECLS
 
-#if SUPPORT_BUILTINS
-// opt: the actual opt used at runtime
-// builtins: the actual selector table used at runtime
-// _objc_opt_data: opt data possibly written by dyld
-// empty_opt_data: empty data to use if dyld didn't cooperate or DisablePreopt
-using namespace objc_opt;
-static const objc_selopt_t *builtins = NULL;
-static const objc_opt_t *opt = NULL;
-static BOOL preoptimized;
-
-extern const objc_opt_t _objc_opt_data;  // in __TEXT, __objc_selopt
-static const uint32_t empty_opt_data[] = OPT_INITIALIZER;
-#endif
-
-
-#define NUM_NONBUILTIN_SELS 3500
-// objc_sel_set grows at 3571, 5778, 9349. 
-// Most apps use 2000..7000 extra sels. Most apps will grow zero to two times.
+static size_t SelrefCount = 0;
 
 static const char *_objc_empty_selector = "";
 static struct __objc_sel_set *_objc_selectors = NULL;
 
 
-#if SUPPORT_BUILTINS
-PRIVATE_EXTERN void dump_builtins(void)
+#if SUPPORT_PREOPT
+void dump_builtins(void)
 {
     uint32_t occupied = builtins->occupied;
     uint32_t capacity = builtins->capacity;
@@ -83,10 +68,13 @@ PRIVATE_EXTERN void dump_builtins(void)
     const int32_t *offsets = builtins->offsets();
     uint32_t i;
     for (i = 0; i < capacity; i++) {
-        if (offsets[i] != offsetof(objc_selopt_t, zero)) {
+        if (offsets[i] != offsetof(objc_stringhash_t, zero)) {
             const char *str = (const char *)builtins + offsets[i];
             _objc_inform("BUILTIN SELECTORS:     %6d: %+8d %s", 
                          i, offsets[i], str);
+            if ((const char *)sel_registerName(str) != str) {
+                _objc_fatal("bogus");
+            }
         } else {
             _objc_inform("BUILTIN SELECTORS:     %6d: ", i);
         }
@@ -108,7 +96,8 @@ static SEL _objc_search_builtins(const char *key)
 #endif
     if ('\0' == *key) return (SEL)_objc_empty_selector;
 
-#if SUPPORT_BUILTINS
+#if SUPPORT_PREOPT
+    assert(builtins);
     return (SEL)builtins->get(key);
 #endif
 
@@ -167,7 +156,7 @@ static SEL __sel_registerName(const char *name, int lock, int copy)
     if (lock) rwlock_write(&selLock);
 
     if (!_objc_selectors) {
-        _objc_selectors = __objc_sel_set_create(NUM_NONBUILTIN_SELS);
+        _objc_selectors = __objc_sel_set_create(SelrefCount);
     }
     if (lock) {
         // Rescan in case it was added while we dropped the lock
@@ -190,16 +179,16 @@ SEL sel_registerName(const char *name) {
     return __sel_registerName(name, 1, 1);     // YES lock, YES copy
 }
 
-PRIVATE_EXTERN SEL sel_registerNameNoLock(const char *name, BOOL copy) {
+SEL sel_registerNameNoLock(const char *name, BOOL copy) {
     return __sel_registerName(name, 0, copy);  // NO lock, maybe copy
 }
 
-PRIVATE_EXTERN void sel_lock(void)
+void sel_lock(void)
 {
     rwlock_write(&selLock);
 }
 
-PRIVATE_EXTERN void sel_unlock(void)
+void sel_unlock(void)
 {
     rwlock_unlock_write(&selLock);
 }
@@ -225,9 +214,9 @@ BOOL sel_isEqual(SEL lhs, SEL rhs)
 * Return YES if this image's selector fixups are valid courtesy 
 * of the dyld shared cache.
 **********************************************************************/
-PRIVATE_EXTERN BOOL sel_preoptimizationValid(const header_info *hi)
+BOOL sel_preoptimizationValid(const header_info *hi)
 {
-#if !SUPPORT_BUILTINS
+#if !SUPPORT_PREOPT
 
     return NO;
 
@@ -239,7 +228,7 @@ PRIVATE_EXTERN BOOL sel_preoptimizationValid(const header_info *hi)
 # endif
 
     // preoptimization disabled for some reason
-    if (!preoptimized) return NO;
+    if (!isPreoptimized()) return NO;
 
     // image not from shared cache, or not fixed inside shared cache
     if (!_objcHeaderOptimizedByDyld(hi)) return NO;
@@ -254,65 +243,13 @@ PRIVATE_EXTERN BOOL sel_preoptimizationValid(const header_info *hi)
 * sel_init
 * Initialize selector tables and register selectors used internally.
 **********************************************************************/
-PRIVATE_EXTERN void sel_init(BOOL wantsGC)
+void sel_init(BOOL wantsGC, size_t selrefCount)
 {
-#if !SUPPORT_BUILTINS
+    // save this value for later
+    SelrefCount = selrefCount;
 
-    disableSharedCacheOptimizations();    
-
-#else
-    // not set at compile time in order to detect too-early selector operations
-    const char *failure = NULL;
-    opt = &_objc_opt_data;
-
-    if (DisablePreopt) {
-        // OBJC_DISABLE_PREOPTIMIZATION is set
-        // If opt->version != VERSION then you continue at your own risk.
-        failure = "(by OBJC_DISABLE_PREOPTIMIZATION)";
-    } 
-    else if (opt->version != objc_opt::VERSION) {
-        // This shouldn't happen. You probably forgot to 
-        // change OPT_INITIALIZER and objc-sel-table.s.
-        // If dyld really did write the wrong optimization version, 
-        // then we must halt because we don't know what bits dyld twiddled.
-        _objc_fatal("bad objc opt version (want %d, got %d)", 
-                    objc_opt::VERSION, opt->version);
-    }
-    else if (!opt->selopt()) {
-        // No selector table. dyld must not have written one.
-        failure = "(dyld shared cache is absent or out of date)";
-    }
-#if SUPPORT_IGNORED_SELECTOR_CONSTANT
-    else if (UseGC) {
-        // GC is on, which renames some selectors
-        // Non-selector optimizations are still valid, but we don't have
-        // any of those yet
-        failure = "(GC is on)";
-    }
-#endif
-
-    if (failure) {
-        // All preoptimized selector references are invalid.
-        preoptimized = NO;
-        opt = (objc_opt_t *)empty_opt_data;
-        builtins = opt->selopt();
-        disableSharedCacheOptimizations();
-
-        if (PrintPreopt) {
-            _objc_inform("PREOPTIMIZATION: is DISABLED %s", failure);
-        }
-    }
-    else {
-        // Valid optimization data written by dyld shared cache
-        preoptimized = YES;
-        builtins = opt->selopt();
-
-        if (PrintPreopt) {
-            _objc_inform("PREOPTIMIZATION: is ENABLED "
-                         "(version %d)", opt->version);
-        }
-    }
-
+#if SUPPORT_PREOPT
+    builtins = preoptimizedSelectors();
 #endif
 
     // Register selectors used by libobjc
@@ -339,6 +276,7 @@ PRIVATE_EXTERN void sel_init(BOOL wantsGC)
     s(autorelease);
     s(retainCount);
     s(alloc);
+    t(allocWithZone:, allocWithZone);
     s(copy);
     s(new);
     s(finalize);

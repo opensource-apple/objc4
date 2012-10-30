@@ -52,7 +52,7 @@ objc_getImageSlide(const struct mach_header *header)
     return 0;  // not reached
 }
 
-PRIVATE_EXTERN uint8_t *
+uint8_t *
 objc_getsectiondata(const struct mach_header *mh, const char *segname, const char *sectname, unsigned long *outSize)
 {
     uint32_t size = 0;
@@ -85,7 +85,7 @@ objc_getsegbynamefromheader(const mach_header *head, const char *segname)
     return NULL;
 }
 
-PRIVATE_EXTERN uint8_t *
+uint8_t *
 objc_getsegmentdata(const struct mach_header *mh, const char *segname, unsigned long *outSize)
 {
     const struct segment_command *seg;
@@ -104,7 +104,7 @@ objc_getsegmentdata(const struct mach_header *mh, const char *segname, unsigned 
 #endif
 
 #define GETSECT(name, type, sectname)                                   \
-    PRIVATE_EXTERN type *name(const header_info *hi, size_t *outCount)  \
+    type *name(const header_info *hi, size_t *outCount)  \
     {                                                                   \
         unsigned long byteCount = 0;                                    \
         type *data = (type *)                                           \
@@ -118,15 +118,15 @@ GETSECT(_getObjc2SelectorRefs,        SEL,             "__objc_selrefs");
 GETSECT(_getObjc2MessageRefs,         message_ref_t,   "__objc_msgrefs"); 
 GETSECT(_getObjc2ClassRefs,           class_t *,       "__objc_classrefs");
 GETSECT(_getObjc2SuperRefs,           class_t *,       "__objc_superrefs");
-GETSECT(_getObjc2ClassList,           class_t *,       "__objc_classlist");
-GETSECT(_getObjc2NonlazyClassList,    class_t *,       "__objc_nlclslist");
+GETSECT(_getObjc2ClassList,           classref_t,       "__objc_classlist");
+GETSECT(_getObjc2NonlazyClassList,    classref_t,       "__objc_nlclslist");
 GETSECT(_getObjc2CategoryList,        category_t *,    "__objc_catlist");
 GETSECT(_getObjc2NonlazyCategoryList, category_t *,    "__objc_nlcatlist");
 GETSECT(_getObjc2ProtocolList,        protocol_t *,    "__objc_protolist");
 GETSECT(_getObjc2ProtocolRefs,        protocol_t *,    "__objc_protorefs");
 
 
-PRIVATE_EXTERN objc_image_info *
+objc_image_info *
 _getObjcImageInfo(const headerType *mhdr, size_t *outBytes)
 {
     unsigned long byteCount = 0;
@@ -155,7 +155,7 @@ getsegbynamefromheader(const headerType *head, const char *segname)
     return NULL;
 }
 
-PRIVATE_EXTERN BOOL
+BOOL
 _hasObjcContents(const header_info *hi)
 {
     // Look for a __DATA,__objc* section other than __DATA,__objc_imageinfo

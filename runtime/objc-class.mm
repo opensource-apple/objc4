@@ -231,7 +231,7 @@ Class object_setClass(id obj, Class cls)
         Class old;
         do {
             old = obj->isa;
-        } while (! OSAtomicCompareAndSwapPtrBarrier(old, cls, (void*)&obj->isa));
+        } while (! OSAtomicCompareAndSwapPtrBarrier(old, cls, (void * volatile *)&obj->isa));
 
         if (old  &&  _class_instancesHaveAssociatedObjects(old)) {
             _class_setInstancesHaveAssociatedObjects(cls);
@@ -326,11 +326,11 @@ void object_setIvar(id obj, Ivar ivar, id value)
     if (obj && ivar) {
         Class cls = _ivar_getClass(object_getClass(obj), ivar);
         ptrdiff_t ivar_offset = ivar_getOffset(ivar);
+        id *location = (id *)((char *)obj + ivar_offset);
         // if this ivar is a member of an ARR compiled class, then issue the correct barrier according to the layout.
         if (_class_usesAutomaticRetainRelease(cls)) {
             // for ARR, layout strings are relative to the instance start.
             uint32_t instanceStart = _class_getInstanceStart(cls);
-            id *location = (id *)((char *)obj + ivar_offset);
             const uint8_t *weak_layout = class_getWeakIvarLayout(cls);
             if (weak_layout && is_scanned_offset(ivar_offset - instanceStart, weak_layout)) {
                 // use the weak system to write to this variable.
@@ -348,11 +348,13 @@ void object_setIvar(id obj, Ivar ivar, id value)
             // for GC, check for weak references.
             const uint8_t *weak_layout = class_getWeakIvarLayout(cls);
             if (weak_layout && is_scanned_offset(ivar_offset, weak_layout)) {
-                objc_assign_weak(value, (id *)((char *)obj + ivar_offset));
+                objc_assign_weak(value, location);
             }
         }
-#endif
         objc_assign_ivar_internal(value, obj, ivar_offset);
+#else
+        *location = value;
+#endif
     }
 }
 
@@ -404,7 +406,7 @@ static void object_cxxDestructFromClass(id obj, Class cls)
         if (!_class_hasCxxStructors(cls)) return; 
         dtor = (void(*)(id))
             lookupMethodInClassAndLoadCache(cls, SEL_cxx_destruct);
-        if (dtor != (void(*)(id))&_objc_msgForward_internal) {
+        if (dtor != (void(*)(id))_objc_msgForward_internal) {
             if (PrintCxxCtors) {
                 _objc_inform("CXX: calling C++ destructors for class %s", 
                              _class_getName(cls));
@@ -420,7 +422,7 @@ static void object_cxxDestructFromClass(id obj, Class cls)
 * Call C++ destructors on obj, if any.
 * Uses methodListLock and cacheUpdateLock. The caller must hold neither.
 **********************************************************************/
-PRIVATE_EXTERN void object_cxxDestruct(id obj)
+void object_cxxDestruct(id obj)
 {
     if (!obj) return;
     if (OBJC_IS_TAGGED_PTR(obj)) return;
@@ -460,7 +462,7 @@ static BOOL object_cxxConstructFromClass(id obj, Class cls)
 
     // Find this class's ctor, if any.
     ctor = (id(*)(id))lookupMethodInClassAndLoadCache(cls, SEL_cxx_construct);
-    if (ctor == (id(*)(id))&_objc_msgForward_internal) return YES;  // no ctor - ok
+    if (ctor == (id(*)(id))_objc_msgForward_internal) return YES;  // no ctor - ok
     
     // Call this class's ctor.
     if (PrintCxxCtors) {
@@ -483,7 +485,7 @@ static BOOL object_cxxConstructFromClass(id obj, Class cls)
 *   caught and discarded. Any partial construction is destructed.
 * Uses methodListLock and cacheUpdateLock. The caller must hold neither.
 **********************************************************************/
-PRIVATE_EXTERN BOOL object_cxxConstruct(id obj)
+BOOL object_cxxConstruct(id obj)
 {
     if (!obj) return YES;
     if (OBJC_IS_TAGGED_PTR(obj)) return YES;
@@ -587,7 +589,7 @@ static Method _class_resolveInstanceMethod(Class cls, SEL sel)
 * the method added or NULL. 
 * Assumes the method doesn't exist already.
 **********************************************************************/
-PRIVATE_EXTERN Method _class_resolveMethod(Class cls, SEL sel)
+Method _class_resolveMethod(Class cls, SEL sel)
 {
     Method meth = NULL;
 
@@ -623,7 +625,7 @@ static Method look_up_method(Class cls, SEL sel,
     Method meth = NULL;
 
     if (withCache) {
-        meth = _cache_getMethod(cls, sel, &_objc_msgForward_internal);
+        meth = _cache_getMethod(cls, sel, _objc_msgForward_internal);
         if (meth == (Method)1) {
             // Cache contains forward:: . Stop searching.
             return NULL;
@@ -731,7 +733,7 @@ BOOL class_respondsToSelector(Class cls, SEL sel)
 
     // Avoids +initialize because it historically did so.
     // We're not returning a callable IMP anyway.
-    imp = lookUpMethod(cls, sel, NO/*initialize*/, YES/*cache*/);
+    imp = lookUpMethod(cls, sel, NO/*initialize*/, YES/*cache*/, nil);
     return (imp != (IMP)_objc_msgForward_internal) ? YES : NO;
 }
 
@@ -759,11 +761,11 @@ IMP class_getMethodImplementation(Class cls, SEL sel)
 
     if (!cls  ||  !sel) return NULL;
 
-    imp = lookUpMethod(cls, sel, YES/*initialize*/, YES/*cache*/);
+    imp = lookUpMethod(cls, sel, YES/*initialize*/, YES/*cache*/, nil);
 
     // Translate forwarding function to C-callable external version
-    if (imp == (IMP)&_objc_msgForward_internal) {
-        return (IMP)&_objc_msgForward;
+    if (imp == _objc_msgForward_internal) {
+        return _objc_msgForward;
     }
 
     return imp;
@@ -845,7 +847,7 @@ void	instrumentObjcMessageSends       (BOOL		flag)
     objcMsgLogEnabled = enabledValue;
 }
 
-PRIVATE_EXTERN void	logObjcMessageSends      (ObjCLogProc	logProc)
+void	logObjcMessageSends      (ObjCLogProc	logProc)
 {
     if (logProc)
     {
@@ -869,7 +871,7 @@ PRIVATE_EXTERN void	logObjcMessageSends      (ObjCLogProc	logProc)
 * cls is the method whose cache should be filled. 
 * implementer is the class that owns the implementation in question.
 **********************************************************************/
-PRIVATE_EXTERN void
+void
 log_and_fill_cache(Class cls, Class implementer, Method meth, SEL sel)
 {
 #if defined(MESSAGE_LOGGING)
@@ -893,13 +895,9 @@ log_and_fill_cache(Class cls, Class implementer, Method meth, SEL sel)
 * This lookup avoids optimistic cache scan because the dispatcher 
 * already tried that.
 **********************************************************************/
-PRIVATE_EXTERN IMP _class_lookupMethodAndLoadCache3(id obj, SEL sel, Class cls)
+IMP _class_lookupMethodAndLoadCache3(id obj, SEL sel, Class cls)
 {        
-    return lookUpMethod(cls, sel, YES/*initialize*/, NO/*cache*/);
-}
-PRIVATE_EXTERN IMP _class_lookupMethodAndLoadCache(Class cls, SEL sel)
-{        
-    return lookUpMethod(cls, sel, YES/*initialize*/, NO/*cache*/);
+    return lookUpMethod(cls, sel, YES/*initialize*/, NO/*cache*/, obj);
 }
 
 
@@ -909,11 +907,12 @@ PRIVATE_EXTERN IMP _class_lookupMethodAndLoadCache(Class cls, SEL sel)
 * initialize==NO tries to avoid +initialize (but sometimes fails)
 * cache==NO skips optimistic unlocked lookup (but uses cache elsewhere)
 * Most callers should use initialize==YES and cache==YES.
+* inst is an instance of cls or a subclass thereof, or nil if none is known. 
+*   If cls is an un-initialized metaclass then a non-nil inst is faster.
 * May return _objc_msgForward_internal. IMPs destined for external use 
 *   must be converted to _objc_msgForward or _objc_msgForward_stret.
 **********************************************************************/
-PRIVATE_EXTERN IMP lookUpMethod(Class cls, SEL sel, 
-                                BOOL initialize, BOOL cache)
+IMP lookUpMethod(Class cls, SEL sel, BOOL initialize, BOOL cache, id inst)
 {
     Class curClass;
     IMP methodPC = NULL;
@@ -927,7 +926,7 @@ PRIVATE_EXTERN IMP lookUpMethod(Class cls, SEL sel,
     }
 
     // realize, +initialize, and any special early exit
-    methodPC = prepareForMethodLookup(cls, sel, initialize);
+    methodPC = prepareForMethodLookup(cls, sel, initialize, inst);
     if (methodPC) return methodPC;
 
 
@@ -963,7 +962,7 @@ PRIVATE_EXTERN IMP lookUpMethod(Class cls, SEL sel,
     curClass = cls;
     while ((curClass = _class_getSuperclass(curClass))) {
         // Superclass cache.
-        meth = _cache_getMethod(curClass, sel, &_objc_msgForward_internal);
+        meth = _cache_getMethod(curClass, sel, _objc_msgForward_internal);
         if (meth) {
             if (meth != (Method)1) {
                 // Found the method in a superclass. Cache it in this class.
@@ -1003,7 +1002,7 @@ PRIVATE_EXTERN IMP lookUpMethod(Class cls, SEL sel,
     // Use forwarding.
 
     _cache_addForwardEntry(cls, sel);
-    methodPC = &_objc_msgForward_internal;
+    methodPC = _objc_msgForward_internal;
 
  done:
     unlockForMethodLookup();
@@ -1045,7 +1044,7 @@ static IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel)
     } else {
         // Miss in method list. Cache objc_msgForward.
         _cache_addForwardEntry(cls, sel);
-        return &_objc_msgForward_internal;
+        return _objc_msgForward_internal;
     }
 }
 
@@ -1060,67 +1059,68 @@ static IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel)
 * _free_internal
 * Convenience functions for the internal malloc zone.
 **********************************************************************/
-PRIVATE_EXTERN void *_malloc_internal(size_t size) 
+void *_malloc_internal(size_t size) 
 {
     return malloc_zone_malloc(_objc_internal_zone(), size);
 }
 
-PRIVATE_EXTERN void *_calloc_internal(size_t count, size_t size) 
+void *_calloc_internal(size_t count, size_t size) 
 {
     return malloc_zone_calloc(_objc_internal_zone(), count, size);
 }
 
-PRIVATE_EXTERN void *_realloc_internal(void *ptr, size_t size)
+void *_realloc_internal(void *ptr, size_t size)
 {
     return malloc_zone_realloc(_objc_internal_zone(), ptr, size);
 }
 
-PRIVATE_EXTERN char *_strdup_internal(const char *str)
+char *_strdup_internal(const char *str)
 {
     size_t len;
     char *dup;
     if (!str) return NULL;
     len = strlen(str);
-    dup = malloc_zone_malloc(_objc_internal_zone(), len + 1);
+    dup = (char *)malloc_zone_malloc(_objc_internal_zone(), len + 1);
     memcpy(dup, str, len + 1);
     return dup;
 }
 
-PRIVATE_EXTERN uint8_t *_ustrdup_internal(const uint8_t *str)
+uint8_t *_ustrdup_internal(const uint8_t *str)
 {
     return (uint8_t *)_strdup_internal((char *)str);
 }
 
 // allocate a new string that concatenates s1+s2.
-PRIVATE_EXTERN char *_strdupcat_internal(const char *s1, const char *s2)
+char *_strdupcat_internal(const char *s1, const char *s2)
 {
     size_t len1 = strlen(s1);
     size_t len2 = strlen(s2);
-    char *dup = malloc_zone_malloc(_objc_internal_zone(), len1 + len2 + 1);
+    char *dup = (char *)
+        malloc_zone_malloc(_objc_internal_zone(), len1 + len2 + 1);
     memcpy(dup, s1, len1);
     memcpy(dup + len1, s2, len2 + 1);
     return dup;
 }
 
-PRIVATE_EXTERN void *_memdup_internal(const void *mem, size_t len)
+void *_memdup_internal(const void *mem, size_t len)
 {
     void *dup = malloc_zone_malloc(_objc_internal_zone(), len);
     memcpy(dup, mem, len);
     return dup;
 }
 
-PRIVATE_EXTERN void _free_internal(void *ptr)
+void _free_internal(void *ptr)
 {
     malloc_zone_free(_objc_internal_zone(), ptr);
 }
 
-PRIVATE_EXTERN size_t _malloc_size_internal(void *ptr)
+size_t _malloc_size_internal(void *ptr)
 {
     malloc_zone_t *zone = _objc_internal_zone();
     return zone->size(zone, ptr);
 }
 
-PRIVATE_EXTERN Class _calloc_class(size_t size)
+Class _calloc_class(size_t size)
 {
 #if SUPPORT_GC
     if (UseGC) return (Class) malloc_zone_calloc(gc_zone, 1, size);
@@ -1223,7 +1223,7 @@ objc_constructInstance(Class cls, void *bytes)
 }
 
 
-PRIVATE_EXTERN id
+id
 _objc_constructOrFree(Class cls, void *bytes)
 {
     id obj = _objc_constructInstance(cls, bytes);
@@ -1247,7 +1247,7 @@ _objc_constructOrFree(Class cls, void *bytes)
 * Returns the number of allocated objects (possibly zero), with 
 * the allocated pointers in *results.
 **********************************************************************/
-PRIVATE_EXTERN unsigned
+unsigned
 _class_createInstancesFromZone(Class cls, size_t extraBytes, void *zone, 
                                id *results, unsigned num_requested)
 {
@@ -1268,7 +1268,7 @@ _class_createInstancesFromZone(Class cls, size_t extraBytes, void *zone,
     {
         unsigned i;
         num_allocated = 
-            malloc_zone_batch_malloc(zone ? zone : malloc_default_zone(), 
+            malloc_zone_batch_malloc((malloc_zone_t *)(zone ? zone : malloc_default_zone()), 
                                      size, (void**)results, num_requested);
         for (i = 0; i < num_allocated; i++) {
             bzero(results[i], size);
@@ -1299,7 +1299,7 @@ _class_createInstancesFromZone(Class cls, size_t extraBytes, void *zone,
 /***********************************************************************
 * inform_duplicate. Complain about duplicate class implementations.
 **********************************************************************/
-PRIVATE_EXTERN void 
+void 
 inform_duplicate(const char *name, Class oldCls, Class cls)
 {
 #if TARGET_OS_WIN32
@@ -1307,8 +1307,8 @@ inform_duplicate(const char *name, Class oldCls, Class cls)
 #else
     const header_info *oldHeader = _headerForClass(oldCls);
     const header_info *newHeader = _headerForClass(cls);
-    const char *oldName = oldHeader ? _nameForHeader(oldHeader->mhdr) : "??";
-    const char *newName = newHeader ? _nameForHeader(newHeader->mhdr) : "??";
+    const char *oldName = oldHeader ? oldHeader->fname : "??";
+    const char *newName = newHeader ? newHeader->fname : "??";
         
     _objc_inform ("Class %s is implemented in both %s and %s. "
                   "One of the two will be used. "
@@ -1345,7 +1345,7 @@ void _objc_insert_tagged_isa(unsigned char slotNumber, Class isa) {
 #endif
 
 
-PRIVATE_EXTERN const char *
+const char *
 copyPropertyAttributeString(const objc_property_attribute_t *attrs,
                             unsigned int count)
 {
@@ -1373,7 +1373,7 @@ copyPropertyAttributeString(const objc_property_attribute_t *attrs,
         }
     }
 
-    result = malloc(len + 1);
+    result = (char *)malloc(len + 1);
     char *s = result;
     for (i = 0; i < count; i++) {
         if (attrs[i].value) {
@@ -1394,12 +1394,23 @@ copyPropertyAttributeString(const objc_property_attribute_t *attrs,
 
 /*
   Property attribute string format:
+
   - Comma-separated name-value pairs. 
   - Name and value may not contain ,
   - Name may not contain "
   - Value may be empty
   - Name is single char, value follows
   - OR Name is double-quoted string of 2+ chars, value follows
+
+  Grammar:
+    attribute-string: \0
+    attribute-string: name-value-pair (',' name-value-pair)*
+    name-value-pair:  unquoted-name optional-value
+    name-value-pair:  quoted-name optional-value
+    unquoted-name:    [^",]
+    quoted-name:      '"' [^",]{2,} '"'
+    optional-value:   [^,]*
+
 */
 static unsigned int 
 iteratePropertyAttributes(const char *attrs, 
@@ -1501,7 +1512,7 @@ copyOneAttribute(unsigned int index, void *ctxa, void *ctxs,
 }
 
                  
-PRIVATE_EXTERN objc_property_attribute_t *
+objc_property_attribute_t *
 copyPropertyAttributeList(const char *attrs, unsigned int *outCount)
 {
     if (!attrs) {
@@ -1525,7 +1536,8 @@ copyPropertyAttributeList(const char *attrs, unsigned int *outCount)
         sizeof(objc_property_attribute_t) + 
         strlen(attrs) + 
         attrcount * 2;
-    objc_property_attribute_t *result = calloc(size, 1);
+    objc_property_attribute_t *result = (objc_property_attribute_t *) 
+        calloc(size, 1);
 
     objc_property_attribute_t *ra = result;
     char *rs = (char *)(ra+attrcount+1);
@@ -1553,7 +1565,7 @@ findOneAttribute(unsigned int index, void *ctxa, void *ctxs,
     char **resultp = (char **)ctxs;
 
     if (strlen(query) == nlen  &&  0 == strncmp(name, query, nlen)) {
-        char *result = calloc(vlen+1, 1);
+        char *result = (char *)calloc(vlen+1, 1);
         memcpy(result, value, vlen);
         result[vlen] = '\0';
         *resultp = result;
@@ -1563,7 +1575,6 @@ findOneAttribute(unsigned int index, void *ctxa, void *ctxs,
     return YES;
 }
 
-PRIVATE_EXTERN
 char *copyPropertyAttributeValue(const char *attrs, const char *name)
 {
     char *result = NULL;

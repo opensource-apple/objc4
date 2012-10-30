@@ -54,14 +54,31 @@ OBJC_EXPORT void _objcInit(void)
 // Read or write an object property. Not all object properties use these.
 OBJC_EXPORT id objc_getProperty(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic)
     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
-OBJC_EXPORT void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy)
+OBJC_EXPORT void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, signed char shouldCopy)
     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+
+OBJC_EXPORT void objc_setProperty_atomic(id self, SEL _cmd, id newValue, ptrdiff_t offset)
+    __OSX_AVAILABLE_STARTING(__MAC_10_8, __IPHONE_6_0)
+    OBJC_GC_UNAVAILABLE;
+OBJC_EXPORT void objc_setProperty_nonatomic(id self, SEL _cmd, id newValue, ptrdiff_t offset)
+    __OSX_AVAILABLE_STARTING(__MAC_10_8, __IPHONE_6_0)
+    OBJC_GC_UNAVAILABLE;
+OBJC_EXPORT void objc_setProperty_atomic_copy(id self, SEL _cmd, id newValue, ptrdiff_t offset)
+    __OSX_AVAILABLE_STARTING(__MAC_10_8, __IPHONE_6_0)
+    OBJC_GC_UNAVAILABLE;
+OBJC_EXPORT void objc_setProperty_nonatomic_copy(id self, SEL _cmd, id newValue, ptrdiff_t offset)
+    __OSX_AVAILABLE_STARTING(__MAC_10_8, __IPHONE_6_0)
+    OBJC_GC_UNAVAILABLE;
+
 
 // Read or write a non-object property. Not all uses are C structs, 
 // and not all C struct properties use this.
 OBJC_EXPORT void objc_copyStruct(void *dest, const void *src, ptrdiff_t size, BOOL atomic, BOOL hasStrong)
     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 
+// Perform a copy of a C++ object using striped locks. Used by non-POD C++ typed atomic properties.
+OBJC_EXPORT void objc_copyCppObjectAtomic(void *dest, const void *src, void (*copyHelper) (void *dest, const void *source))
+    __OSX_AVAILABLE_STARTING(__MAC_10_8, __IPHONE_6_0);
 
 /* Classes. */
 #if __OBJC2__

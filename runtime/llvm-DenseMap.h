@@ -24,7 +24,6 @@
 #include <cstring>
 #include <TargetConditionals.h>
 
-
 namespace objc {
 
 #if TARGET_OS_IPHONE
@@ -654,6 +653,7 @@ private:
   bool LookupBucketFor(const KeyT &Val, BucketT *&FoundBucket) const {
     unsigned BucketNo = getHashValue(Val);
     unsigned ProbeAmt = 1;
+    unsigned ProbeCount = 0;
     BucketT *BucketsPtr = Buckets;
 
     // FoundTombstone - Keep track of whether we find a tombstone or zero value while probing.
@@ -664,7 +664,7 @@ private:
            !KeyInfoT::isEqual(Val, TombstoneKey) &&
            "Empty/Tombstone value shouldn't be inserted into map!");
 
-    while (1) {
+    do {
       BucketT *ThisBucket = BucketsPtr + (BucketNo & (NumBuckets-1));
       // Found Val's bucket?  If so, return it.
       if (KeyInfoT::isEqual(ThisBucket->first, Val)) {
@@ -694,7 +694,19 @@ private:
       // Otherwise, it's a hash collision or a tombstone, continue quadratic
       // probing.
       BucketNo += ProbeAmt++;
+      ProbeCount++;
+    } while (ProbeCount < NumBuckets);
+    // If we get here then we did not find a bucket. This is a bug. Emit some diagnostics and abort.
+    unsigned EmptyCount = 0, TombstoneCount = 0, ZeroCount = 0, ValueCount = 0;
+    BucketsPtr = Buckets;
+    for (unsigned i=0; i<NumBuckets; i++) {
+        if (KeyInfoT::isEqual(BucketsPtr->first, EmptyKey)) EmptyCount++;
+        else if (KeyInfoT::isEqual(BucketsPtr->first, TombstoneKey)) TombstoneCount++;
+        else if (KeyInfoT::isEqual(BucketsPtr->first, 0)) ZeroCount++;
+        else ValueCount++;
+        BucketsPtr++;
     }
+    _objc_fatal("DenseMap::LookupBucketFor() failed to find available bucket.\nNumBuckets = %d, EmptyCount = %d, TombstoneCount = %d, ZeroCount = %d, ValueCount = %d\n", NumBuckets, EmptyCount, TombstoneCount, ZeroCount, ValueCount);
   }
 
   void init(unsigned InitBuckets) {

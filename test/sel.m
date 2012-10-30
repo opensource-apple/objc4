@@ -13,13 +13,20 @@ int main()
     // sel_getName recognizes the zero SEL
     testassert(0 == strcmp("<null selector>", sel_getName(0)));
 
+    // GC-ignored selectors.
+#if __has_feature(objc_arc)
+
+    // ARC dislikes `@selector(retain)`
+
+#else
+
     // sel_getName recognizes GC-ignored SELs
-#if defined(__i386__)
+# if defined(__i386__)
     if (objc_collectingEnabled()) {
         testassert(0 == strcmp("<ignored selector>", 
                                sel_getName(@selector(retain))));
     } else 
-#endif
+# endif
     {
         testassert(0 == strcmp("retain", 
                                sel_getName(@selector(retain))));
@@ -32,6 +39,8 @@ int main()
     } u;
     u.sel = @selector(retain);
     testassert(@selector(retain) == sel_registerName(u.ptr));
+
+#endif
 
     succeed(__FILE__);
 }

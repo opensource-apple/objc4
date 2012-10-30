@@ -145,10 +145,6 @@
 #include "objc-runtime-old.h"
 #include "objc-loadmethod.h"
 
-/* NXHashTable SPI */
-extern unsigned _NXHashCapacity(NXHashTable *table);
-extern void _NXHashRehashToCapacity(NXHashTable *table, unsigned newCapacity);
-
 
 typedef struct _objc_unresolved_category
 {
@@ -193,10 +189,10 @@ static BOOL _objc_register_category(struct old_category *cat, int version);
 
 
 // Function called when a class is loaded from an image
-PRIVATE_EXTERN void (*callbackFunction)(Class, Category) = 0;
+void (*callbackFunction)(Class, Category) = 0;
 
 // Hash table of classes
-PRIVATE_EXTERN NXHashTable *		class_hash = 0;
+NXHashTable *		class_hash = 0;
 static NXHashTablePrototype	classHashPrototype =
 {
     (uintptr_t (*) (const void *, const void *))			classHash,
@@ -235,7 +231,7 @@ static BOOL (*_objc_classLoader)(const char *) = NULL;
 /***********************************************************************
 * objc_dump_class_hash.  Log names of all known classes.
 **********************************************************************/
-PRIVATE_EXTERN void objc_dump_class_hash(void)
+void objc_dump_class_hash(void)
 {
     NXHashTable *table;
     unsigned count;
@@ -254,7 +250,7 @@ PRIVATE_EXTERN void objc_dump_class_hash(void)
 * _objc_init_class_hash.  Return the class lookup table, create it if
 * necessary.
 **********************************************************************/
-PRIVATE_EXTERN void _objc_init_class_hash(void)
+void _objc_init_class_hash(void)
 {
     // Do nothing if class hash table already exists
     if (class_hash)
@@ -516,7 +512,7 @@ static void makeFutureClass(struct old_class *cls, const char *name)
 * Assumes the named class doesn't exist yet.
 * Not thread safe.
 **********************************************************************/
-PRIVATE_EXTERN Class _objc_allocateFutureClass(const char *name)
+Class _objc_allocateFutureClass(const char *name)
 {
     struct old_class *cls;
 
@@ -628,7 +624,7 @@ Protocol *objc_getProtocol(const char *name)
 * 3. classLoader callback
 * 4. classHandler callback (optional)
 **********************************************************************/
-PRIVATE_EXTERN id look_up_class(const char *aClassName, BOOL includeUnconnected, BOOL includeClassHandler)
+id look_up_class(const char *aClassName, BOOL includeUnconnected, BOOL includeClassHandler)
 {
     BOOL includeClassLoader = YES; // class loader cannot be skipped
     id result = nil;
@@ -696,7 +692,7 @@ static BOOL class_is_connected(struct old_class *cls)
 * Returns TRUE if class cls is ready for its +load method to be called. 
 * A class is ready for +load if it is connected.
 **********************************************************************/
-PRIVATE_EXTERN BOOL _class_isLoadable(Class cls)
+BOOL _class_isLoadable(Class cls)
 {
     return class_is_connected(oldcls(cls));
 }
@@ -912,7 +908,7 @@ static void really_connect_class(struct old_class *cls,
         layout_bitmap_free(superBitmap);
         
         if (layoutChanged) {
-            layout_bitmap weakBitmap = {0};
+            layout_bitmap weakBitmap = {};
             BOOL weakLayoutChanged = NO;
 
             if (cls->ext  &&  cls->ext->weak_ivar_layout) {
@@ -1531,12 +1527,13 @@ lookup_method(struct objc_method_description_list *mlist, SEL aSel)
 
 /***********************************************************************
 * lookup_protocol_method
-* Recursively search for a selector in a protocol 
-* (and all incorporated protocols)
+* Search for a selector in a protocol 
+* (and optionally recursively all incorporated protocols)
 **********************************************************************/
-PRIVATE_EXTERN struct objc_method_description *
+struct objc_method_description *
 lookup_protocol_method(struct old_protocol *proto, SEL aSel, 
-                       BOOL isRequiredMethod, BOOL isInstanceMethod)
+                       BOOL isRequiredMethod, BOOL isInstanceMethod, 
+                       BOOL recursive)
 {
     struct objc_method_description *m = NULL;
     struct old_protocol_ext *ext;
@@ -1555,11 +1552,11 @@ lookup_protocol_method(struct old_protocol *proto, SEL aSel,
         }
     }
 
-    if (!m  &&  proto->protocol_list) {
+    if (!m  &&  recursive  &&  proto->protocol_list) {
         int i;
         for (i = 0; !m  &&  i < proto->protocol_list->count; i++) {
             m = lookup_protocol_method(proto->protocol_list->list[i], aSel, 
-                                       isRequiredMethod, isInstanceMethod);
+                                       isRequiredMethod,isInstanceMethod,true);
         }
     }
 
@@ -1595,7 +1592,7 @@ protocol_getMethodDescription(Protocol *p, SEL aSel,
     if (!proto) return empty;
 
     desc = lookup_protocol_method(proto, aSel, 
-                                  isRequiredMethod, isInstanceMethod);
+                                  isRequiredMethod, isInstanceMethod, true);
     if (desc) return *desc;
     else return empty;
 }
@@ -1660,7 +1657,7 @@ objc_property_t protocol_getProperty(Protocol *p, const char *name,
 {
     struct old_protocol *proto = oldprotocol(p);
     struct old_protocol_ext *ext;
-    struct old_protocol_list *plist;
+    struct old_protocol_list *proto_list;
 
     if (!proto  ||  !name) return NULL;
     
@@ -1682,11 +1679,11 @@ objc_property_t protocol_getProperty(Protocol *p, const char *name,
         }
     }
 
-    if ((plist = proto->protocol_list)) {
+    if ((proto_list = proto->protocol_list)) {
         int i;
-        for (i = 0; i < plist->count; i++) {
+        for (i = 0; i < proto_list->count; i++) {
             objc_property_t prop = 
-                protocol_getProperty((Protocol *)plist->list[i], name, 
+                protocol_getProperty((Protocol *)proto_list->list[i], name, 
                                      isRequiredProperty, isInstanceProperty);
             if (prop) return prop;
         }
@@ -1789,6 +1786,72 @@ BOOL protocol_isEqual(Protocol *self, Protocol *other)
     if (!protocol_conformsToProtocol(other, self)) return NO;
 
     return YES;
+}
+
+
+/***********************************************************************
+* _protocol_getMethodTypeEncoding
+* Return the @encode string for the requested protocol method.
+* Returns NULL if the compiler did not emit any extended @encode data.
+* Locking: runtimeLock must not be held by the caller
+**********************************************************************/
+const char * 
+_protocol_getMethodTypeEncoding(Protocol *proto_gen, SEL sel, 
+                                BOOL isRequiredMethod, BOOL isInstanceMethod)
+{
+    struct old_protocol *proto = oldprotocol(proto_gen);
+    if (!proto) return NULL;
+    struct old_protocol_ext *ext = ext_for_protocol(proto);
+    if (!ext) return NULL;
+    if (ext->size < offsetof(struct old_protocol_ext, extendedMethodTypes) + sizeof(ext->extendedMethodTypes)) return NULL;
+    if (! ext->extendedMethodTypes) return NULL;
+
+    struct objc_method_description *m = 
+        lookup_protocol_method(proto, sel, 
+                               isRequiredMethod, isInstanceMethod, false);
+    if (!m) {
+        // No method with that name. Search incorporated protocols.
+        if (proto->protocol_list) {
+            for (int i = 0; i < proto->protocol_list->count; i++) {
+                const char *enc = 
+                    _protocol_getMethodTypeEncoding((Protocol *)proto->protocol_list->list[i], sel, isRequiredMethod, isInstanceMethod);
+                if (enc) return enc;
+            }
+        }
+        return NULL;
+    }
+    
+    int i = 0;
+    if (isRequiredMethod && isInstanceMethod) {
+        i += ((uintptr_t)m - (uintptr_t)proto->instance_methods) / sizeof(proto->instance_methods->list[0]);
+        goto done;
+    } else if (proto->instance_methods) {
+        i += proto->instance_methods->count;
+    }
+
+    if (isRequiredMethod && !isInstanceMethod) {
+        i += ((uintptr_t)m - (uintptr_t)proto->class_methods) / sizeof(proto->class_methods->list[0]);
+        goto done;
+    } else if (proto->class_methods) {
+        i += proto->class_methods->count;
+    }
+
+    if (!isRequiredMethod && isInstanceMethod) {
+        i += ((uintptr_t)m - (uintptr_t)ext->optional_instance_methods) / sizeof(ext->optional_instance_methods->list[0]);
+        goto done;
+    } else if (ext->optional_instance_methods) {
+        i += ext->optional_instance_methods->count;
+    }
+
+    if (!isRequiredMethod && !isInstanceMethod) {
+        i += ((uintptr_t)m - (uintptr_t)ext->optional_class_methods) / sizeof(ext->optional_class_methods->list[0]);
+        goto done;
+    } else if (ext->optional_class_methods) {
+        i += ext->optional_class_methods->count;
+    }
+
+ done:
+    return ext->extendedMethodTypes[i];
 }
 
 
@@ -2150,11 +2213,11 @@ static void _objc_fixup_selector_refs   (const header_info *hi)
     if (PrintPreopt) {
         if (sel_preoptimizationValid(hi)) {
             _objc_inform("PREOPTIMIZATION: honoring preoptimized selectors in %s", 
-                         _nameForHeader(hi->mhdr));
+                         hi->fname);
         }
         else if (_objcHeaderOptimizedByDyld(hi)) {
             _objc_inform("PREOPTIMIZATION: IGNORING preoptimized selectors in %s", 
-                         _nameForHeader(hi->mhdr));
+                         hi->fname);
         }
     }
 
@@ -2180,7 +2243,7 @@ static inline BOOL _is_threaded() {
 * mh is mach_header instead of headerType because that's what 
 *   dyld_priv.h says even for 64-bit.
 **********************************************************************/
-PRIVATE_EXTERN void 
+void 
 unmap_image(const struct mach_header *mh, intptr_t vmaddr_slide)
 {
     recursive_mutex_lock(&loadMethodLock);
@@ -2194,7 +2257,7 @@ unmap_image(const struct mach_header *mh, intptr_t vmaddr_slide)
 * Process the given images which are being mapped in by dyld.
 * Calls ABI-agnostic code after taking ABI-specific locks.
 **********************************************************************/
-PRIVATE_EXTERN const char *
+const char *
 map_images(enum dyld_image_states state, uint32_t infoCount,
            const struct dyld_image_info infoList[])
 {
@@ -2215,7 +2278,7 @@ map_images(enum dyld_image_states state, uint32_t infoCount,
 *
 * Locking: acquires classLock and loadMethodLock
 **********************************************************************/
-PRIVATE_EXTERN const char *
+const char *
 load_images(enum dyld_image_states state, uint32_t infoCount,
            const struct dyld_image_info infoList[])
 {
@@ -2242,7 +2305,7 @@ load_images(enum dyld_image_states state, uint32_t infoCount,
 * _read_images
 * Perform metadata processing for hCount images starting with firstNewHeader
 **********************************************************************/
-PRIVATE_EXTERN void _read_images(header_info **hList, uint32_t hCount)
+void _read_images(header_info **hList, uint32_t hCount)
 {
     uint32_t i;
     BOOL categoriesLoaded = NO;
@@ -2310,7 +2373,7 @@ static void schedule_class_load(struct old_class *cls)
     cls->info |= CLS_LOADED;
 }
 
-PRIVATE_EXTERN void prepare_load_methods(header_info *hi)
+void prepare_load_methods(header_info *hi)
 {
     Module mods;
     unsigned int midx;
@@ -2375,7 +2438,7 @@ PRIVATE_EXTERN void prepare_load_methods(header_info *hi)
 
 #if TARGET_OS_WIN32
 
-PRIVATE_EXTERN void unload_class(struct old_class *cls)
+void unload_class(struct old_class *cls)
 {
 }
 
@@ -2412,7 +2475,7 @@ static void rependClassReferences(struct old_class **refs, size_t count,
 }
 
 
-PRIVATE_EXTERN void try_free(const void *p)
+void try_free(const void *p)
 {
     if (p  &&  malloc_size(p)) free((void *)p);
 }
@@ -2443,7 +2506,7 @@ static void unload_property_list(struct old_property_list *proplist)
 
 
 // Deallocate all memory in a class. 
-PRIVATE_EXTERN void unload_class(struct old_class *cls)
+void unload_class(struct old_class *cls)
 {
     // Free method cache
     // This dereferences the cache contents; do this before freeing methods
@@ -2674,7 +2737,7 @@ static void unload_paranoia(header_info *hi)
     seg = (uintptr_t)getsegmentdata(hi->mhdr, "__OBJC", &seg_size);
 
     _objc_inform("UNLOAD DEBUG: unloading image '%s' [%p..%p]", 
-                 _nameForHeader(hi->mhdr), (void *)seg, (void*)(seg+seg_size));
+                 hi->fname, (void *)seg, (void*)(seg+seg_size));
 
     mutex_lock(&classLock);
 
@@ -2743,7 +2806,7 @@ static void unload_paranoia(header_info *hi)
 * Only handles MH_BUNDLE for now.
 * Locking: loadMethodLock acquired by unmap_image
 **********************************************************************/
-PRIVATE_EXTERN void _unload_image(header_info *hi)
+void _unload_image(header_info *hi)
 {
     recursive_mutex_assert_locked(&loadMethodLock);
 
@@ -2850,7 +2913,7 @@ static void _objcTweakMethodListPointerForClass(struct old_class *cls)
 * Does not take any locks.
 * If the class is already in use, use class_addMethods() instead.
 **********************************************************************/
-PRIVATE_EXTERN void _objc_insertMethods(struct old_class *cls, 
+void _objc_insertMethods(struct old_class *cls, 
                                             struct old_method_list *mlist, 
                                             struct old_category *cat)
 {
@@ -2930,7 +2993,7 @@ PRIVATE_EXTERN void _objc_insertMethods(struct old_class *cls,
 * Does not flush any method caches.
 * If the class is currently in use, use class_removeMethods() instead.
 **********************************************************************/
-PRIVATE_EXTERN void _objc_removeMethods(struct old_class *cls, 
+void _objc_removeMethods(struct old_class *cls, 
                                             struct old_method_list *mlist)
 {
     struct old_method_list ***list;
@@ -3202,7 +3265,7 @@ static BOOL _objc_register_category(struct old_category *cat, int version)
 }
 
 
-PRIVATE_EXTERN const char **
+const char **
 _objc_copyClassNamesForImage(header_info *hi, unsigned int *outCount)
 {
     Module mods;
@@ -3290,17 +3353,17 @@ BOOL gdb_objc_isRuntimeLocked()
 * Every lock used anywhere must be managed here. 
 * Locks not managed here may cause gdb deadlocks.
 **********************************************************************/
-PRIVATE_EXTERN rwlock_t selLock = {0};
-PRIVATE_EXTERN mutex_t classLock = MUTEX_INITIALIZER;
-PRIVATE_EXTERN mutex_t methodListLock = MUTEX_INITIALIZER;
-PRIVATE_EXTERN mutex_t cacheUpdateLock = MUTEX_INITIALIZER;
-PRIVATE_EXTERN recursive_mutex_t loadMethodLock = RECURSIVE_MUTEX_INITIALIZER;
+rwlock_t selLock = {};
+mutex_t classLock = MUTEX_INITIALIZER;
+mutex_t methodListLock = MUTEX_INITIALIZER;
+mutex_t cacheUpdateLock = MUTEX_INITIALIZER;
+recursive_mutex_t loadMethodLock = RECURSIVE_MUTEX_INITIALIZER;
 static int debugger_selLock;
 static int debugger_loadMethodLock;
 #define RDONLY 1
 #define RDWR 2
 
-PRIVATE_EXTERN void lock_init(void)
+void lock_init(void)
 {
     rwlock_init(&selLock);
     recursive_mutex_init(&loadMethodLock);
@@ -3319,7 +3382,7 @@ PRIVATE_EXTERN void lock_init(void)
 *   attempt to manipulate them will cause a trap.
 * Locks not handled here may cause deadlocks in gdb.
 **********************************************************************/
-PRIVATE_EXTERN int startDebuggerMode(void)
+int startDebuggerMode(void)
 {
     int result = DEBUGGER_FULL;
 
@@ -3374,7 +3437,7 @@ PRIVATE_EXTERN int startDebuggerMode(void)
 * endDebuggerMode
 * Relinquish locks acquired in startDebuggerMode().
 **********************************************************************/
-PRIVATE_EXTERN void endDebuggerMode(void)
+void endDebuggerMode(void)
 {
     if (debugger_loadMethodLock) {
         recursive_mutex_unlock(&loadMethodLock);
@@ -3392,7 +3455,7 @@ PRIVATE_EXTERN void endDebuggerMode(void)
 * Returns YES if the given lock is handled specially during debugger 
 * mode (i.e. debugger mode tries to acquire it).
 **********************************************************************/
-PRIVATE_EXTERN BOOL isManagedDuringDebugger(void *lock)
+BOOL isManagedDuringDebugger(void *lock)
 {
     if (lock == &selLock) return YES;
     if (lock == &classLock) return YES;
@@ -3408,7 +3471,7 @@ PRIVATE_EXTERN BOOL isManagedDuringDebugger(void *lock)
 * Locking a managed mutex during debugger mode causes a trap unless 
 *   this returns YES.
 **********************************************************************/
-PRIVATE_EXTERN BOOL isLockedDuringDebugger(void *lock)
+BOOL isLockedDuringDebugger(void *lock)
 {
     assert(DebuggerMode);
 
@@ -3416,7 +3479,6 @@ PRIVATE_EXTERN BOOL isLockedDuringDebugger(void *lock)
     if (lock == &methodListLock) return YES;
     if (lock == &cacheUpdateLock) return YES;
     if (lock == (mutex_t *)&loadMethodLock) return YES;
-    
     return NO;
 }
 
@@ -3426,7 +3488,7 @@ PRIVATE_EXTERN BOOL isLockedDuringDebugger(void *lock)
 * Read-locking a managed rwlock during debugger mode causes a trap unless
 *   this returns YES.
 **********************************************************************/
-PRIVATE_EXTERN BOOL isReadingDuringDebugger(rwlock_t *lock)
+BOOL isReadingDuringDebugger(rwlock_t *lock)
 {
     assert(DebuggerMode);
     
@@ -3442,7 +3504,7 @@ PRIVATE_EXTERN BOOL isReadingDuringDebugger(rwlock_t *lock)
 * Write-locking a managed rwlock during debugger mode causes a trap unless
 *   this returns YES.
 **********************************************************************/
-PRIVATE_EXTERN BOOL isWritingDuringDebugger(rwlock_t *lock)
+BOOL isWritingDuringDebugger(rwlock_t *lock)
 {
     assert(DebuggerMode);
     

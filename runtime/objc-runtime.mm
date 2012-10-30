@@ -46,40 +46,42 @@ OBJC_EXPORT Class getOriginalClassForPosingClass(Class);
 
 // Settings from environment variables
 #if SUPPORT_ENVIRON
-PRIVATE_EXTERN int PrintImages = -1;     // env OBJC_PRINT_IMAGES
-PRIVATE_EXTERN int PrintLoading = -1;    // env OBJC_PRINT_LOAD_METHODS
-PRIVATE_EXTERN int PrintInitializing = -1; // env OBJC_PRINT_INITIALIZE_METHODS
-PRIVATE_EXTERN int PrintResolving = -1;  // env OBJC_PRINT_RESOLVED_METHODS
-PRIVATE_EXTERN int PrintConnecting = -1; // env OBJC_PRINT_CLASS_SETUP
-PRIVATE_EXTERN int PrintProtocols = -1;  // env OBJC_PRINT_PROTOCOL_SETUP
-PRIVATE_EXTERN int PrintIvars = -1;      // env OBJC_PRINT_IVAR_SETUP
-PRIVATE_EXTERN int PrintVtables = -1;    // env OBJC_PRINT_VTABLE_SETUP
-PRIVATE_EXTERN int PrintVtableImages = -1;//env OBJC_PRINT_VTABLE_IMAGES
-PRIVATE_EXTERN int PrintFuture = -1;     // env OBJC_PRINT_FUTURE_CLASSES
-PRIVATE_EXTERN int PrintRTP = -1;        // env OBJC_PRINT_RTP
-PRIVATE_EXTERN int PrintGC = -1;         // env OBJC_PRINT_GC
-PRIVATE_EXTERN int PrintPreopt = -1;     // env OBJC_PRINT_PREOPTIMIZATION
-PRIVATE_EXTERN int PrintCxxCtors = -1;   // env OBJC_PRINT_CXX_CTORS
-PRIVATE_EXTERN int PrintExceptions = -1; // env OBJC_PRINT_EXCEPTIONS
-PRIVATE_EXTERN int PrintExceptionThrow = -1; // env OBJC_PRINT_EXCEPTION_THROW
-PRIVATE_EXTERN int PrintAltHandlers = -1; // env OBJC_PRINT_ALT_HANDLERS
-PRIVATE_EXTERN int PrintDeprecation = -1;// env OBJC_PRINT_DEPRECATION_WARNINGS
-PRIVATE_EXTERN int PrintReplacedMethods = -1; // env OBJC_PRINT_REPLACED_METHODS
-PRIVATE_EXTERN int PrintCaches = -1;     // env OBJC_PRINT_CACHE_SETUP
-PRIVATE_EXTERN int PrintPoolHiwat = -1;  // env OBJC_PRINT_POOL_HIGHWATER
+int PrintImages = -1;     // env OBJC_PRINT_IMAGES
+int PrintLoading = -1;    // env OBJC_PRINT_LOAD_METHODS
+int PrintInitializing = -1; // env OBJC_PRINT_INITIALIZE_METHODS
+int PrintResolving = -1;  // env OBJC_PRINT_RESOLVED_METHODS
+int PrintConnecting = -1; // env OBJC_PRINT_CLASS_SETUP
+int PrintProtocols = -1;  // env OBJC_PRINT_PROTOCOL_SETUP
+int PrintIvars = -1;      // env OBJC_PRINT_IVAR_SETUP
+int PrintVtables = -1;    // env OBJC_PRINT_VTABLE_SETUP
+int PrintVtableImages = -1;//env OBJC_PRINT_VTABLE_IMAGES
+int PrintFuture = -1;     // env OBJC_PRINT_FUTURE_CLASSES
+int PrintRTP = -1;        // env OBJC_PRINT_RTP
+int PrintGC = -1;         // env OBJC_PRINT_GC
+int PrintPreopt = -1;     // env OBJC_PRINT_PREOPTIMIZATION
+int PrintCxxCtors = -1;   // env OBJC_PRINT_CXX_CTORS
+int PrintExceptions = -1; // env OBJC_PRINT_EXCEPTIONS
+int PrintExceptionThrow = -1; // env OBJC_PRINT_EXCEPTION_THROW
+int PrintAltHandlers = -1; // env OBJC_PRINT_ALT_HANDLERS
+int PrintDeprecation = -1;// env OBJC_PRINT_DEPRECATION_WARNINGS
+int PrintReplacedMethods = -1; // env OBJC_PRINT_REPLACED_METHODS
+int PrintCaches = -1;     // env OBJC_PRINT_CACHE_SETUP
+int PrintPoolHiwat = -1;  // env OBJC_PRINT_POOL_HIGHWATER
+int PrintCustomRR = -1;   // env OBJC_PRINT_CUSTOM_RR
+int PrintCustomAWZ = -1;  // env OBJC_PRINT_CUSTOM_AWZ
 
-PRIVATE_EXTERN int UseInternalZone = -1; // env OBJC_USE_INTERNAL_ZONE
+int UseInternalZone = -1; // env OBJC_USE_INTERNAL_ZONE
 
-PRIVATE_EXTERN int DebugUnload = -1;     // env OBJC_DEBUG_UNLOAD
-PRIVATE_EXTERN int DebugFragileSuperclasses = -1; // env OBJC_DEBUG_FRAGILE_SUPERCLASSES
-PRIVATE_EXTERN int DebugNilSync = -1;    // env OBJC_DEBUG_NIL_SYNC
-PRIVATE_EXTERN int DebugNonFragileIvars = -1; // env OBJC_DEBUG_NONFRAGILE_IVARS
-PRIVATE_EXTERN int DebugAltHandlers = -1;// env OBJC_DEBUG_ALT_HANDLERS
+int DebugUnload = -1;     // env OBJC_DEBUG_UNLOAD
+int DebugFragileSuperclasses = -1; // env OBJC_DEBUG_FRAGILE_SUPERCLASSES
+int DebugNilSync = -1;    // env OBJC_DEBUG_NIL_SYNC
+int DebugNonFragileIvars = -1; // env OBJC_DEBUG_NONFRAGILE_IVARS
+int DebugAltHandlers = -1;// env OBJC_DEBUG_ALT_HANDLERS
 
-PRIVATE_EXTERN int DisableGC = -1;       // env OBJC_DISABLE_GC
-PRIVATE_EXTERN int DisableVtables = -1;  // env OBJC_DISABLE_VTABLES
-PRIVATE_EXTERN int DisablePreopt = -1;   // env OBJC_DISABLE_PREOPTIMIZATION
-PRIVATE_EXTERN int DebugFinalizers = -1; // env OBJC_DEBUG_FINALIZERS
+int DisableGC = -1;       // env OBJC_DISABLE_GC
+int DisableVtables = -1;  // env OBJC_DISABLE_VTABLES
+int DisablePreopt = -1;   // env OBJC_DISABLE_PREOPTIMIZATION
+int DebugFinalizers = -1; // env OBJC_DEBUG_FINALIZERS
 #endif
 
 
@@ -87,25 +89,26 @@ PRIVATE_EXTERN int DebugFinalizers = -1; // env OBJC_DEBUG_FINALIZERS
 static tls_key_t _objc_pthread_key;
 
 // Selectors
-PRIVATE_EXTERN SEL SEL_load = NULL;
-PRIVATE_EXTERN SEL SEL_initialize = NULL;
-PRIVATE_EXTERN SEL SEL_resolveInstanceMethod = NULL;
-PRIVATE_EXTERN SEL SEL_resolveClassMethod = NULL;
-PRIVATE_EXTERN SEL SEL_cxx_construct = NULL;
-PRIVATE_EXTERN SEL SEL_cxx_destruct = NULL;
-PRIVATE_EXTERN SEL SEL_retain = NULL;
-PRIVATE_EXTERN SEL SEL_release = NULL;
-PRIVATE_EXTERN SEL SEL_autorelease = NULL;
-PRIVATE_EXTERN SEL SEL_retainCount = NULL;
-PRIVATE_EXTERN SEL SEL_alloc = NULL;
-PRIVATE_EXTERN SEL SEL_copy = NULL;
-PRIVATE_EXTERN SEL SEL_new = NULL;
-PRIVATE_EXTERN SEL SEL_finalize = NULL;
-PRIVATE_EXTERN SEL SEL_forwardInvocation = NULL;
+SEL SEL_load = NULL;
+SEL SEL_initialize = NULL;
+SEL SEL_resolveInstanceMethod = NULL;
+SEL SEL_resolveClassMethod = NULL;
+SEL SEL_cxx_construct = NULL;
+SEL SEL_cxx_destruct = NULL;
+SEL SEL_retain = NULL;
+SEL SEL_release = NULL;
+SEL SEL_autorelease = NULL;
+SEL SEL_retainCount = NULL;
+SEL SEL_alloc = NULL;
+SEL SEL_allocWithZone = NULL;
+SEL SEL_copy = NULL;
+SEL SEL_new = NULL;
+SEL SEL_finalize = NULL;
+SEL SEL_forwardInvocation = NULL;
 
-PRIVATE_EXTERN header_info *FirstHeader = 0;  // NULL means empty list
-PRIVATE_EXTERN header_info *LastHeader  = 0;  // NULL means invalid; recompute it
-PRIVATE_EXTERN int HeaderCount = 0;
+header_info *FirstHeader = 0;  // NULL means empty list
+header_info *LastHeader  = 0;  // NULL means invalid; recompute it
+int HeaderCount = 0;
 
 
 
@@ -203,18 +206,9 @@ id objc_getMetaClass(const char *aClassName)
 
 
 /***********************************************************************
-* _nameForHeader.
+* appendHeader.  Add a newly-constructed header_info to the list. 
 **********************************************************************/
-PRIVATE_EXTERN const char *_nameForHeader(const headerType *header)
-{
-    return _getObjcHeaderName ((headerType *) header);
-}
-
-
-/***********************************************************************
-* _objc_appendHeader.  Add a newly-constructed header_info to the list. 
-**********************************************************************/
-PRIVATE_EXTERN void _objc_appendHeader(header_info *hi)
+void appendHeader(header_info *hi)
 {
     // Add the header to the header list. 
     // The header is appended to the list, to preserve the bottom-up order.
@@ -237,13 +231,13 @@ PRIVATE_EXTERN void _objc_appendHeader(header_info *hi)
 
 
 /***********************************************************************
-* _objc_RemoveHeader
+* removeHeader
 * Remove the given header from the header list.
 * FirstHeader is updated. 
 * LastHeader is set to NULL. Any code that uses LastHeader must 
 * detect this NULL and recompute LastHeader by traversing the list.
 **********************************************************************/
-PRIVATE_EXTERN void _objc_removeHeader(header_info *hi)
+void removeHeader(header_info *hi)
 {
     header_info **hiP;
 
@@ -271,7 +265,7 @@ PRIVATE_EXTERN void _objc_removeHeader(header_info *hi)
 * Read environment variables that affect the runtime.
 * Also print environment variable help, if requested.
 **********************************************************************/
-PRIVATE_EXTERN void environ_init(void) 
+void environ_init(void) 
 {
 #if SUPPORT_ENVIRON
     int PrintHelp = (getenv("OBJC_HELP") != NULL);
@@ -350,7 +344,11 @@ PRIVATE_EXTERN void environ_init(void)
     OPTION(PrintDeprecation, OBJC_PRINT_DEPRECATION_WARNINGS, 
            "warn about calls to deprecated runtime functions");
     OPTION(PrintPoolHiwat, OBJC_PRINT_POOL_HIGHWATER, 
-           "print high-water marks for autorelease pools");
+           "log high-water marks for autorelease pools");
+    OPTION(PrintCustomRR, OBJC_PRINT_CUSTOM_RR, 
+           "log classes with un-optimized custom retain/release methods");
+    OPTION(PrintCustomAWZ, OBJC_PRINT_CUSTOM_AWZ, 
+           "log classes with un-optimized custom allocWithZone methods");
 
     OPTION(DebugUnload, OBJC_DEBUG_UNLOAD,
            "warn about poorly-behaving bundles when unloaded");
@@ -384,7 +382,7 @@ PRIVATE_EXTERN void environ_init(void)
 * logReplacedMethod
 * OBJC_PRINT_REPLACED_METHODS implementation
 **********************************************************************/
-PRIVATE_EXTERN void 
+void 
 logReplacedMethod(const char *className, SEL s, 
                   BOOL isMeta, const char *catName, 
                   IMP oldImp, IMP newImp)
@@ -400,8 +398,8 @@ logReplacedMethod(const char *className, SEL s,
 #else
     Dl_info dl;
 
-    if (dladdr(oldImp, &dl)  &&  dl.dli_fname) oldImage = dl.dli_fname;
-    if (dladdr(newImp, &dl)  &&  dl.dli_fname) newImage = dl.dli_fname;
+    if (dladdr((void*)oldImp, &dl)  &&  dl.dli_fname) oldImage = dl.dli_fname;
+    if (dladdr((void*)newImp, &dl)  &&  dl.dli_fname) newImage = dl.dli_fname;
 #endif
     
     _objc_inform("REPLACED: %c[%s %s]  %s%s  (IMP was %p (%s), now %p (%s))",
@@ -429,13 +427,14 @@ void objc_setMultithreaded (BOOL flag)
 * If the data doesn't exist yet and create is NO, return NULL.
 * If the data doesn't exist yet and create is YES, allocate and return it.
 **********************************************************************/
-PRIVATE_EXTERN _objc_pthread_data *_objc_fetch_pthread_data(BOOL create)
+_objc_pthread_data *_objc_fetch_pthread_data(BOOL create)
 {
     _objc_pthread_data *data;
 
-    data = tls_get(_objc_pthread_key);
+    data = (_objc_pthread_data *)tls_get(_objc_pthread_key);
     if (!data  &&  create) {
-        data = _calloc_internal(1, sizeof(_objc_pthread_data));
+        data = (_objc_pthread_data *)
+            _calloc_internal(1, sizeof(_objc_pthread_data));
         tls_set(_objc_pthread_key, data);
     }
 
@@ -449,7 +448,7 @@ PRIVATE_EXTERN _objc_pthread_data *_objc_fetch_pthread_data(BOOL create)
 * arg shouldn't be NULL, but we check anyway.
 **********************************************************************/
 extern void _destroyInitializingClassList(struct _objc_initializing_classes *list);
-PRIVATE_EXTERN void _objc_pthread_destroyspecific(void *arg)
+void _objc_pthread_destroyspecific(void *arg)
 {
     _objc_pthread_data *data = (_objc_pthread_data *)arg;
     if (data != NULL) {
@@ -464,7 +463,7 @@ PRIVATE_EXTERN void _objc_pthread_destroyspecific(void *arg)
 }
 
 
-PRIVATE_EXTERN void tls_init(void)
+void tls_init(void)
 {
 #if SUPPORT_DIRECT_THREAD_KEYS
     _objc_pthread_key = TLS_DIRECT_KEY;
@@ -528,12 +527,12 @@ void objc_setForwardHandler(void *fwd, void *fwd_stret)
 * Returns the number of BYTES needed 
 * for a branch from entry to target. 
 **********************************************************************/
-PRIVATE_EXTERN size_t objc_branch_size(void *entry, void *target)
+size_t objc_branch_size(void *entry, void *target)
 {
     return objc_cond_branch_size(entry, target, COND_ALWAYS);
 }
 
-PRIVATE_EXTERN size_t 
+size_t 
 objc_cond_branch_size(void *entry, void *target, unsigned cond)
 {
     // For simplicity, always use 32-bit relative jumps.
@@ -547,12 +546,12 @@ objc_cond_branch_size(void *entry, void *target, unsigned cond)
 * The sequence written will be objc_branch_size(entry, target) BYTES.
 * Returns the number of BYTES written.
 **********************************************************************/
-PRIVATE_EXTERN size_t objc_write_branch(void *entry, void *target) 
+size_t objc_write_branch(void *entry, void *target) 
 {
     return objc_write_cond_branch(entry, target, COND_ALWAYS);
 }
 
-PRIVATE_EXTERN size_t 
+size_t 
 objc_write_cond_branch(void *entry, void *target, unsigned cond) 
 {
     uint8_t *address = (uint8_t *)entry;  // instructions written to here
@@ -580,7 +579,7 @@ objc_write_cond_branch(void *entry, void *target, unsigned cond)
 
 #if !__OBJC2__
 // GrP fixme
-extern Class _objc_getOrigClass(const char *name);
+OBJC_EXTERN Class _objc_getOrigClass(const char *name);
 #endif
 const char *class_getImageName(Class cls)
 {
@@ -624,19 +623,19 @@ const char **objc_copyImageNames(unsigned int *outCount)
     int count = 0;
     int max = HeaderCount;
 #if TARGET_OS_WIN32
-    const TCHAR **names = calloc(max+1, sizeof(TCHAR *));
+    const TCHAR **names = (const TCHAR **)calloc(max+1, sizeof(TCHAR *));
 #else
-    const char **names = calloc(max+1, sizeof(char *));
+    const char **names = (const char **)calloc(max+1, sizeof(char *));
 #endif
     
     for (hi = FirstHeader; hi != NULL && count < max; hi = hi->next) {
 #if TARGET_OS_WIN32
-        if (hi->os.moduleName) {
-            names[count++] = hi->os.moduleName;
+        if (hi->moduleName) {
+            names[count++] = hi->moduleName;
         }
 #else
-        if (hi->os.dl_info.dli_fname) {
-            names[count++] = hi->os.dl_info.dli_fname;
+        if (hi->fname) {
+            names[count++] = hi->fname;
         }
 #endif
     }
@@ -669,9 +668,9 @@ objc_copyClassNamesForImage(const char *image, unsigned int *outCount)
     // Find the image.
     for (hi = FirstHeader; hi != NULL; hi = hi->next) {
 #if TARGET_OS_WIN32
-        if (0 == wcscmp((TCHAR *)image, hi->os.moduleName)) break;
+        if (0 == wcscmp((TCHAR *)image, hi->moduleName)) break;
 #else
-        if (0 == strcmp(image, hi->os.dl_info.dli_fname)) break;
+        if (0 == strcmp(image, hi->fname)) break;
 #endif
     }
     
@@ -716,19 +715,19 @@ void objc_setEnumerationMutationHandler(void (*handler)(id)) {
 **********************************************************************/
 
 #if SUPPORT_GC
-PRIVATE_EXTERN id objc_getAssociatedObject_gc(id object, const void *key) {
-    return auto_zone_get_associative_ref(gc_zone, object, (void *)key);
+id objc_getAssociatedObject_gc(id object, const void *key) {
+    return (id)auto_zone_get_associative_ref(gc_zone, object, (void *)key);
 }
 #endif
 
-PRIVATE_EXTERN id objc_getAssociatedObject_non_gc(id object, const void *key) {
+id objc_getAssociatedObject_non_gc(id object, const void *key) {
     return _object_get_associative_reference(object, (void *)key);
 }
 
 id objc_getAssociatedObject(id object, const void *key) {
 #if SUPPORT_GC
     if (UseGC) {
-        return auto_zone_get_associative_ref(gc_zone, object, (void *)key);
+        return (id)auto_zone_get_associative_ref(gc_zone, object, (void *)key);
     } else 
 #endif
     {
@@ -737,15 +736,15 @@ id objc_getAssociatedObject(id object, const void *key) {
 }
 
 #if SUPPORT_GC
-PRIVATE_EXTERN void objc_setAssociatedObject_gc(id object, const void *key, id value, objc_AssociationPolicy policy) {
+void objc_setAssociatedObject_gc(id object, const void *key, id value, objc_AssociationPolicy policy) {
     if ((policy & OBJC_ASSOCIATION_COPY_NONATOMIC) == OBJC_ASSOCIATION_COPY_NONATOMIC) {
-        value = objc_msgSend(value, SEL_copy);
+        value = ((id(*)(id, SEL))objc_msgSend)(value, SEL_copy);
     }
     auto_zone_set_associative_ref(gc_zone, object, (void *)key, value);
 }
 #endif
 
-PRIVATE_EXTERN void objc_setAssociatedObject_non_gc(id object, const void *key, id value, objc_AssociationPolicy policy) {
+void objc_setAssociatedObject_non_gc(id object, const void *key, id value, objc_AssociationPolicy policy) {
     _object_set_associative_reference(object, (void *)key, value, policy);
 }
 
@@ -753,7 +752,7 @@ void objc_setAssociatedObject(id object, const void *key, id value, objc_Associa
 #if SUPPORT_GC
     if (UseGC) {
         if ((policy & OBJC_ASSOCIATION_COPY_NONATOMIC) == OBJC_ASSOCIATION_COPY_NONATOMIC) {
-            value = objc_msgSend(value, SEL_copy);
+            value = ((id(*)(id, SEL))objc_msgSend)(value, SEL_copy);
         }
         auto_zone_set_associative_ref(gc_zone, object, (void *)key, value);
     } else 
@@ -801,8 +800,8 @@ BOOL class_instancesHaveAssociatedObjects(Class cls) {
 
 #if SUPPORT_DEBUGGER_MODE
 
-PRIVATE_EXTERN int DebuggerMode = DEBUGGER_OFF;
-PRIVATE_EXTERN objc_thread_t DebuggerModeThread = 0;
+int DebuggerMode = DEBUGGER_OFF;
+objc_thread_t DebuggerModeThread = 0;
 static int DebuggerModeCount;
 
 /**********************************************************************

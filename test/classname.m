@@ -1,45 +1,38 @@
 // TEST_CONFIG
 
 #include "test.h"
+#include "testroot.i"
 #include <string.h>
-#include <objc/objc-runtime.h>
+#include <objc/runtime.h>
 
-@interface Super { @public id isa; } @end
-@implementation Super 
-+(void)initialize { } 
-+class { return self; }
-@end
-
-@interface Fake { @public id isa; } @end
-@implementation Fake
-+(void)initialize { } 
-+class { return self; }
-@end
+@interface Fake : TestRoot @end
+@implementation Fake @end
 
 int main()
 {
-    id buf[10];
-    Super *obj = (Super *)buf;
-    buf[0] = [Fake class];
+    TestRoot *obj = [TestRoot new];
+    Class __unsafe_unretained * buf = (Class *)objc_unretainedPointer(obj);
+    *buf = [Fake class];
 
-    testassert(obj->isa == [Fake class]);
-    testassert(object_setClass(obj, [Super class]) == [Fake class]);
-    testassert(obj->isa == [Super class]);
-    testassert(object_setClass(nil, [Super class]) == nil);
+    testassert(object_getClass(obj) == [Fake class]);
+    testassert(object_setClass(obj, [TestRoot class]) == [Fake class]);
+    testassert(object_getClass(obj) == [TestRoot class]);
+    testassert(object_setClass(nil, [TestRoot class]) == nil);
 
-    bzero(buf, sizeof(buf));
-    testassert(object_setClass(obj, [Super class]) == nil);
+    testassert(malloc_size(buf) >= sizeof(id));
+    bzero(buf, malloc_size(buf));
+    testassert(object_setClass(obj, [TestRoot class]) == nil);
 
     testassert(object_getClass(obj) == buf[0]);
-    testassert(object_getClass([Super class]) == [Super class]->isa);
+    testassert(object_getClass([TestRoot class]) == object_getClass([TestRoot class]));
     testassert(object_getClass(nil) == Nil);
 
-    testassert(0 == strcmp(object_getClassName(obj), "Super"));
-    testassert(0 == strcmp(object_getClassName([Super class]), "Super"));
+    testassert(0 == strcmp(object_getClassName(obj), "TestRoot"));
+    testassert(0 == strcmp(object_getClassName([TestRoot class]), "TestRoot"));
     testassert(0 == strcmp(object_getClassName(nil), "nil"));
     
-    testassert(0 == strcmp(class_getName([Super class]), "Super"));
-    testassert(0 == strcmp(class_getName([Super class]->isa), "Super"));
+    testassert(0 == strcmp(class_getName([TestRoot class]), "TestRoot"));
+    testassert(0 == strcmp(class_getName(object_getClass([TestRoot class])), "TestRoot"));
     testassert(0 == strcmp(class_getName(nil), "nil"));
 
     succeed(__FILE__);

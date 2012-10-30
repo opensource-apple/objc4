@@ -3,19 +3,28 @@
 .align 3
 .private_extern __objc_opt_data
 __objc_opt_data:
-.long 10 /* table.version */
+.long 12 /* table.version */
 .long 0 /* table.selopt_offset */
-.space 4096-8
+.long 0 /* table.headeropt_offset */
+.long 0 /* table.clsopt_offset */
+.space 4096-16
 
 /* space for selopt, smax/capacity=131072, blen/mask=65535+1 */
 .space 65536
-.space 131072*4  /* offsets */
 .space 131072    /* checkbytes */
+.space 131072*4  /* offsets */
 
-#if __arm__
+	
+/* space for clsopt, smax/capacity=16384, blen/mask=4095+1 */
+.space 4096
+.space 16384    /* checkbytes */
+.space 16384*12 /* offsets to name and class and header_info */
+.space 4096	/* some duplicate classes */
+
+
 .section __DATA,__objc_opt_rw
 .align 3
-.space 256*1024
-#else
-/* optimization performed in linker, not shared cache */
-#endif
+.private_extern __objc_opt_rw_data
+__objc_opt_rw_data:
+/* space for header_info structures */
+.space 4096*4

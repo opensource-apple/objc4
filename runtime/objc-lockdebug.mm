@@ -76,7 +76,7 @@ getLocks(BOOL create)
         if (!create) {
             return NULL;
         } else {
-            locks = _calloc_internal(1, sizeof(_objc_lock_list) + sizeof(lockcount) * 16);
+            locks = (_objc_lock_list *)_calloc_internal(1, sizeof(_objc_lock_list) + sizeof(lockcount) * 16);
             locks->allocated = 16;
             locks->used = 0;
             tls_set(lock_tls, locks);
@@ -88,7 +88,7 @@ getLocks(BOOL create)
             return locks;
         } else {
             _objc_lock_list *oldlocks = locks;
-            locks = _calloc_internal(1, sizeof(_objc_lock_list) + 2 * oldlocks->used * sizeof(lockcount));
+            locks = (_objc_lock_list *)_calloc_internal(1, sizeof(_objc_lock_list) + 2 * oldlocks->used * sizeof(lockcount));
             locks->used = oldlocks->used;
             locks->allocated = oldlocks->used * 2;
             memcpy(locks->list, oldlocks->list, locks->used * sizeof(lockcount));
@@ -152,7 +152,7 @@ clearLock(_objc_lock_list *locks, void *lock, int kind)
 * Mutex checking
 **********************************************************************/
 
-PRIVATE_EXTERN int 
+int 
 _mutex_lock_debug(mutex_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(YES);
@@ -167,7 +167,7 @@ _mutex_lock_debug(mutex_t *lock, const char *name)
     return _mutex_lock_nodebug(lock);
 }
 
-PRIVATE_EXTERN int 
+int 
 _mutex_try_lock_debug(mutex_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(YES);
@@ -183,7 +183,7 @@ _mutex_try_lock_debug(mutex_t *lock, const char *name)
     return result;
 }
 
-PRIVATE_EXTERN int 
+int 
 _mutex_unlock_debug(mutex_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -198,7 +198,7 @@ _mutex_unlock_debug(mutex_t *lock, const char *name)
     return _mutex_unlock_nodebug(lock);
 }
 
-PRIVATE_EXTERN void 
+void 
 _mutex_assert_locked_debug(mutex_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -211,7 +211,7 @@ _mutex_assert_locked_debug(mutex_t *lock, const char *name)
 }
 
 
-PRIVATE_EXTERN void 
+void 
 _mutex_assert_unlocked_debug(mutex_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -228,7 +228,7 @@ _mutex_assert_unlocked_debug(mutex_t *lock, const char *name)
 * Recursive mutex checking
 **********************************************************************/
 
-PRIVATE_EXTERN int 
+int 
 _recursive_mutex_lock_debug(recursive_mutex_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(YES);
@@ -240,7 +240,7 @@ _recursive_mutex_lock_debug(recursive_mutex_t *lock, const char *name)
     return _recursive_mutex_lock_nodebug(lock);
 }
 
-PRIVATE_EXTERN int 
+int 
 _recursive_mutex_try_lock_debug(recursive_mutex_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(YES);
@@ -255,7 +255,7 @@ _recursive_mutex_try_lock_debug(recursive_mutex_t *lock, const char *name)
     return result;
 }
 
-PRIVATE_EXTERN int 
+int 
 _recursive_mutex_unlock_debug(recursive_mutex_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -270,7 +270,7 @@ _recursive_mutex_unlock_debug(recursive_mutex_t *lock, const char *name)
     return _recursive_mutex_unlock_nodebug(lock);
 }
 
-PRIVATE_EXTERN void 
+void 
 _recursive_mutex_assert_locked_debug(recursive_mutex_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -283,7 +283,7 @@ _recursive_mutex_assert_locked_debug(recursive_mutex_t *lock, const char *name)
 }
 
 
-PRIVATE_EXTERN void 
+void 
 _recursive_mutex_assert_unlocked_debug(recursive_mutex_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -300,7 +300,7 @@ _recursive_mutex_assert_unlocked_debug(recursive_mutex_t *lock, const char *name
 * Monitor checking
 **********************************************************************/
 
-PRIVATE_EXTERN int 
+int 
 _monitor_enter_debug(monitor_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(YES);
@@ -315,7 +315,7 @@ _monitor_enter_debug(monitor_t *lock, const char *name)
     return _monitor_enter_nodebug(lock);
 }
 
-PRIVATE_EXTERN int 
+int 
 _monitor_exit_debug(monitor_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -330,7 +330,7 @@ _monitor_exit_debug(monitor_t *lock, const char *name)
     return _monitor_exit_nodebug(lock);
 }
 
-PRIVATE_EXTERN int 
+int 
 _monitor_wait_debug(monitor_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -344,7 +344,7 @@ _monitor_wait_debug(monitor_t *lock, const char *name)
     return _monitor_wait_nodebug(lock);
 }
 
-PRIVATE_EXTERN void 
+void 
 _monitor_assert_locked_debug(monitor_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -356,7 +356,7 @@ _monitor_assert_locked_debug(monitor_t *lock, const char *name)
     }
 }
 
-PRIVATE_EXTERN void 
+void 
 _monitor_assert_unlocked_debug(monitor_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -373,7 +373,7 @@ _monitor_assert_unlocked_debug(monitor_t *lock, const char *name)
 * rwlock checking
 **********************************************************************/
 
-PRIVATE_EXTERN void
+void
 _rwlock_read_debug(rwlock_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(YES);
@@ -392,7 +392,7 @@ _rwlock_read_debug(rwlock_t *lock, const char *name)
     _rwlock_read_nodebug(lock);
 }
 
-PRIVATE_EXTERN int 
+int 
 _rwlock_try_read_debug(rwlock_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(YES);
@@ -409,7 +409,7 @@ _rwlock_try_read_debug(rwlock_t *lock, const char *name)
     return result;
 }
 
-PRIVATE_EXTERN void 
+void 
 _rwlock_unlock_read_debug(rwlock_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -424,7 +424,7 @@ _rwlock_unlock_read_debug(rwlock_t *lock, const char *name)
     _rwlock_unlock_read_nodebug(lock);
 }
 
-PRIVATE_EXTERN void
+void
 _rwlock_write_debug(rwlock_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(YES);
@@ -444,7 +444,7 @@ _rwlock_write_debug(rwlock_t *lock, const char *name)
 }
 
 
-PRIVATE_EXTERN int 
+int 
 _rwlock_try_write_debug(rwlock_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(YES);
@@ -461,7 +461,7 @@ _rwlock_try_write_debug(rwlock_t *lock, const char *name)
     return result;
 }
 
-PRIVATE_EXTERN void 
+void 
 _rwlock_unlock_write_debug(rwlock_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -477,7 +477,7 @@ _rwlock_unlock_write_debug(rwlock_t *lock, const char *name)
 }
 
 
-PRIVATE_EXTERN void 
+void 
 _rwlock_assert_reading_debug(rwlock_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -489,7 +489,7 @@ _rwlock_assert_reading_debug(rwlock_t *lock, const char *name)
     }
 }
 
-PRIVATE_EXTERN void 
+void 
 _rwlock_assert_writing_debug(rwlock_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -501,7 +501,7 @@ _rwlock_assert_writing_debug(rwlock_t *lock, const char *name)
     }
 }
 
-PRIVATE_EXTERN void 
+void 
 _rwlock_assert_locked_debug(rwlock_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);
@@ -514,7 +514,7 @@ _rwlock_assert_locked_debug(rwlock_t *lock, const char *name)
     }
 }
 
-PRIVATE_EXTERN void 
+void 
 _rwlock_assert_unlocked_debug(rwlock_t *lock, const char *name)
 {
     _objc_lock_list *locks = getLocks(NO);

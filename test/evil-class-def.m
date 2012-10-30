@@ -161,6 +161,8 @@ asm(
 #if !OMIT_NL_SUB
     PTR "_OBJC_CLASS_$_Sub \n"
 #endif
+
+    ".text \n"
 );
 
 // __OBJC2__

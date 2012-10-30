@@ -1,3 +1,4 @@
+// TEST_CONFIG MEM=mrc,gc
 // TEST_CFLAGS -Wno-deprecated-declarations
 
 #include "test.h"
@@ -9,14 +10,14 @@ static int state = 0;
 
 @interface Super { id isa; } @end
 @implementation Super 
-+class { return self; }
++(id)class { return self; }
 +(void)initialize { } 
 
-+normal { state = 1; return self; } 
-+normal2 { testassert(0); } 
-+retain { state = 2; return self; } 
-+release { state = 3; return self; } 
-+autorelease { state = 4; return self; } 
++(id)ordinary { state = 1; return self; } 
++(id)ordinary2 { testassert(0); } 
++(id)retain { state = 2; return self; } 
++(void)release { state = 3; } 
++(id)autorelease { state = 4; return self; } 
 +(void)dealloc { state = 5; } 
 +(uintptr_t)retainCount { state = 6; return 6; } 
 @end
@@ -29,9 +30,9 @@ static int state = 0;
 
 @interface Empty { id isa; } @end
 @implementation Empty
-+class { return self; }
++(id)class { return self; }
 +(void)initialize { }
-+forward:(SEL)sel :(marg_list)margs { 
++(id)forward:(SEL)sel :(marg_list)margs { 
     (void)sel; (void)margs; 
     state = 1; 
     return nil; 
@@ -39,10 +40,10 @@ static int state = 0;
 @end
 
 @interface Empty (Unimplemented)
-+normal;
-+retain;
-+release;
-+autorelease;
++(id)ordinary;
++(id)retain;
++(void)release;
++(id)autorelease;
 +(void)dealloc;
 +(uintptr_t)retainCount;
 @end
@@ -57,8 +58,8 @@ static int state = 0;
     } while (0)
 
 
-static IMP normal, normal2, retain, release, autorelease, dealloc, retainCount;
-static Method normalMethod, normal2Method, retainMethod, releaseMethod, autoreleaseMethod, deallocMethod, retainCountMethod;
+static IMP ordinary, ordinary2, retain, release, autorelease, dealloc, retainCount;
+static Method ordinaryMethod, ordinary2Method, retainMethod, releaseMethod, autoreleaseMethod, deallocMethod, retainCountMethod;
 
 void cycle(Class cls)
 {
@@ -84,14 +85,14 @@ void cycle(Class cls)
     }
 
     // no ignored selector matches a real selector
-    testassert(@selector(normal) != @selector(retain)       &&  
-               @selector(normal) != @selector(release)      &&  
-               @selector(normal) != @selector(autorelease)  &&  
-               @selector(normal) != @selector(dealloc)      &&  
-               @selector(normal) != @selector(retainCount)  );
+    testassert(@selector(ordinary) != @selector(retain)       &&  
+               @selector(ordinary) != @selector(release)      &&  
+               @selector(ordinary) != @selector(autorelease)  &&  
+               @selector(ordinary) != @selector(dealloc)      &&  
+               @selector(ordinary) != @selector(retainCount)  );
 
-    getImp(normal);
-    getImp(normal2);
+    getImp(ordinary);
+    getImp(ordinary2);
     getImp(retain);
     getImp(release);
     getImp(autorelease);
@@ -114,15 +115,15 @@ void cycle(Class cls)
     }
 
     // no ignored selector IMP matches a real selector IMP
-    testassert(normal != retain       &&  
-               normal != release      &&  
-               normal != autorelease  &&  
-               normal != dealloc      &&  
-               normal != retainCount  );
+    testassert(ordinary != retain       &&  
+               ordinary != release      &&  
+               ordinary != autorelease  &&  
+               ordinary != dealloc      &&  
+               ordinary != retainCount  );
     
     // Test calls via method_invoke
 
-    idVal =         ((id(*)(id, Method))method_invoke)(cls, normalMethod);
+    idVal =         ((id(*)(id, Method))method_invoke)(cls, ordinaryMethod);
     testassert(state == 1);
     testassert(idVal == cls);
 
@@ -131,9 +132,8 @@ void cycle(Class cls)
     testassert(state == (objc_collectingEnabled() ? 0 : 2));
     testassert(idVal == cls);
 
-    idVal =         ((id(*)(id, Method))method_invoke)(cls, releaseMethod);
+    (void)        ((void(*)(id, Method))method_invoke)(cls, releaseMethod);
     testassert(state == (objc_collectingEnabled() ? 0 : 3));
-    testassert(idVal == cls);
 
     idVal =         ((id(*)(id, Method))method_invoke)(cls, autoreleaseMethod);
     testassert(state == (objc_collectingEnabled() ? 0 : 4));
@@ -150,7 +150,7 @@ void cycle(Class cls)
     // Test calls via compiled objc_msgSend
 
     state = 0;
-    idVal  = [cls normal];
+    idVal  = [cls ordinary];
     testassert(state == 1);
     testassert(idVal == cls);
 
@@ -159,9 +159,8 @@ void cycle(Class cls)
     testassert(state == (objc_collectingEnabled() ? 0 : 2));
     testassert(idVal == cls);
 
-    idVal  = [cls release];
+    (void)   [cls release];
     testassert(state == (objc_collectingEnabled() ? 0 : 3));
-    testassert(idVal == cls);
 
     idVal  = [cls autorelease];
     testassert(state == (objc_collectingEnabled() ? 0 : 4));
@@ -177,7 +176,7 @@ void cycle(Class cls)
     // Test calls via handwritten objc_msgSend
 
     state = 0;
-    idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(normal));
+    idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(ordinary));
     testassert(state == 1);
     testassert(idVal == cls);
 
@@ -186,15 +185,14 @@ void cycle(Class cls)
     testassert(state == (objc_collectingEnabled() ? 0 : 2));
     testassert(idVal == cls);
 
-    idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(release));
+    (void) ((void(*)(id,SEL))objc_msgSend)(cls, @selector(release));
     testassert(state == (objc_collectingEnabled() ? 0 : 3));
-    testassert(idVal == cls);
 
     idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(autorelease));
     testassert(state == (objc_collectingEnabled() ? 0 : 4));
     testassert(idVal == cls);
 
-    (void)   ((void(*)(id,SEL))objc_msgSend)(cls, @selector(dealloc));
+    (void) ((void(*)(id,SEL))objc_msgSend)(cls, @selector(dealloc));
     testassert(state == (objc_collectingEnabled() ? 0 : 5));
 
     intVal = ((uintptr_t(*)(id,SEL))objc_msgSend)(cls, @selector(retainCount));
@@ -245,13 +243,13 @@ int main()
         method_setImplementation(retainCountMethod, (IMP)1);
         cycle(cls);
 
-        testassert(normal2 != dealloc);
-        method_exchangeImplementations(retainMethod, releaseMethod);
-        method_exchangeImplementations(autoreleaseMethod, retainCountMethod);
-        method_exchangeImplementations(deallocMethod, normal2Method);
+        testassert(ordinary2 != retainCount);
+        method_exchangeImplementations(retainMethod, autoreleaseMethod);
+        method_exchangeImplementations(deallocMethod, releaseMethod);
+        method_exchangeImplementations(retainCountMethod, ordinary2Method);
         cycle(cls);
-        // normal2 exchanged with ignored method is now ignored too
-        testassert(normal2 == dealloc);
+        // ordinary2 exchanged with ignored method is now ignored too
+        testassert(ordinary2 == retainCount);
 
         // replace == replace existing
         class_replaceMethod(cls, @selector(retain), (IMP)1, "");
@@ -299,9 +297,8 @@ int main()
         testassert(state == 0);
         testassert(idVal == cls);
 
-        idVal  = [Empty release];
+        (void)   [Empty release];
         testassert(state == 0);
-        testassert(idVal == cls);
 
         idVal  = [Empty autorelease];
         testassert(state == 0);
@@ -314,7 +311,7 @@ int main()
         testassert(state == 0);
         testassert(intVal == (uintptr_t)cls);
 
-        idVal  = [Empty normal];
+        idVal  = [Empty ordinary];
         testassert(state == 1);
         testassert(idVal == nil);
 
@@ -324,22 +321,21 @@ int main()
         testassert(state == 0);
         testassert(idVal == cls);
 
-        idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(release));
+        (void) ((void(*)(id,SEL))objc_msgSend)(cls, @selector(release));
         testassert(state == 0);
-        testassert(idVal == cls);
 
         idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(autorelease));
         testassert(state == 0);
         testassert(idVal == cls);
 
-        (void)   ((void(*)(id,SEL))objc_msgSend)(cls, @selector(dealloc));
+        (void) ((void(*)(id,SEL))objc_msgSend)(cls, @selector(dealloc));
         testassert(state == 0);
 
         intVal = ((uintptr_t(*)(id,SEL))objc_msgSend)(cls, @selector(retainCount));
         testassert(state == 0);
         testassert(intVal == (uintptr_t)cls);
 
-        idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(normal));
+        idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(ordinary));
         testassert(state == 1);
         testassert(idVal == nil);
     }    

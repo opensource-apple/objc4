@@ -24,39 +24,18 @@
 #ifndef _OBJC_ACCESSORS_H_
 #define _OBJC_ACCESSORS_H_
 
-#import <objc/objc.h>
-#import <stddef.h>
+#include <objc/objc.h>
+#include <stddef.h>
 
 __BEGIN_DECLS
 
-// Called under non-GC for retain or copy attributed properties
-void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy);
-id objc_getProperty(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic);
-
 // GC-specific accessors.
-void objc_setProperty_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy);
-id objc_getProperty_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic);
+extern void objc_setProperty_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, signed char shouldCopy);
+extern id objc_getProperty_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic);
 
 // Non-GC accessors.
-void objc_setProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy);
-id objc_getProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic);
-
-// Called under GC by compiler for copying structures containing objects or other strong pointers when
-// the destination memory is not known to be stack local memory.
-// Called to read instance variable structures (or other non-word sized entities) atomically 
-void objc_copyStruct(void *dest, const void *src, ptrdiff_t size, BOOL atomic, BOOL hasStrong);
-
-// OBSOLETE
-
-@protocol NSCopying;
-
-// called for @property(copy)
-id <NSCopying> object_getProperty_bycopy(id object, SEL _cmd, ptrdiff_t offset);
-void object_setProperty_bycopy(id object, SEL _cmd, id <NSCopying> value, ptrdiff_t offset);
-
-// called for @property(retain)
-id object_getProperty_byref(id object, SEL _cmd, ptrdiff_t offset);
-void object_setProperty_byref(id object, SEL _cmd, id value, ptrdiff_t offset);
+extern void objc_setProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, signed char shouldCopy);
+extern id objc_getProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic);
 
 __END_DECLS
 
