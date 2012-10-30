@@ -103,6 +103,7 @@ __private_extern__ void rtp_init(void)
                     "objc_assign_strongCast", objc_assign_strongCast_gc, objc_assign_strongCast_non_gc);
 
     // initialize data in ObjC runtime pages
+    memset((char *)kRTAddress_zero, 0, 16);
     strcpy((char *)kIgnore, "<ignored selector>");
 
     // re-protect the ObjC runtime pages for execution

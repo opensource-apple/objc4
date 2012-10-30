@@ -108,9 +108,10 @@
 // Absolute address of data in the RTP area
 // These count forwards from the lo end of the RTP area.
 // These are not locked down and can be moved if necessary.
-#define kRTAddress_ignoredSelector OBJC_UINTPTR_T(kRTPagesHi-kRTPagesSize)
+#define kRTAddress_zero OBJC_UINTPTR_T(kRTPagesHi-kRTPagesSize)  // 16 zero bytes
+#define kRTAddress_ignoredSelector OBJC_UINTPTR_T(kRTAddress_zero+16)  // string "<ignored selector>"
 
-#define kIgnore kRTAddress_ignoredSelector  // ppc 0xfffef000
+#define kIgnore kRTAddress_ignoredSelector  // ppc 0xfffef010
 
 /*********************************************************************
   End of runtime page layout. 

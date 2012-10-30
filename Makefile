@@ -79,7 +79,7 @@ NMEDIT = /usr/bin/nmedit
 LIPO = /usr/bin/lipo
 
 ifeq "$(PLATFORM)" "Darwin"
-WARNING_FLAGS = -Wmost -Wno-precomp -Wno-four-char-constants
+WARNING_FLAGS = -Wmost -Wno-four-char-constants
 endif
 
 ARCH_LIST= 
@@ -101,7 +101,7 @@ endif
 
 
 ifeq "$(ORDERFILE)" ""
-ORDERFILE = $(wildcard /usr/local/lib/OrderFiles/libobjc.order)
+ORDERFILE = $(SRCROOT)/libobjc.order
 endif
 ifneq "$(ORDERFILE)" ""
 ORDER = -sectorder __TEXT __text $(ORDERFILE)
@@ -113,7 +113,7 @@ ifeq "$(USER)" ""
 USER = unknown
 endif
 
-CFLAGS = -g -fno-common -fobjc-exceptions -pipe $(PLATFORM_CFLAGS) $(WARNING_FLAGS) -I$(SYMROOT) -I. -I$(SYMROOT)/ProjectHeaders
+CFLAGS = -g -fno-common -fobjc-exceptions -fdollars-in-identifiers -pipe $(PLATFORM_CFLAGS) $(WARNING_FLAGS) -I$(SYMROOT) -I. -I$(SYMROOT)/ProjectHeaders
 LDFLAGS = 
 
 LIBRARY_EXT = .dylib
@@ -200,7 +200,7 @@ MODULE_SOURCES += runtime/Messengers.subproj/objc-msg-stub.s
 OTHER_SOURCES += runtime/Messengers.subproj/objc-msg-stub-ppc.s runtime/Messengers.subproj/objc-msg-stub-i386.s
 
 # project root
-OTHER_SOURCES += Makefile APPLE_LICENSE objc-exports-i386 objc-exports-ppc
+OTHER_SOURCES += Makefile APPLE_LICENSE objc-exports libobjc.order
 
 OBJECTS = $(addprefix $(OBJROOT)/, $(addsuffix .o, $(basename $(SOURCES) ) ) )
 OBJECTS_OPTIMIZED = $(OBJECTS:.o=.opt.o)
@@ -462,7 +462,7 @@ define link
 	    $3 ; \
 	  $(SILENT) $(CC) $2 \
 	    -arch $A \
-	    -Wl,-exported_symbols_list,$(SRCROOT)/objc-exports-$(A) \
+	    -Wl,-exported_symbols_list,$(SRCROOT)/objc-exports \
 	    $(ORDER) \
 	    -sectcreate __DATA __commpage $(OBJROOT)/runtime/objc-rtp-sym.$A.o \
 	    -install_name /$(INSTALLDIR)/libobjc$1.$(VERSION_NAME)$(LIBRARY_EXT) \

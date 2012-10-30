@@ -868,12 +868,19 @@ LMsgSendNilSelf:
 	; DO NOT CHANGE THE PREVIOUS SIX INSTRUCTIONS - see note above
 
 	cmplwi  r11,0			; return nil if no new receiver
-	beqlr
+	beq	LMsgSendReturnZero
 
 	mr	r3,r11			; send to new receiver
 	lwz	r12,ISA(r11)		; class = receiver->isa
 	b	LMsgSendReceiverOk
 
+LMsgSendReturnZero:
+	li	r3, 0
+	li	r4, 0
+	lis	r12, ha16(kRTAddress_zero)
+	lfd	f1, lo16(kRTAddress_zero)(r12)
+	lfd	f2, lo16(kRTAddress_zero)(r12)
+	
 ; WARNING - This blr marks the end of the copy to the ObjC runtime pages and
 ;           also marks the beginning of the cache miss code.  Do not move
 ;           around without checking the ObjC runtime pages initialization code.
@@ -888,6 +895,15 @@ LMsgSendCacheMiss:
 LMsgSendExit:
 	END_ENTRY _objc_msgSend
 
+/********************************************************************
+ *
+ * double objc_msgSend_fpret(id self, SEL op, ...);
+ *
+ ********************************************************************/
+
+	ENTRY _objc_msgSend_fpret
+	b	_objc_msgSend
+	END_ENTRY _objc_msgSend_fpret
 
 /********************************************************************
  * struct_type	objc_msgSend_stret(id	self,
@@ -939,7 +955,7 @@ LMsgSendStretNilSelf:
 	lwz     r11,lo16(__objc_nilReceiver-1b)(r11)
 	mtlr    r0
 
-	cmplwi  r11,0			; return nil if no new receiver
+	cmplwi  r11,0			; return if no new receiver
 	beqlr
 
 	mr	r4,r11			; send to new receiver
@@ -1282,6 +1298,14 @@ LMsgSendvSendIt:
 
 	END_ENTRY _objc_msgSendv
 
+/********************************************************************
+ * double objc_msgSendv_fpret(id self, SEL op, unsigned arg_size, 
+ *                            marg_list arg_frame);
+ ********************************************************************/
+
+	ENTRY _objc_msgSendv_fpret
+	b _objc_msgSendv
+	END_ENTRY _objc_msgSendv_fpret
 
 /********************************************************************
  * struct_type	objc_msgSendv_stret(id		self,
