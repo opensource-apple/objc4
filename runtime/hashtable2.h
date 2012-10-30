@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2006 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,12 +26,15 @@
     Copyright 1989-1996 NeXT Software, Inc.
 */
 
-#warning The API in this header is obsoleted by NSHashtable.h
-
 #ifndef _OBJC_LITTLE_HASHTABLE_H_
 #define _OBJC_LITTLE_HASHTABLE_H_
 
+#ifndef _OBJC_PRIVATE_H_
+#warning The API in this header is obsoleted by NSHashtable.h
+#endif
+
 #import <objc/objc.h>
+#include <stdint.h>
 
 /*************************************************************************
  *	Hash tables of arbitrary data
@@ -44,7 +45,7 @@ The objective C class HashTable is preferred when dealing with (key, values) ass
 As well-behaved scalable data structures, hash tables double in size when they start becoming full, thus guaranteeing both average constant time access and linear size. */
 
 typedef struct {
-    uarith_t	(*hash)(const void *info, const void *data);
+    uintptr_t	(*hash)(const void *info, const void *data);
     int		(*isEqual)(const void *info, const void *data1, const void *data2);
     void	(*free)(const void *info, void *data);
     int		style; /* reserved for future expansion; currently 0 */
@@ -144,9 +145,9 @@ OBJC_EXPORT int NXNextHashState(NXHashTable *table, NXHashState *state, void **d
  *	and common prototypes
  *************************************************************************/
 
-OBJC_EXPORT uarith_t NXPtrHash(const void *info, const void *data);
+OBJC_EXPORT uintptr_t NXPtrHash(const void *info, const void *data);
     /* scrambles the address bits; info unused */
-OBJC_EXPORT uarith_t NXStrHash(const void *info, const void *data);
+OBJC_EXPORT uintptr_t NXStrHash(const void *info, const void *data);
     /* string hashing; info unused */
 OBJC_EXPORT int NXPtrIsEqual(const void *info, const void *data1, const void *data2);
     /* pointer comparison; info unused */

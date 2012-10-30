@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2007 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -72,7 +70,7 @@
 ; Substitute receiver for messages sent to nil (usually also nil)
 ; id _objc_nilReceiver
 	.align 4
-.globl __objc_nilReceiver
+.private_extern __objc_nilReceiver
 __objc_nilReceiver:
 	.long   0
 
@@ -80,7 +78,7 @@ __objc_nilReceiver:
 ; caching code to figure out whether any threads are actively 
 ; in the cache for dispatching.  The labels surround the asm code
 ; that do cache lookups.  The tables are zero-terminated.
-.globl _objc_entryPoints
+.private_extern _objc_entryPoints
 _objc_entryPoints:
 	.long   __cache_getImp
 	.long   __cache_getMethod
@@ -91,7 +89,7 @@ _objc_entryPoints:
 	.long   _objc_msgSend_rtp
 	.long   0
 
-.globl _objc_exitPoints
+.private_extern _objc_exitPoints
 _objc_exitPoints:
 	.long   LGetImpExit
 	.long   LGetMethodExit
@@ -559,11 +557,8 @@ LLoop_$0_$1:
 
 #if !defined(KERNEL)
 ; Save the FP parameter registers.
-; Note: If we (the compiler) could determine that no FP arguments were in use,
-; we could use a different variant of this macro and avoid the need to spill the FP
-; registers (provided the runtime uses no FP).
-; We still do not spill vector argument registers, for which we really should have an alternate
-; entry point.
+; We do not spill vector argument registers. This is 
+; harmless because vector parameters are unsupported.
 	stfd    f1, -104(r1)	;
 	stfd    f2,  -96(r1)	;
 	stfd    f3,  -88(r1)	;
@@ -616,11 +611,6 @@ LLoop_$0_$1:
 #if !defined(KERNEL)
 
 ; Restore FP parameter registers
-; Note: If we (the compiler) could determine that no FP arguments were in use,
-; we could use a different variant of this macro and avoid the need to restore the FP
-; registers (provided the runtime uses no FP).
-; We still do not restore vector argument registers, for which we really should have an alternate
-; entry point.
 	lfd     f1, -104(r1)	;
 	lfd     f2,  -96(r1)	;
 	lfd     f3,  -88(r1)	;
@@ -750,6 +740,7 @@ LLoop_$0_$1:
  * to do the (PIC) lookup once in the caller than repeatedly here.
  ********************************************************************/
 
+    .private_extern __cache_getMethod
     ENTRY __cache_getMethod
 ; do profiling if enabled
     CALL_MCOUNT
@@ -781,6 +772,7 @@ LGetMethodExit:
  * If not found, returns NULL.
  ********************************************************************/
 
+    .private_extern __cache_getImp
     ENTRY __cache_getImp
 ; do profiling if enabled
     CALL_MCOUNT
@@ -821,6 +813,10 @@ LGetImpExit:
 _objc_msgSend_rtp = 0xfffeff00
 _objc_msgSend_rtp_exit = 0xfffeff00+0x100
 
+	ENTRY _objc_msgSend_fixup_rtp
+	lwz	r4, 4(r4)		; load _cmd from message_ref
+	b	_objc_msgSend
+	END_ENTRY _objc_msgSend_fixup_rtp
 	
 	ENTRY _objc_msgSend
 ; check whether receiver is nil or selector is to be ignored
@@ -919,6 +915,11 @@ LMsgSendExit:
  *           r5 is the selector
  ********************************************************************/
 
+	ENTRY _objc_msgSend_stret_fixup_rtp
+	lwz	r5, 4(r5)		; load _cmd from message_ref
+	b	_objc_msgSend_stret
+	END_ENTRY _objc_msgSend_stret_fixup_rtp
+	
 	ENTRY _objc_msgSend_stret
 ; check whether receiver is nil
 	cmplwi  r4,0			; receiver nil?
@@ -976,6 +977,15 @@ LMsgSendStretExit:
  * };
  ********************************************************************/
 
+	ENTRY _objc_msgSendSuper2_fixup_rtp
+	; objc_super->class is superclass of the class to search
+	lwz	r11, CLASS(r3)
+	lwz	r4, 4(r4)		; load _cmd from message_ref
+	lwz	r11, 4(r11)		; r11 = cls->super_class
+	stw	r11, CLASS(r3)
+	b	_objc_msgSendSuper
+	END_ENTRY _objc_msgSendSuper2_fixup_rtp
+	
 	ENTRY _objc_msgSendSuper
 ; do profiling when enabled
 	CALL_MCOUNT
@@ -1031,6 +1041,15 @@ LMsgSendSuperExit:
  *		r4 is the address of the objc_super structure,
  *		r5 is the selector
  ********************************************************************/
+
+	ENTRY _objc_msgSendSuper2_stret_fixup_rtp
+	; objc_super->class is superclass of the class to search
+	lwz	r11, CLASS(r4)
+	lwz	r5, 4(r5)		; load _cmd from message_ref
+	lwz	r11, 4(r11)		; r11 = cls->super_class
+	stw	r11, CLASS(r4)
+	b	_objc_msgSendSuper_stret
+	END_ENTRY _objc_msgSendSuper2_stret_fixup_rtp
 
 	ENTRY _objc_msgSendSuper_stret
 ; do profiling when enabled
@@ -1094,103 +1113,125 @@ LMsgSendSuperStretExit:
  *
  * typedef struct objc_sendv_margs {
  *	double		floatingPointArgs[13];
- *	int		linkageArea[6];
- *	int		registerArgs[8];
- *	int		stackArgs[variable];
+ *	intptr_t	linkageArea[6];
+ *	intptr_t	registerArgs[8];
+ *	intptr_t	stackArgs[variable];
  * };
  *
  ********************************************************************/
 
-; Location LFwdStr contains the string "forward::"
-; Location LFwdSel contains a pointer to LFwdStr, that can be changed
-; to point to another forward:: string for selector uniquing
-; purposes.  ALWAYS dereference LFwdSel to get to "forward::" !!
-	.objc_meth_var_names
-	.align 1
-LFwdStr: .ascii "forward::\0"
-
-	.objc_message_refs
+; _FwdSel is @selector(forward::), set up in map_images().
+; ALWAYS dereference _FwdSel to get to "forward::" !!
+	.data
 	.align 2
-LFwdSel: .long LFwdStr
+	.private_extern _FwdSel
+_FwdSel: .long 0
 
 	.cstring
-	.align 1
+	.align 2
 LUnkSelStr: .ascii "Does not recognize selector %s\0"
+
+	.data
+	.align 2
+	.private_extern __objc_forward_handler
+__objc_forward_handler:	.long 0
+
+	.data
+	.align 2
+	.private_extern __objc_forward_stret_handler
+__objc_forward_stret_handler:	.long 0
+	
 
 	ENTRY __objc_msgForward
 ; do profiling when enabled
 	CALL_MCOUNT
 
-#if !defined(KERNEL)
-	LOAD_STATIC_WORD r12, LFwdSel, LOCAL_SYMBOL	; get uniqued selector for "forward::"
-	cmplwi  r11,kFwdMsgSendStret	; via objc_msgSend or objc_msgSend_stret?
-	beq     LMsgForwardStretSel		; branch for objc_msgSend_stret
-	cmplw   r12,r4					; if (sel == @selector (forward::))
-	b       LMsgForwardSelCmpDone	; check the result in common code
-LMsgForwardStretSel:
-	cmplw   r12,r5					; if (sel == @selector (forward::))
-LMsgForwardSelCmpDone:
-	beq     LMsgForwardError		;   goto error
+	; Check return type (stret or not)
+	cmplwi	r11,kFwdMsgSendStret
+	beq	LMsgForwardStretSel
 
-	mflr    r0
-	stw     r0,  8(r1)		; save lr
+	; Non-stret return
+	; Call user handler, if any
+	LOAD_STATIC_WORD r12, __objc_forward_handler, LOCAL_SYMBOL
+	cmplwi	r12, 0
+	mtctr	r12
+	bnectr			; call _objc_forward_handler if not NULL
+	; No user handler
+	mr	r11, r3		; r11 = receiver
+	mr	r12, r4		; r12 = SEL
+	b	LMsgForwardSelCmp
+
+LMsgForwardStretSel:	
+	; Stret return
+	; Call user handler, if any
+	LOAD_STATIC_WORD r12, __objc_forward_stret_handler, LOCAL_SYMBOL
+	cmplwi	r12, 0
+	mtctr	r12
+	bnectr			; call _objc_forward_stret_handler if not NULL
+	; No user handler
+	mr	r11, r4		; r11 = receiver
+	mr	r12, r5		; r12 = SEL
+
+LMsgForwardSelCmp:
+	; r11 is the receiver
+	; r12 is the selector
 	
-	stw     r3, 24(r1)		; put register arguments on stack for forwarding
-	stw     r4, 28(r1)		; (stack based args already follow this area)
-	stw     r5, 32(r1)		;
-	stw     r6, 36(r1)		; 
-	stw     r7, 40(r1)		;
+	; Die if forwarding "forward::"
+	LOAD_STATIC_WORD r2, _FwdSel, LOCAL_SYMBOL
+	cmplw   r2, r12
+	beq     LMsgForwardError
+
+	; Save registers to margs
+	; Link register
+	mflr    r0
+	stw     r0,  8(r1)
+
+	; GPR parameters
+	stw     r3, 24(r1)
+	stw     r4, 28(r1)
+	stw     r5, 32(r1)
+	stw     r6, 36(r1)
+	stw     r7, 40(r1)
 	stw     r8, 44(r1)
 	stw     r9, 48(r1)
 	stw     r10,52(r1)
 
-	stfd    f1, -104(r1)		; prepend floating point registers to marg_list
-	stfd    f2,  -96(r1)		;
-	stfd    f3,  -88(r1)		;
-	stfd    f4,  -80(r1)		;
-	stfd    f5,  -72(r1)		;
-	stfd    f6,  -64(r1)		;
-	stfd    f7,  -56(r1)		;
-	stfd    f8,  -48(r1)		;
-	stfd    f9,  -40(r1)		;
-	stfd    f10, -32(r1)		;
-	stfd    f11, -24(r1)		;
-	stfd    f12, -16(r1)		;
-	stfd    f13,  -8(r1)		;
+	; FP parameters
+	stfd    f1, -104(r1)
+	stfd    f2,  -96(r1)
+	stfd    f3,  -88(r1)
+	stfd    f4,  -80(r1)
+	stfd    f5,  -72(r1)
+	stfd    f6,  -64(r1)
+	stfd    f7,  -56(r1)
+	stfd    f8,  -48(r1)
+	stfd    f9,  -40(r1)
+	stfd    f10, -32(r1)
+	stfd    f11, -24(r1)
+	stfd    f12, -16(r1)
+	stfd    f13,  -8(r1)
 
-	cmplwi  r11,kFwdMsgSendStret	; via objc_msgSend or objc_msgSend_stret?
-	beq     LMsgForwardStretParams	; branch for objc_msgSend_stret
-						    ; first arg (r3) remains self
-	mr      r5,r4			; third arg is previous selector
-	b       LMsgForwardParamsDone
+	; Call [receiver forward:sel :margs]
+	mr	r3, r11			; receiver
+	mr	r4, r2			; forward::
+	mr      r5, r12			; sel
+	subi    r6,r1,13*8		; &margs (on stack)
 
-LMsgForwardStretParams:
-	mr      r3,r4			; first arg is self
-                            ; third arg (r5) remains previous selector
-LMsgForwardParamsDone:
-	mr      r4,r12			; second arg is "forward::"
-	subi    r6,r1,13*8		; fourth arg is &objc_sendv_margs
-
-	stwu    r1,-56-(13*8)(r1)	; push aligned linkage and parameter areas, set stack link
+	stwu    r1,-56-(13*8)(r1)	; push stack frame
 	bl      _objc_msgSend		; [self forward:sel :objc_sendv_margs]
-	addi    r1,r1,56+13*8		; deallocate linkage and parameters areas
+	addi    r1,r1,56+13*8		; pop stack frame
 
 	lwz     r0,8(r1)		; restore lr
 	mtlr    r0			;
 	blr     			;
 
-; call error handler with unrecognized selector message
 LMsgForwardError:
-	cmplwi  r11,kFwdMsgSendStret	; via objc_msgSend or objc_msgSend_stret?
-	bne     LMsgForwardErrorParamsOK;  branch for objc_msgSend
-	mr      r3,r4			; first arg is self
-LMsgForwardErrorParamsOK:
+	; Call __objc_error(receiver, "unknown selector %s", "forward::")
+	mr	r3, r11
 	LEA_STATIC_DATA r4, LUnkSelStr, LOCAL_SYMBOL
-	mr      r5,r12			; third arg is "forward::"
-	CALL_EXTERN(___objc_error) ; never returns
-#endif /* !defined(KERNEL) */
-	trap    				; ___objc_error should never return
-    ; _objc_msgForward is not for the kernel - kernel code ends up here
+	mr      r5, r2
+	CALL_EXTERN(___objc_error)	; never returns
+	trap
 
 	END_ENTRY __objc_msgForward
 
@@ -1308,27 +1349,16 @@ LMsgSendvSendIt:
 	END_ENTRY _objc_msgSendv_fpret
 
 /********************************************************************
- * struct_type	objc_msgSendv_stret(id		self,
- *				SEL		op,
- *				unsigned	arg_size,
- *				marg_list	arg_frame); 
- *
- * objc_msgSendv_stret is the struct-return form of msgSendv.
- * The ABI calls for r3 to be used as the address of the structure
- * being returned, with the parameters in the succeeding registers.
- * 
- * An equally correct way to prototype this routine is:
- *
  * void objc_msgSendv_stret(void	*structStorage,
  *			id		self,
  *			SEL		op,
  *			unsigned	arg_size,
  *			marg_list	arg_frame);
  *
- * which is useful in, for example, message forwarding where the
- * structure-return address needs to be passed in.
- *
- * The ABI for the two cases are identical.
+ * objc_msgSendv_stret is the struct-return form of msgSendv.
+ * This function does not use the struct-return ABI; instead, the
+ * structure return address is passed as a normal parameter.
+ * The two are functionally identical on ppc, but not on other architectures.
  *
  * On entry:	r3 is the address in which the returned struct is put,
  *		r4 is the message receiver,
@@ -1418,9 +1448,21 @@ LMsgSendvStretSendIt:
 	END_ENTRY _objc_msgSendv_stret
 
 
-// Special section containing a function pointer that dyld will call
-// when it loads new images.
-LAZY_PIC_FUNCTION_STUB(__objc_notify_images)
-.data
-.section __DATA,__image_notify
-.long L__objc_notify_images$stub
+	ENTRY _method_invoke
+	
+	lwz	r12, METHOD_IMP(r4)
+	lwz	r4, METHOD_NAME(r4)
+	mtctr	r12
+	bctr
+	
+	END_ENTRY _method_invoke
+
+
+	ENTRY _method_invoke_stret
+	
+	lwz	r12, METHOD_IMP(r5)
+	lwz	r5, METHOD_NAME(r5)
+	mtctr	r12
+	bctr
+	
+	END_ENTRY _method_invoke_stret

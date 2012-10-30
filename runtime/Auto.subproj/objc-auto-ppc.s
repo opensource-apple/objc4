@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004, 2006 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 2004 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -42,7 +40,7 @@
 _$0:                           ; primary entry point
     ba      $1                 ; branch to runtime page
     
-    .globl  _$0_non_gc         ; non_gc entry point name
+    .private_extern _$0_non_gc ; non_gc entry point name
 _$0_non_gc:                    ; non_gc entry point
     .endmacro
 

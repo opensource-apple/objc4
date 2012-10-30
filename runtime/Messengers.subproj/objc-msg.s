@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2001, 2005-2006 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -37,7 +35,10 @@
     #include "objc-msg-i386.s"
 #elif defined (__ppc__) || defined(ppc)
     #include "objc-msg-ppc.s"
-
+#elif defined (__ppc64__)
+    #include "objc-msg-ppc64.s"
+#elif defined (__x86_64__)
+    #include "objc-msg-x86_64.s"
 #else
     #error Architecture not supported
 #endif

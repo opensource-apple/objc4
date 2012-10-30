@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2003, 2007 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -31,6 +29,13 @@
     Copyright (c) 1988-1996 NeXT Software, Inc. as an unpublished work.
     All rights reserved.
 */
+
+#if defined(__LP64__)
+
+// This header contains definitions for Libstreams, which will never be 64-bit.
+#warning objc/error.h is unavailable in 64-bit.
+
+#endif
 
 #warning The API in this header is obsoleted by NSException et al.
 

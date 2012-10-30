@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004-2006 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 2004 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,10 +21,6 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*
-  objc-rtp.h
-  Copyright 2004, Apple Computer, Inc.
-  Author: Jim Laskey
-  
   Layout of the "objc runtime pages", an fixed area 
   in high memory that can be reached via an absolute branch.
   Basic idea is that, on ppc, a single "bla" instruction
@@ -79,10 +73,12 @@
 // which is what the ppc "bla" instruction is defined to do with "negative" addresses.
 // This definition will establish the correct entry points for 64-bit if this mechanism
 // is adopted for that architecture as well.
-#if defined(__ppc__)
+#if defined(__ppc__)  ||  defined(__ppc64__)
 #   define kRTPagesLo    OBJC_UINTPTR_T(-20 * 0x1000) // ppc 0xfffec000
 #elif defined(__i386__)
 #   define kRTPagesLo    OBJC_UINTPTR_T(-24 * 0x1000) // i386 0xfffe8000
+#elif defined(__x86_64__)
+#   define kRTPagesLo    OBJC_UINTPTR_T(-24 * 0x1000) // x86_64 0xfffffffffffe8000
 #else
     #error unknown architecture
 #endif
@@ -103,15 +99,16 @@
 #define kRTAddress_objc_assign_strongCast OBJC_UINTPTR_T(kRTAddress_objc_assign_global - kRTSize_objc_assign_strongCast) // ppc 0xfffefea0
 
 // Sizes reserved for data in the RTP area, in bytes
+#define kRTSize_zero              OBJC_SIZE_T(16) // 16 zero bytes
 #define kRTSize_ignoredSelector   OBJC_SIZE_T(19) // 1+strlen("<ignored selector>")
 
 // Absolute address of data in the RTP area
 // These count forwards from the lo end of the RTP area.
 // These are not locked down and can be moved if necessary.
-#define kRTAddress_zero OBJC_UINTPTR_T(kRTPagesHi-kRTPagesSize)  // 16 zero bytes
-#define kRTAddress_ignoredSelector OBJC_UINTPTR_T(kRTAddress_zero+16)  // string "<ignored selector>"
+#define kRTAddress_zero OBJC_UINTPTR_T(kRTPagesHi-kRTPagesSize)
+#define kRTAddress_ignoredSelector OBJC_UINTPTR_T(kRTAddress_zero+kRTSize_zero)
 
-#define kIgnore kRTAddress_ignoredSelector  // ppc 0xfffef010
+#define kIgnore kRTAddress_ignoredSelector  // ppc 0xfffef000
 
 /*********************************************************************
   End of runtime page layout. 

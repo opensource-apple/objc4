@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004, 2006 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 2004 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -54,7 +52,7 @@ L_objc_msgSend$lazy_ptr:
 	
 	.text
 	.align 4
-	.globl _objc_msgSend_stub
+	.private_extern _objc_msgSend_stub
 
 _objc_msgSend_stub:
 	b	L_objc_msgSend$stub

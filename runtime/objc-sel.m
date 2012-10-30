@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2007 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -36,8 +34,11 @@
 #import "objc-rtp.h"
 #import "objc-sel-set.h"
 
-// NUM_BUILTIN_SELS, LG_NUM_BUILTIN_SELS, _objc_builtin_selectors
+// _objc_builtin_selectors[]
 #include "objc-sel-table.h"
+
+// from phash.c
+extern uint32_t phash(const char *key, int len);
 
 #define NUM_NONBUILTIN_SELS 3500
 // objc_sel_set grows at 3571, 5778, 9349. 
@@ -68,33 +69,29 @@ static inline int ignore_selector(const char *sel)
 
 
 static SEL _objc_search_builtins(const char *key) {
-    int c, idx, lg = LG_NUM_BUILTIN_SELS;
-    const char *s;
+    const char *sel;
+    uint32_t hash;
 
 #if defined(DUMP_SELECTORS)
     if (NULL != key) printf("\t\"%s\",\n", key);
 #endif
+
     /* The builtin table contains only sels starting with '[.A-z]', including '_' */
     if (!key) return (SEL)0;
+    if ((intptr_t)key == kIgnore) return (SEL)kIgnore;
     if ('\0' == *key) return (SEL)_objc_empty_selector;
     if ((*key < 'A' || 'z' < *key)  &&  *key != '.') return (SEL)0;
     if (ignore_selector(key)) return (SEL)kIgnore;
 
-    s = _objc_builtin_selectors[-1 + (1 << lg)];
-    c = _objc_strcmp(s, key);
-    if (c == 0) return (SEL)s;
-    idx = (c < 0) ? NUM_BUILTIN_SELS - (1 << lg) : -1;
-    while (--lg >= 0) {
-	s = _objc_builtin_selectors[idx + (1 << lg)];
-	c = _objc_strcmp(s, key);
-	if (c == 0) return (SEL)s;
-	if (c < 0) idx += (1 << lg);
-    }
-    return (SEL)0;
+    hash = phash(key, (int)__builtin_strlen(key));
+    sel = _objc_builtin_selectors[hash];
+    if (sel  &&  0 == __builtin_strcmp(key, sel)) return (SEL)sel;
+    else return (SEL)0;
 }
 
 
 const char *sel_getName(SEL sel) {
+    if ((intptr_t)sel == kIgnore) return "<ignored selector>";
     return sel ? (const char *)sel : "<null selector>";
 }
 
@@ -166,4 +163,10 @@ __private_extern__ void sel_unlock(void)
 //
 SEL sel_getUid(const char *name) {
     return __sel_registerName(name, 2, 1);  // YES lock, YES copy
+}
+
+
+BOOL sel_isEqual(SEL lhs, SEL rhs)
+{
+    return (lhs == rhs) ? YES : NO;
 }

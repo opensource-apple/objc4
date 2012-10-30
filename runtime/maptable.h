@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2003, 2006-2007 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,10 +26,13 @@
 	Copyright 1990-1996 NeXT Software, Inc.
 */
 
-#warning the API in this header is obsolete
-
 #ifndef _OBJC_MAPTABLE_H_
 #define _OBJC_MAPTABLE_H_
+
+
+#ifndef _OBJC_PRIVATE_H_
+#warning the API in this header is obsolete
+#endif
 
 #import <objc/objc.h>
 
@@ -124,7 +125,7 @@ OBJC_EXPORT const NXMapTablePrototype NXStrValueMapPrototype;
     /* hashing is string hashing;
       isEqual is strcmp;
       free is no-op. */
-OBJC_EXPORT const NXMapTablePrototype NXObjectMapPrototype;
+OBJC_EXPORT const NXMapTablePrototype NXObjectMapPrototype  OBJC2_UNAVAILABLE;
     /* for objects; uses methods: hash, isEqual:, free, all for key. */
 
 #endif /* _OBJC_MAPTABLE_H_ */

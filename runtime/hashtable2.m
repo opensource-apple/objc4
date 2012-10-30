@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2006 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,16 +26,12 @@
 	Created by Bertrand Serlet, Feb 89
  */
 
-#import <objc/hashtable2.h>
+
+#include <mach/mach.h>
+#include <pthread.h>
+
 #import "objc-private.h"
-
-/* Is this in the right spot ? <jf> */
-#if defined(__osf__)
-    #include <stdarg.h>
-#endif
-
-    #import <mach/mach.h>
-    #import <pthread.h>
+#import "hashtable2.h"
 
 /* In order to improve efficiency, buckets contain a pointer to an array or directly the data when the array size is 1 */
 typedef union {
@@ -58,7 +52,7 @@ typedef struct	{
  *	
  *************************************************************************/
 
-static unsigned log2 (unsigned x) { return (x<2) ? 0 : log2 (x>>1)+1; };
+static unsigned log2u (unsigned x) { return (x<2) ? 0 : log2u (x>>1)+1; };
 
 static unsigned exp2m1 (unsigned x) { return (1 << x) - 1; };
 
@@ -87,10 +81,10 @@ static int isEqualPrototype (const void *info, const void *data1, const void *da
     return (proto1->hash == proto2->hash) && (proto1->isEqual == proto2->isEqual) && (proto1->free == proto2->free) && (proto1->style == proto2->style);
     };
     
-static uarith_t hashPrototype (const void *info, const void *data) {
+static uintptr_t hashPrototype (const void *info, const void *data) {
     NXHashTablePrototype	*proto = (NXHashTablePrototype *) data;
     
-    return NXPtrHash(info, proto->hash) ^ NXPtrHash(info, proto->isEqual) ^ NXPtrHash(info, proto->free) ^ (uarith_t) proto->style;
+    return NXPtrHash(info, proto->hash) ^ NXPtrHash(info, proto->isEqual) ^ NXPtrHash(info, proto->free) ^ (uintptr_t) proto->style;
     };
 
 void NXNoEffectFree (const void *info, void *data) {};
@@ -138,7 +132,7 @@ NXHashTable *NXCreateHashTableFromZone (NXHashTablePrototype prototype, unsigned
     if (! prototype.isEqual) prototype.isEqual = NXPtrIsEqual;
     if (! prototype.free) prototype.free = NXNoEffectFree;
     if (prototype.style) {
-	_objc_syslog ("*** NXCreateHashTable: invalid style\n");
+	_objc_inform ("*** NXCreateHashTable: invalid style\n");
 	return NULL;
 	};
     proto = NXHashGet (prototypes, &prototype); 
@@ -150,12 +144,12 @@ NXHashTable *NXCreateHashTableFromZone (NXHashTablePrototype prototype, unsigned
     	(void) NXHashInsert (prototypes, proto);
 	proto = NXHashGet (prototypes, &prototype);
 	if (! proto) {
-	    _objc_syslog ("*** NXCreateHashTable: bug\n");
+	    _objc_inform ("*** NXCreateHashTable: bug\n");
 	    return NULL;
 	    };
 	};
     table->prototype = proto; table->count = 0; table->info = info;
-    table->nbBuckets = exp2m1 (log2 (capacity)+1);
+    table->nbBuckets = exp2m1 (log2u (capacity)+1);
     table->buckets = ALLOCBUCKETS(z, table->nbBuckets);
     return table;
     }
@@ -204,19 +198,6 @@ void NXEmptyHashTable (NXHashTable *table) {
 void NXResetHashTable (NXHashTable *table) {
     freeBuckets (table, YES);
     table->count = 0;
-}
-
-BOOL NXIsEqualHashTable (NXHashTable *table1, NXHashTable *table2) {
-    if (table1 == table2) return YES;
-    if (NXCountHashTable (table1) != NXCountHashTable (table2)) return NO;
-    else {
-	void		*data;
-	NXHashState	state = NXInitHashState (table1);
-	while (NXNextHashState (table1, &state, &data)) {
-	    if (! NXHashMember (table2, data)) return NO;
-	}
-	return YES;
-    }
 }
 
 BOOL NXCompareHashTables (NXHashTable *table1, NXHashTable *table2) {
@@ -311,7 +292,7 @@ __private_extern__ void _NXHashRehashToCapacity (NXHashTable *table, unsigned ne
 	(void) NXHashInsert (table, aux);
     freeBuckets (old, NO);
     if (old->count != table->count)
-	_objc_syslog("*** hashtable: count differs after rehashing; probably indicates a broken invariant: there are x and y such as isEqual(x, y) is TRUE but hash(x) != hash (y)\n");
+	_objc_inform("*** hashtable: count differs after rehashing; probably indicates a broken invariant: there are x and y such as isEqual(x, y) is TRUE but hash(x) != hash (y)\n");
     free (old->buckets); 
     free (old);
     }
@@ -482,24 +463,24 @@ int NXNextHashState (NXHashTable *table, NXHashState *state, void **data) {
  *	
  *************************************************************************/
 
-uarith_t NXPtrHash (const void *info, const void *data) {
-    return (((uarith_t) data) >> 16) ^ ((uarith_t) data);
+uintptr_t NXPtrHash (const void *info, const void *data) {
+    return (((uintptr_t) data) >> 16) ^ ((uintptr_t) data);
     };
     
-uarith_t NXStrHash (const void *info, const void *data) {
-    register uarith_t	hash = 0;
+uintptr_t NXStrHash (const void *info, const void *data) {
+    register uintptr_t	hash = 0;
     register unsigned char	*s = (unsigned char *) data;
     /* unsigned to avoid a sign-extend */
     /* unroll the loop */
     if (s) for (; ; ) { 
 	if (*s == '\0') break;
-	hash ^= (uarith_t) *s++;
+	hash ^= (uintptr_t) *s++;
 	if (*s == '\0') break;
-	hash ^= (uarith_t) *s++ << 8;
+	hash ^= (uintptr_t) *s++ << 8;
 	if (*s == '\0') break;
-	hash ^= (uarith_t) *s++ << 16;
+	hash ^= (uintptr_t) *s++ << 16;
 	if (*s == '\0') break;
-	hash ^= (uarith_t) *s++ << 24;
+	hash ^= (uintptr_t) *s++ << 24;
 	}
     return hash;
     };
@@ -517,7 +498,7 @@ void NXReallyFree (const void *info, void *data) {
     };
 
 /* All the following functions are really private, made non-static only for the benefit of shlibs */
-static uarith_t hashPtrStructKey (const void *info, const void *data) {
+static uintptr_t hashPtrStructKey (const void *info, const void *data) {
     return NXPtrHash(info, *((void **) data));
     };
 
@@ -525,7 +506,7 @@ static int isEqualPtrStructKey (const void *info, const void *data1, const void 
     return NXPtrIsEqual (info, *((void **) data1), *((void **) data2));
     };
 
-static uarith_t hashStrStructKey (const void *info, const void *data) {
+static uintptr_t hashStrStructKey (const void *info, const void *data) {
     return NXStrHash(info, *((char **) data));
     };
 
@@ -564,11 +545,11 @@ static NXHashTable *uniqueStrings = NULL;
 static int accessUniqueString = 0;
 
 static char		*z = NULL;
-static vm_size_t	zSize = 0;
+static size_t	zSize = 0;
 static mutex_t		lock = (mutex_t)0;
 
 static const char *CopyIntoReadOnly (const char *str) {
-    unsigned int	len = strlen (str) + 1;
+    size_t	len = strlen (str) + 1;
     char	*new;
     
     if (len > CHUNK_SIZE/2) {	/* dont let big strings waste space */
@@ -608,7 +589,7 @@ NXAtom NXUniqueString (const char *buffer) {
     if (previous) return previous;
     previous = CopyIntoReadOnly (buffer);
     if (NXHashInsert (uniqueStrings, previous)) {
-	_objc_syslog ("*** NXUniqueString: invariant broken\n");
+	_objc_inform ("*** NXUniqueString: invariant broken\n");
 	return NULL;
 	};
     return previous;

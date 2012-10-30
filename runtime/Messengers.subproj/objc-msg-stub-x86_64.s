@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004-2006 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,15 +21,18 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#ifdef moninitobjc
-#undef moninitobjc
+/* 
+ * Interposing support.
+ * When OBJC_ALLOW_INTERPOSING is set, calls to objc_msgSend_rtp
+ * jump to the ordinary messenger via this stub. If objc_msgSend 
+ * itself is interposed, dyld will find and change this stub.
+ * This stub must be compiled into a separate linker module.
+ */
 
-unsigned long *
-moninitobjc(unsigned long moncount_addr)
-{
-    extern void _objc_inform(const char *format, ...);
-    _objc_inform ("moninitobjc is obsoleted, refer to documentation for how to do profiling\n");
-    return (0);
-}
+#warning x86_64 interposing stub not implemented
 
-#endif
+	.text
+	.align 2, 0x90
+	.globl _objc_msgSend_stub		
+_objc_msgSend_stub:
+	jmp	_objc_msgSend

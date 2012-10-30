@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 2002, 2006 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -22,11 +20,6 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
-//
-//  objc_sync.h
-//
-//  Copyright (c) 2002 Apple Computer, Inc. All rights reserved.
-//
 
 #ifndef __OBJC_SNYC_H_
 #define __OBJC_SNYC_H_

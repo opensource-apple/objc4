@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2006 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -24,17 +22,42 @@
  */
 // Copyright 1988-1996 NeXT Software, Inc.
 
+#ifndef _OBJC_OBJC_API_H_
+#define _OBJC_OBJC_API_H_
+
+#include <AvailabilityMacros.h>
+
+/*
+ * OBJC_API_VERSION 0 or undef: Tiger and earlier API only
+ * OBJC_API_VERSION 2: Leopard and later API available
+ */
+#if !defined(OBJC_API_VERSION)
+#   if MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_5
+#       define OBJC_API_VERSION 0
+#   else
+#       define OBJC_API_VERSION 2
+#   endif
+#endif
+
+/* OBJC2_UNAVAILABLE: unavailable in objc 2.0, deprecated in Leopard */
+#if !defined(OBJC2_UNAVAILABLE)
+#   if __OBJC2__
+#       define OBJC2_UNAVAILABLE UNAVAILABLE_ATTRIBUTE
+#   else
+#       define OBJC2_UNAVAILABLE DEPRECATED_IN_MAC_OS_X_VERSION_10_5_AND_LATER
+#   endif
+#endif
 
 #if !defined(OBJC_EXPORT)
-#if defined(__cplusplus)
-#   define OBJC_EXPORT extern "C" 
-#else
-#   define OBJC_EXPORT extern
-#endif
+#   if defined(__cplusplus)
+#       define OBJC_EXPORT extern "C" 
+#   else
+#       define OBJC_EXPORT extern
+#   endif
 #endif
 
 #if !defined(OBJC_IMPORT)
 #   define OBJC_IMPORT extern
 #endif
 
-
+#endif

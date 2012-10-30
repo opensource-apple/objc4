@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2003, 2005-2007 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -34,9 +32,22 @@
 #ifndef _OBJC_OBJECT_H_
 #define _OBJC_OBJECT_H_
 
-#include <objc/objc-runtime.h>
+#include <stdarg.h>
+#import <objc/objc-runtime.h>
 
-@class Protocol;
+#if __OBJC2__
+
+@interface Object
+{
+	Class isa;	/* A pointer to the instance's class structure */
+}
+
++class;
+-(BOOL) isEqual:anObject;
+
+@end
+
+#else
 
 @interface Object
 {
@@ -159,10 +170,6 @@
 
 @end
 
-OBJC_EXPORT id object_dispose(Object *anObject);
-OBJC_EXPORT id object_copy(Object *anObject, unsigned nBytes);
-OBJC_EXPORT id object_copyFromZone(Object *anObject, unsigned nBytes, void *z);
-OBJC_EXPORT id object_realloc(Object *anObject, unsigned nBytes);
-OBJC_EXPORT id object_reallocFromZone(Object *anObject, unsigned nBytes, void *z);
+#endif
 
 #endif /* _OBJC_OBJECT_H_ */

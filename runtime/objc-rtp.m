@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004-2007 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 2004 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -23,10 +21,6 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 /*
-  objc-rtp.m
-  Copyright 2004, Apple Computer, Inc.
-  Author: Jim Laskey
-  
   Implementation of the "objc runtime pages", an fixed area 
   in high memory that can be reached via an absolute branch.
 */
@@ -41,10 +35,7 @@
 
 // Local prototypes
 
-static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize);
-static void rtp_set_up_other(uintptr_t address, size_t maxsize, const char *name, void *gc_code, void *non_gc_code);
-
-#if defined(__ppc__)
+#if defined(__ppc__)  ||  defined(__ppc64__)
 // from Libc, but no prototype yet (#3850825)
 extern void sys_icache_invalidate(const void * newcode, size_t len);
 
@@ -52,7 +43,7 @@ static size_t rtp_copy_code(unsigned* dest, unsigned* source, size_t max_insns);
 #endif
 
 
-#if !defined(__ppc__)
+#if defined(__ppc64__)
 
 __private_extern__ void rtp_init(void)
 {
@@ -63,6 +54,15 @@ __private_extern__ void rtp_init(void)
 
 #else
 
+#if defined(__ppc__)
+static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize);
+static void rtp_set_up_other(uintptr_t address, size_t maxsize, const char *name, void *gc_code, void *non_gc_code);
+#endif
+
+#if defined(__i386__) || defined(__x86_64__)
+static void rtp_swap_imp(unsigned *address, void *code, const char *name);
+#endif
+
 /**********************************************************************
 * rtp_init
 * Allocate and initialize the Objective-C runtime pages.
@@ -70,18 +70,20 @@ __private_extern__ void rtp_init(void)
 **********************************************************************/
 __private_extern__ void rtp_init(void)
 {
+#if defined(__ppc__)
+
     kern_return_t ret;
     vm_address_t objcRTPages = (vm_address_t)(kRTPagesHi - kRTPagesSize);
 
     if (PrintRTP) {
         _objc_inform("RTP: initializing rtp at [%p..%p)", 
-                     objcRTPages, kRTPagesHi);
+                     (void *)objcRTPages, (void *)kRTPagesHi);
     }
 
     // unprotect the ObjC runtime pages for writing
     ret = vm_protect(mach_task_self(),
                      objcRTPages, kRTPagesSize,
-                     FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
+                     FALSE, VM_PROT_READ | VM_PROT_WRITE);
                      
     if (ret != KERN_SUCCESS) {
         if (PrintRTP) {
@@ -113,8 +115,33 @@ __private_extern__ void rtp_init(void)
     if (ret != KERN_SUCCESS) {
         _objc_inform("RTP: Could not re-protect Objective-C runtime pages!");
     }
+
+#elif defined(__i386__) || defined(__x86_64__)
+
+    // At load time, the page on which the objc_assign_* routines live is not
+    // marked as executable. We fix that here, regardless of the GC choice.
+    if (UseGC)
+    {
+        rtp_swap_imp((unsigned*)objc_assign_ivar,
+            objc_assign_ivar_gc, "objc_assign_ivar");
+        rtp_swap_imp((unsigned*)objc_assign_global,
+            objc_assign_global_gc, "objc_assign_global");
+        rtp_swap_imp((unsigned*)objc_assign_strongCast,
+            objc_assign_strongCast_gc, "objc_assign_strongCast");
+    }
+    else
+    {   // Not GC, just make the page executable.
+        if (vm_protect(mach_task_self(), (vm_address_t)objc_assign_ivar, 1,
+            FALSE, VM_PROT_READ | VM_PROT_EXECUTE) != KERN_SUCCESS)
+            _objc_fatal("Could not reprotect objc_assign_*.");
+    }
+
+#else
+#error undefined architecture
+#endif
 }
 
+#if defined(__ppc__)
 
 /**********************************************************************
 * rtp_set_up_objc_msgSend
@@ -125,7 +152,7 @@ __private_extern__ void rtp_init(void)
 **********************************************************************/
 static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize) 
 {
-#if defined(__ppc__)
+#if defined(__ppc__)  ||  defined(__ppc64__)
     // Location in the runtime pages of the new function.
     unsigned *buffer = (unsigned *)address;
 
@@ -136,11 +163,11 @@ static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize)
     // If building an instrumented or profiled runtime, simply branch 
     // directly to the full implementation.
 #if defined(OBJC_INSTRUMENTED) || defined(PROFILE)
-    unsigned written = objc_write_branch(buffer, code);
+    size_t written = objc_write_branch(buffer, code);
     sys_icache_invalidate(buffer, written*4);
     if (PrintRTP) {
         _objc_inform("RTP: instrumented or profiled libobjc - objc_msgSend "
-                     "in RTP at %p is a %d instruction branch", 
+                     "in RTP at %p is a %zu instruction branch", 
                      buffer, written);
     }
     return;
@@ -150,11 +177,11 @@ static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize)
     // via a dyld-recognizable stub.
     if (AllowInterposing) {
         extern void objc_msgSend_stub(void);
-        unsigned written = objc_write_branch(buffer, objc_msgSend_stub);
+        size_t written = objc_write_branch(buffer, objc_msgSend_stub);
         sys_icache_invalidate(buffer, written*4);
         if (PrintRTP) {
             _objc_inform("RTP: interposing enabled - objc_msgSend "
-                         "in RTP at %p is a %d instruction branch", 
+                         "in RTP at %p is a %zu instruction branch", 
                          buffer, written);
         }
         return;
@@ -162,51 +189,73 @@ static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize)
 
     if (PrintRTP) {
         _objc_inform("RTP: writing objc_msgSend at [%p..%p) ...", 
-                     address, address+maxsize);
+                     (void *)address, (void *)(address+maxsize));
     }
 
     // Copy instructions from function to runtime pages
     // i is the number of INSTRUCTIONS written so far
     size_t max_insns = maxsize / sizeof(unsigned);
     size_t i = rtp_copy_code(buffer, code, max_insns);
-    if (i > max_insns) {
+    if (i + objc_branch_size(buffer + i, code + i) > max_insns) {
         // objc_msgSend didn't fit in the alloted space.
         // Branch to ordinary objc_msgSend instead so the program won't crash.
         i = objc_write_branch(buffer, code);
         sys_icache_invalidate(buffer, i*4);
         _objc_inform("RTP: objc_msgSend is too large to fit in the "
-                     "runtime pages (%d bytes available)", maxsize);
+                     "runtime pages (%zu bytes available)", maxsize);
         return;
     }
     
     { 
-        // Replace load of _objc_nilReceiver.
+        // Replace load of _objc_nilReceiver into r11
         // This assumes that the load of _objc_nilReceiver
         // immediately follows the LAST `mflr r0` in objc_msgSend, 
         // and that the original load sequence is six instructions long.
-        
+
         // instructions used to load _objc_nilReceiver
         const unsigned op_mflr_r0    = 0x7c0802a6u;
-        const unsigned op_lis_r11 = 0x3d600000u;
-        const unsigned op_lwz_r11 = 0x816b0000u;
         const unsigned op_nop     = 0x60000000u;
         
         // get address of _objc_nilReceiver, and its lo and hi halves
-        unsigned address = (unsigned)&_objc_nilReceiver;
-        signed lo = (signed short)address;
-        signed ha = (address - lo) >> 16;
-        
+        uintptr_t address = (uintptr_t)&_objc_nilReceiver;
+        uint16_t lo = address & 0xffff;
+        uint16_t ha = ((address - (int16_t)lo) >> 16) & 0xffff;
+#if defined(__ppc64__)
+        uint16_t hi2 = (address >> 32) & 0xffff;
+        uint16_t hi3 = (address >> 48) & 0xffff;
+#endif
+
         // search for mflr instruction
-        int j;
+        size_t j;
         for (j = i; j-- != 0; ) {
             if (buffer[j] == op_mflr_r0) {
-                // replace with lis lwz nop nop sequence
-                buffer[j + 0] = op_lis_r11 | (ha & 0xffff);
+                const unsigned op_lis_r11 = 0x3d600000u;
+                const unsigned op_lwz_r11 = 0x816b0000u;
+#if defined(__ppc__)
+                // lis r11, ha
+                // lwz r11, lo(r11)
+                buffer[j + 0] = op_lis_r11 | ha;
                 buffer[j + 1] = op_nop;
                 buffer[j + 2] = op_nop;
-                buffer[j + 3] = op_lwz_r11 | (lo & 0xffff);
+                buffer[j + 3] = op_lwz_r11 | lo;
                 buffer[j + 4] = op_nop;
                 buffer[j + 5] = op_nop;
+#elif defined(__ppc64__)
+                const unsigned op_ori_r11 = 0x616b0000u;
+                const unsigned op_oris_r11 = 0x656b0000u;
+                const unsigned op_sldi_r11 = 0x796b07c6u;
+                // lis  r11, hi3
+                // ori  r11, r11, hi2
+                // sldi r11, r11, 32
+                // oris r11, r11, ha
+                // lwz  r11, lo(r11)
+                buffer[j + 0] = op_lis_r11  | hi3;
+                buffer[j + 1] = op_ori_r11  | hi2;
+                buffer[j + 2] = op_sldi_r11;
+                buffer[j + 3] = op_oris_r11 | ha;
+                buffer[j + 4] = op_lwz_r11  | lo;
+                buffer[j + 5] = op_nop;
+#endif
                 break;
             }
         }
@@ -220,7 +269,7 @@ static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize)
 
     if (PrintRTP) {
         _objc_inform("RTP: wrote   objc_msgSend at [%p..%p)", 
-                     address, address + i*sizeof(unsigned));
+                     (void *)address, (void *)(address + i*sizeof(unsigned)));
     }
 
 #elif defined(__i386__)
@@ -242,7 +291,7 @@ static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize)
 * non_gc_code is the code to use if collecting is not enabled (assumed to be small enough to copy.)
 **********************************************************************/
 static void rtp_set_up_other(uintptr_t address, size_t maxsize, const char *name, void *gc_code, void *non_gc_code) {
-#if defined(__ppc__)
+#if defined(__ppc__)  ||  defined(__ppc64__)
     // location in the runtime pages of this function
     unsigned *buffer = (unsigned *)address;
     
@@ -250,10 +299,10 @@ static void rtp_set_up_other(uintptr_t address, size_t maxsize, const char *name
     unsigned *code = (unsigned *)(objc_collecting_enabled() ? gc_code : non_gc_code);
     
     if (objc_collecting_enabled()) {
-        unsigned written = objc_write_branch(buffer, code);
+        size_t written = objc_write_branch(buffer, code);
         sys_icache_invalidate(buffer, written*4);
         if (PrintRTP) {
-            _objc_inform("RTP: %s in RTP at %p is a %d instruction branch", 
+            _objc_inform("RTP: %s in RTP at %p is a %zu instruction branch", 
                          name, buffer, written);
         }
         return;
@@ -261,20 +310,20 @@ static void rtp_set_up_other(uintptr_t address, size_t maxsize, const char *name
 
     if (PrintRTP) {
         _objc_inform("RTP: writing %s at [%p..%p) ...", 
-                     name, address, address + maxsize);
+                     name, (void *)address, (void *)(address + maxsize));
     }
 
     // Copy instructions from function to runtime pages
     // i is the number of INSTRUCTIONS written so far
-    unsigned max_insns = maxsize / sizeof(unsigned);
-    unsigned i = rtp_copy_code(buffer, code, max_insns);
+    size_t max_insns = maxsize / sizeof(unsigned);
+    size_t i = rtp_copy_code(buffer, code, max_insns);
     if (i > max_insns) {
         // code didn't fit in the alloted space.
         // Branch to ordinary objc_assign_ivar instead so the program won't crash.
         i = objc_write_branch(buffer, code);
         sys_icache_invalidate(buffer, i*4);
         _objc_inform("RTP: %s is too large to fit in the "
-                     "runtime pages (%d bytes available)", name, maxsize);
+                     "runtime pages (%zu bytes available)", name, maxsize);
         return;
     }
     
@@ -283,7 +332,8 @@ static void rtp_set_up_other(uintptr_t address, size_t maxsize, const char *name
 
     if (PrintRTP) {
         _objc_inform("RTP: wrote %s at [%p..%p)", 
-                     name, address, address + i * sizeof(unsigned));
+                     name, (void *)address, 
+                     (void *)(address + i * sizeof(unsigned)));
     }
 
 #elif defined(__i386__)
@@ -293,8 +343,6 @@ static void rtp_set_up_other(uintptr_t address, size_t maxsize, const char *name
 #endif // defined(architecture)
 }
 
-
-#if defined(__ppc__)
 
 /**********************************************************************
 * rtp_copy_code
@@ -321,8 +369,35 @@ static size_t rtp_copy_code(unsigned* dest, unsigned* source, size_t max_insns)
     return i + 1;
 }
 
-// defined(__ppc__)
+// defined(__ppc__)  ||  defined(__ppc64__)
 #endif
 
-// defined(__ppc__)  ||  defined(__i386__)
+#if defined(__i386__) || defined(__x86_64__)
+
+/**********************************************************************
+* rtp_swap_imp
+*
+* Swap a function's current implementation with a new one.
+* The routine at 'address' is assumed to be at least as large as the
+*   jump instruction required to reach the new implementation.
+**********************************************************************/
+static void rtp_swap_imp(unsigned *address, void *code, const char *name)
+{
+    if (vm_protect(mach_task_self(), (vm_address_t)address, 1,
+        FALSE, VM_PROT_READ | VM_PROT_WRITE) != KERN_SUCCESS)
+        _objc_fatal("Could not get write access to %s.", name);
+    else
+    {
+        objc_write_branch(address, (unsigned*)code);
+
+        if (vm_protect(mach_task_self(), (vm_address_t)address, 1,
+            FALSE, VM_PROT_READ | VM_PROT_EXECUTE) != KERN_SUCCESS)
+            _objc_fatal("Could not reprotect %s.", name);
+    }
+}
+
+// defined(__i386__) || defined(__x86_64__)
+#endif
+
+// !defined(__ppc64__)
 #endif

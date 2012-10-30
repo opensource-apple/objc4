@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004-2007 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
- * Copyright (c) 2004 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -22,184 +20,48 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
-/*
- *  objc-auto.m
- *  Copyright 2004 Apple Computer, Inc.
- */
-
-#import "objc-auto.h"
 
 #import <stdint.h>
 #import <stdbool.h>
 #import <fcntl.h>
 #import <mach/mach.h>
 #import <mach-o/dyld.h>
+#import <sys/types.h>
+#import <sys/mman.h>
+#import <libkern/OSAtomic.h>
 
+#define OLD 1
 #import "objc-private.h"
+#import "auto_zone.h"
+#import "objc-auto.h"
 #import "objc-rtp.h"
 #import "maptable.h"
 
 
-
-// Types and prototypes from non-open-source auto_zone.h
-
-#include <sys/types.h>
-#include <malloc/malloc.h>
-
-typedef malloc_zone_t auto_zone_t;
-
-typedef uint64_t auto_date_t;
-
-typedef struct {
-    unsigned    version; // reserved - 0 for now
-    /* Memory usage */
-    unsigned long long  num_allocs; // number of allocations performed
-    volatile unsigned   blocks_in_use;// number of pointers in use
-    unsigned    bytes_in_use;       // sum of the sizes of all pointers in use
-    unsigned    max_bytes_in_use;   // high water mark
-    unsigned    bytes_allocated;
-    /* GC stats */
-    /* When there is an array, 0 stands for full collection, 1 for generational */
-    unsigned    num_collections[2];
-    boolean_t   last_collection_was_generational;
-    unsigned    bytes_in_use_after_last_collection[2];
-    unsigned    bytes_allocated_after_last_collection[2];
-    unsigned    bytes_freed_during_last_collection[2];
-    auto_date_t duration_last_collection[2];
-    auto_date_t duration_all_collections[2];
-} auto_statistics_t;
-
-typedef enum {
-    AUTO_COLLECTION_NO_COLLECTION = 0,
-    AUTO_COLLECTION_GENERATIONAL_COLLECTION,
-    AUTO_COLLECTION_FULL_COLLECTION
-} auto_collection_mode_t;
-
-typedef enum {
-    AUTO_LOG_COLLECTIONS = (1 << 1),    // log whenever a collection occurs
-    AUTO_LOG_COLLECT_DECISION = (1 << 2), // logs when deciding whether to collect
-    AUTO_LOG_GC_IMPL = (1 << 3),    // logs to help debug GC
-    AUTO_LOG_REGIONS = (1 << 4),    // log whenever a new region is allocated
-    AUTO_LOG_UNUSUAL = (1 << 5),    // log unusual circumstances
-    AUTO_LOG_WEAK = (1 << 6),        // log weak reference manipulation
-    AUTO_LOG_ALL = (~0u)
-} auto_log_mask_t;
-
-typedef struct auto_zone_cursor *auto_zone_cursor_t;
-
-typedef void (*auto_zone_foreach_object_t) (auto_zone_cursor_t cursor, void (*op) (void *ptr, void *data), void* data);
-
-typedef struct {
-    unsigned        version; // reserved - 0 for now
-    boolean_t       trace_stack_conservatively;
-    boolean_t       (*should_collect)(auto_zone_t *, const auto_statistics_t *stats, boolean_t about_to_create_a_new_region); 
-        // called back when a threshold is reached; must say whether to collect (and what type)
-        // all locks are released when that call back is called
-        // callee is free to call for statistics or reset the threshold
-    unsigned        ask_should_collect_frequency;
-	// should_collect() is called each <N> allocations or free, where <N> is this field
-    unsigned        full_vs_gen_frequency;
-	// ratio of generational vs. full GC for the frequency based ones
-    int             (*collection_should_interrupt)(void);
-        // called during scan to see if garbage collection should be aborted
-    void        (*invalidate)(auto_zone_t *zone, void *ptr, void *collection_context);
-    void        (*batch_invalidate) (auto_zone_t *zone, auto_zone_foreach_object_t foreach, auto_zone_cursor_t cursor);
-        // called back with an object that is unreferenced
-        // callee is responsible for invalidating object state
-    void        (*resurrect) (auto_zone_t *zone, void *ptr);
-        // convert the object into a safe-to-use, but otherwise "undead" object. no guarantees are made about the
-        // contents of this object, other than its liveness.
-    unsigned        word0_mask; // mask for defining class
-    void        (*note_unknown_layout)(auto_zone_t *zone, unsigned class_field);
-        // called once for each class encountered for which we don't know the layout
-        // callee can decide to register class with auto_zone_register_layout(), or do nothing
-        // Note that this function is called during GC and therefore should not do any auto-allocation
-    char*       (*name_for_address) (auto_zone_t *zone, vm_address_t base, vm_address_t offset);
-    auto_log_mask_t log;
-	// set to auto_log_mask_t bits as desired
-    boolean_t           disable_generational;
-	// if true, ignores requests to do generational GC.
-    boolean_t           paranoid_generational;
-	// if true, always compares generational GC result to full GC garbage list
-    boolean_t           malloc_stack_logging;
-	// if true, uses malloc_zone_malloc() for stack logging.
-} auto_collection_control_t;
-
-typedef enum {
-    AUTO_TYPE_UNKNOWN = -1,                                 // this is an error value
-    AUTO_UNSCANNED = 1,
-    AUTO_OBJECT = 2,
-    AUTO_MEMORY_SCANNED = 0,                                // holds conservatively scanned pointers
-    AUTO_MEMORY_UNSCANNED = AUTO_UNSCANNED,                 // holds unscanned memory (bits)
-    AUTO_OBJECT_SCANNED = AUTO_OBJECT,                      // first word is 'isa', may have 'exact' layout info elsewhere
-    AUTO_OBJECT_UNSCANNED = AUTO_OBJECT | AUTO_UNSCANNED,   // first word is 'isa', good for bits or auto_zone_retain'ed items
-} auto_memory_type_t;
-
-typedef struct 
-{
-    vm_address_t referent;
-    vm_address_t referrer_base;
-    intptr_t     referrer_offset;
-} auto_reference_t;
-
-typedef void (*auto_reference_recorder_t)(auto_zone_t *zone, void *ctx, 
-                                          auto_reference_t reference);
-
-
-static void auto_collect(auto_zone_t *zone, auto_collection_mode_t mode, void *collection_context);
-static auto_collection_control_t *auto_collection_parameters(auto_zone_t *zone);
-static const auto_statistics_t *auto_collection_statistics(auto_zone_t *zone);
-static void auto_enumerate_references(auto_zone_t *zone, void *referent, 
-                                      auto_reference_recorder_t callback, 
-                                      void *stack_bottom, void *ctx);
-static void auto_enumerate_references_no_lock(auto_zone_t *zone, void *referent, auto_reference_recorder_t callback, void *stack_bottom, void *ctx);
-static auto_zone_t *auto_zone(void);
-static void auto_zone_add_root(auto_zone_t *zone, void *root, size_t size);
-static void* auto_zone_allocate_object(auto_zone_t *zone, size_t size, auto_memory_type_t type, boolean_t initial_refcount_to_one, boolean_t clear);
-static const void *auto_zone_base_pointer(auto_zone_t *zone, const void *ptr);
-static auto_memory_type_t auto_zone_get_layout_type(auto_zone_t *zone, void *ptr);
-static auto_memory_type_t auto_zone_get_layout_type_no_lock(auto_zone_t *zone, void *ptr);
-static boolean_t auto_zone_is_finalized(auto_zone_t *zone, const void *ptr);
-static boolean_t auto_zone_is_valid_pointer(auto_zone_t *zone, const void *ptr);
-static unsigned int auto_zone_release(auto_zone_t *zone, void *ptr);
-static void auto_zone_retain(auto_zone_t *zone, void *ptr);
-static unsigned int auto_zone_retain_count_no_lock(auto_zone_t *zone, const void *ptr);
-static void auto_zone_set_class_list(int (*get_class_list)(void **buffer, int count));
-static size_t auto_zone_size_no_lock(auto_zone_t *zone, const void *ptr);
-static void auto_zone_start_monitor(boolean_t force);
-static void auto_zone_write_barrier(auto_zone_t *zone, void *recipient, const unsigned int offset_in_bytes, const void *new_value);
-static void *auto_zone_write_barrier_memmove(auto_zone_t *zone, void *dst, const void *src, size_t size);
-
-
-
-static void record_allocation(Class cls);
 static auto_zone_t *gc_zone_init(void);
 
 
 __private_extern__ BOOL UseGC NOBSS = NO;
 static BOOL RecordAllocations = NO;
-static int IsaStompBits = 0x0;
+static BOOL MultiThreadedGC = NO;
+static BOOL WantsMainThreadFinalization = NO;
+static BOOL NeedsMainThreadFinalization = NO;
 
-static auto_zone_t *gc_zone = NULL;
-static BOOL gc_zone_finalizing = NO;
-static intptr_t gc_collection_threshold = 128 * 1024;
-static size_t gc_collection_ratio = 100, gc_collection_counter = 0;
-static NXMapTable *gc_finalization_safe_classes = NULL;
-static BOOL gc_roots_retained = YES;
-
-/***********************************************************************
-* Internal utilities
-**********************************************************************/
-
-#define ISAUTOOBJECT(x) (auto_zone_is_valid_pointer(gc_zone, (x)))
+static struct {
+    auto_zone_foreach_object_t foreach;
+    auto_zone_cursor_t cursor;
+    size_t cursor_size;
+    volatile BOOL finished;
+    volatile BOOL started;
+    pthread_mutex_t mutex;
+    pthread_cond_t condition;
+} BatchFinalizeBlock;
 
 
-// A should-collect callback that never allows collection.
-// Currently used to prevent on-demand collection.
-static boolean_t objc_never_collect(auto_zone_t *zone, const auto_statistics_t *stats, boolean_t about_to_create_a_new_region)
-{
-    return false;
-}
+__private_extern__ auto_zone_t *gc_zone = NULL;
+
+// Pointer magic to make dyld happy. See notes in objc-private.h
+__private_extern__ id (*objc_assign_ivar_internal)(id, id, ptrdiff_t) = objc_assign_ivar;
 
 
 /***********************************************************************
@@ -207,69 +69,128 @@ static boolean_t objc_never_collect(auto_zone_t *zone, const auto_statistics_t *
 * Called by various libraries.
 **********************************************************************/
 
-void objc_collect(void) 
-{
+OBJC_EXPORT void objc_set_collection_threshold(size_t threshold) { // Old naming
     if (UseGC) {
-        auto_collect(gc_zone, AUTO_COLLECTION_FULL_COLLECTION, NULL);
+        auto_collection_parameters(gc_zone)->collection_threshold = threshold;
     }
 }
 
-void objc_collect_if_needed(unsigned long options) {
+OBJC_EXPORT void objc_setCollectionThreshold(size_t threshold) {
     if (UseGC) {
-        const auto_statistics_t *stats = auto_collection_statistics(gc_zone);
-        if (options & OBJC_GENERATIONAL) {
-            // use an absolute memory allocated threshold to decide when to generationally collect.
-            intptr_t bytes_allocated_since_last_gc = stats->bytes_in_use - stats->bytes_in_use_after_last_collection[stats->last_collection_was_generational];
-            if (bytes_allocated_since_last_gc >= gc_collection_threshold) {
-                // malloc_printf("bytes_allocated_since_last_gc = %ld\n", bytes_allocated_since_last_gc);
-                // periodically run a full collection until to keep memory usage down, controlled by OBJC_COLLECTION_RATIO (100 to 1 is the default).
-                auto_collection_mode_t mode = AUTO_COLLECTION_GENERATIONAL_COLLECTION;
-                if (gc_collection_counter++ >= gc_collection_ratio) {
-                    mode = AUTO_COLLECTION_FULL_COLLECTION;
-                    gc_collection_counter = 0;
-                }
-                auto_collect(gc_zone, mode, NULL);
-            }
-        } else {
-            // Run full collections until we no longer recover additional objects. We use two measurements
-            // to determine whether or not the collector is being productive: the total number of blocks
-            // must be shrinking, and the collector must itself be freeing bytes. Otherwise, another thread
-            // could be responsible for reducing the block count. On the other hand, another thread could
-            // be generating a lot of garbage, which would keep us collecting. This will need even more
-            // tuning to prevent starvation, etc.
-            unsigned blocks_in_use;
-            do {
-                blocks_in_use = stats->blocks_in_use;
-                auto_collect(gc_zone, AUTO_COLLECTION_FULL_COLLECTION, NULL);
-                // malloc_printf("bytes freed = %ld\n", stats->bytes_freed_during_last_collection[0]);
-            } while (stats->bytes_freed_during_last_collection[0] > 0 && stats->blocks_in_use < blocks_in_use);
-            gc_collection_counter = 0;
+        auto_collection_parameters(gc_zone)->collection_threshold = threshold;
+    }
+}
+
+void objc_setCollectionRatio(size_t ratio) {
+    if (UseGC) {
+        auto_collection_parameters(gc_zone)->full_vs_gen_frequency = ratio;
+    }
+}
+
+void objc_set_collection_ratio(size_t ratio) {  // old naming
+    if (UseGC) {
+        auto_collection_parameters(gc_zone)->full_vs_gen_frequency = ratio;
+    }
+}
+
+void objc_finalizeOnMainThread(Class cls) {
+    if (UseGC) {
+        WantsMainThreadFinalization = YES;
+        _class_setFinalizeOnMainThread(cls);
+    }
+}
+
+
+void objc_startCollectorThread(void) {
+    static int didOnce = 0;
+    if (!didOnce) {
+        didOnce = 1;
+        
+        // pretend we're done to start out with.
+        BatchFinalizeBlock.started = YES;
+        BatchFinalizeBlock.finished = YES;
+        pthread_mutex_init(&BatchFinalizeBlock.mutex, NULL);
+        pthread_cond_init(&BatchFinalizeBlock.condition, NULL);
+        auto_collect_multithreaded(gc_zone);
+        MultiThreadedGC = YES;
+    }
+}
+
+void objc_start_collector_thread(void) {
+    objc_startCollectorThread();
+}
+
+static void batchFinalizeOnMainThread(void);
+
+void objc_collect(unsigned long options) {
+    if (!UseGC) return;
+    BOOL onMainThread = pthread_main_np() ? YES : NO;
+
+    if (MultiThreadedGC || onMainThread) {
+        if (MultiThreadedGC && onMainThread) batchFinalizeOnMainThread();
+        auto_collection_mode_t amode = AUTO_COLLECT_RATIO_COLLECTION;
+        switch (options & 0x3) {
+          case OBJC_RATIO_COLLECTION:        amode = AUTO_COLLECT_RATIO_COLLECTION;        break;
+          case OBJC_GENERATIONAL_COLLECTION: amode = AUTO_COLLECT_GENERATIONAL_COLLECTION; break;
+          case OBJC_FULL_COLLECTION:         amode = AUTO_COLLECT_FULL_COLLECTION;         break;
+          case OBJC_EXHAUSTIVE_COLLECTION:   amode = AUTO_COLLECT_EXHAUSTIVE_COLLECTION;   break;
         }
+        if (options & OBJC_COLLECT_IF_NEEDED) amode |= AUTO_COLLECT_IF_NEEDED;
+        if (options & OBJC_WAIT_UNTIL_DONE)   amode |= AUTO_COLLECT_SYNCHRONOUS;  // uses different bits
+        auto_collect(gc_zone, amode, NULL);
+    }
+    else {
+        objc_msgSend(objc_getClass("NSGarbageCollector"), @selector(_callOnMainThread:withArgs:), objc_collect, (void *)options);
     }
 }
 
-void objc_collect_generation(void) 
-{
-    if (UseGC) {
-        auto_collect(gc_zone, AUTO_COLLECTION_GENERATIONAL_COLLECTION, NULL);
+// SPI
+// 0 - exhaustively NSGarbageCollector.m
+//   - from AppKit /Developer/Applications/Xcode.app/Contents/MacOS/Xcode via idleTimer
+// GENERATIONAL
+//   - from autoreleasepool
+//   - several other places
+void objc_collect_if_needed(unsigned long options) {
+    if (!UseGC) return;
+    BOOL onMainThread = pthread_main_np() ? YES : NO;
+
+    if (MultiThreadedGC || onMainThread) {
+        auto_collection_mode_t mode;
+        if (options & OBJC_GENERATIONAL) {
+            mode = AUTO_COLLECT_IF_NEEDED | AUTO_COLLECT_RATIO_COLLECTION;
+        }
+        else {
+            mode = AUTO_COLLECT_EXHAUSTIVE_COLLECTION;
+        }
+        if (MultiThreadedGC && onMainThread) batchFinalizeOnMainThread();
+        auto_collect(gc_zone, mode, NULL);
+    }
+    else {      // XXX could be optimized (e.g. ask auto for threshold check, if so, set ASKING if not already ASKING,...
+        objc_msgSend(objc_getClass("NSGarbageCollector"), @selector(_callOnMainThread:withArgs:), objc_collect_if_needed, (void *)options);
     }
 }
 
-
-unsigned int objc_numberAllocated(void) 
+// NEVER USED.
+size_t objc_numberAllocated(void) 
 {
-    const auto_statistics_t *stats = auto_collection_statistics(gc_zone);
-    return stats->blocks_in_use;
+    auto_statistics_t stats;
+    stats.version = 0;
+    auto_zone_statistics(gc_zone, &stats);
+    return stats.malloc_statistics.blocks_in_use;
 }
 
-
+// USED BY CF & ONE OTHER
 BOOL objc_isAuto(id object) 
 {
-    return UseGC && ISAUTOOBJECT(object) != 0;
+    return UseGC && auto_zone_is_valid_pointer(gc_zone, object) != 0;
 }
 
 
-BOOL objc_collecting_enabled(void) 
+BOOL objc_collectingEnabled(void) 
+{
+    return UseGC;
+}
+BOOL objc_collecting_enabled(void) // Old naming
 {
     return UseGC;
 }
@@ -283,20 +204,74 @@ BOOL objc_collecting_enabled(void)
 // Allocate an object in the GC zone, with the given number of extra bytes.
 id objc_allocate_object(Class cls, int extra) 
 {
-    id result = 
-        (id)auto_zone_allocate_object(gc_zone, cls->instance_size + extra, 
-                                      AUTO_OBJECT_SCANNED, false, true);
-    result->isa = cls;
-    if (RecordAllocations) record_allocation(cls);
-    return result;
+    return class_createInstance(cls, extra);
+}
+
+
+/***********************************************************************
+* Write barrier implementations, optimized for when GC is known to be on
+* Called by the write barrier exports only.
+* These implementations assume GC is on. The exported function must 
+* either perform the check itself or be conditionally stomped at 
+* startup time.
+**********************************************************************/
+
+static void objc_strongCast_write_barrier(id value, id *slot) {
+    if (!auto_zone_set_write_barrier(gc_zone, (void*)slot, value)) {
+        auto_zone_root_write_barrier(gc_zone, slot, value);
+    }
+}
+
+__private_extern__ id objc_assign_strongCast_gc(id value, id *slot) 
+{
+    objc_strongCast_write_barrier(value, slot);
+    return (*slot = value);
+}
+
+static void objc_register_global(id value, id *slot)
+{
+    // use explicit root registration.
+    if (value && auto_zone_is_valid_pointer(gc_zone, value)) {
+        if (auto_zone_is_finalized(gc_zone, value)) {
+            __private_extern__ void objc_assign_global_error(id value, id *slot);
+
+            _objc_inform("GC: storing an already collected object %p into global memory at %p, break on objc_assign_global_error to debug\n", value, slot);
+            objc_assign_global_error(value, slot);
+        }
+        auto_zone_add_root(gc_zone, slot, value);
+    }
+}
+
+__private_extern__ id objc_assign_global_gc(id value, id *slot) {
+    objc_register_global(value, slot);
+    return (*slot = value);
+}
+
+
+__private_extern__ id objc_assign_ivar_gc(id value, id base, ptrdiff_t offset) 
+{
+    id *slot = (id*) ((char *)base + offset);
+
+    if (value) {
+        if (!auto_zone_set_write_barrier(gc_zone, (char *)base + offset, value)) {
+            __private_extern__  void objc_assign_ivar_error(id base, ptrdiff_t offset);
+
+            _objc_inform("GC: %p + %d isn't in the auto_zone, break on objc_assign_ivar_error to debug.\n", base, offset);
+            objc_assign_ivar_error(base, offset);
+        }
+    }
+    
+    return (*slot = value);
 }
 
 
 /***********************************************************************
 * Write barrier exports
 * Called by pretty much all GC-supporting code.
+*
+* These "generic" implementations, available in PPC, are thought to be
+* called by Rosetta when it translates the bla instruction.
 **********************************************************************/
-
 
 // Platform-independent write barriers
 // These contain the UseGC check that the platform-specific 
@@ -322,7 +297,7 @@ id objc_assign_global_generic(id value, id *dest)
 }
 
 
-id objc_assign_ivar_generic(id value, id dest, unsigned int offset)
+id objc_assign_ivar_generic(id value, id dest, ptrdiff_t offset)
 {
     if (UseGC) {
         return objc_assign_ivar_gc(value, dest, offset);
@@ -332,19 +307,23 @@ id objc_assign_ivar_generic(id value, id dest, unsigned int offset)
     }
 }
 
-#if defined(__ppc__)
+#if defined(__ppc__) || defined(__i386__) || defined(__x86_64__)
 
 // PPC write barriers are in objc-auto-ppc.s
 // write_barrier_init conditionally stomps those to jump to the _impl versions.
+
+// These 3 functions are defined in objc-auto-i386.s and objc-auto-x86_64.s as
+// the non-GC variants. Under GC, rtp_init stomps them with jumps to
+// objc_assign_*_gc.
 
 #else
 
 // use generic implementation until time can be spent on optimizations
 id objc_assign_strongCast(id value, id *dest) { return objc_assign_strongCast_generic(value, dest); }
 id objc_assign_global(id value, id *dest) { return objc_assign_global_generic(value, dest); }
-id objc_assign_ivar(id value, id dest, unsigned int offset) { return objc_assign_ivar_generic(value, dest, offset); }
+id objc_assign_ivar(id value, id dest, ptrdiff_t offset) { return objc_assign_ivar_generic(value, dest, offset); }
 
-// not defined(__ppc__)
+// not (defined(__ppc__)) && not defined(__i386__) && not defined(__x86_64__)
 #endif
 
 
@@ -357,15 +336,114 @@ void *objc_memmove_collectable(void *dst, const void *src, size_t size)
     }
 }
 
+BOOL objc_atomicCompareAndSwapGlobal(id predicate, id replacement, volatile id *objectLocation) {
+    if (UseGC) objc_register_global(replacement, (id *)objectLocation);
+    return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+}
+
+BOOL objc_atomicCompareAndSwapGlobalBarrier(id predicate, id replacement, volatile id *objectLocation) {
+    if (UseGC) objc_register_global(replacement, (id *)objectLocation);
+    return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+}
+
+BOOL objc_atomicCompareAndSwapInstanceVariable(id predicate, id replacement, volatile id *objectLocation) {
+    if (UseGC) objc_strongCast_write_barrier(replacement, (id *)objectLocation);
+    return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+}
+
+BOOL objc_atomicCompareAndSwapInstanceVariableBarrier(id predicate, id replacement, volatile id *objectLocation) {
+    if (UseGC) objc_strongCast_write_barrier(replacement, (id *)objectLocation);
+    return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+}
+
+
+/***********************************************************************
+* Weak ivar support
+**********************************************************************/
+
+id objc_read_weak(id *location) {
+    id result = *location;
+    if (UseGC && result) {
+        result = auto_read_weak_reference(gc_zone, (void **)location);
+    }
+    return result;
+}
+
+id objc_assign_weak(id value, id *location) {
+    if (UseGC) {
+        auto_assign_weak_reference(gc_zone, value, (void **)location, NULL);
+    }
+    else {
+        *location = value;
+    }
+    return value;
+}
+
 
 /***********************************************************************
 * Testing tools
 * Used to isolate resurrection of garbage objects during finalization.
 **********************************************************************/
 BOOL objc_is_finalized(void *ptr) {
-    return ptr != NULL && auto_zone_is_finalized(gc_zone, ptr);
+    if (ptr != NULL && UseGC) {
+        return auto_zone_is_finalized(gc_zone, ptr);
+    }
+    return NO;
 }
 
+
+/***********************************************************************
+* Stack management
+* Used to tell clean up dirty stack frames before a thread blocks. To
+* make this more efficient, we really need better support from pthreads.
+* See <rdar://problem/4548631> for more details.
+**********************************************************************/
+
+static vm_address_t _stack_resident_base() {
+    pthread_t self = pthread_self();
+    size_t stack_size = pthread_get_stacksize_np(self);
+    vm_address_t stack_base = (vm_address_t)pthread_get_stackaddr_np(self) - stack_size;
+    size_t stack_page_count = stack_size / vm_page_size;
+    char stack_residency[stack_page_count];
+    vm_address_t stack_resident_base = 0;
+    if (mincore((void*)stack_base, stack_size, stack_residency) == 0) {
+        // we can now tell the degree to which the stack is resident, and use it as our ultimate high water mark.
+        size_t i;
+        for (i = 0; i < stack_page_count; ++i) {
+            if (stack_residency[i]) {
+                stack_resident_base = stack_base + i * vm_page_size;
+                // malloc_printf("last touched page = %lu\n", stack_page_count - i - 1);
+                break;
+            }
+        }
+    }
+    return stack_resident_base;
+}
+
+static __attribute__((noinline)) void* _get_stack_pointer() {
+#if defined(__i386__) || defined(__ppc__) || defined(__ppc64__) || defined(__x86_64__)
+    return __builtin_frame_address(0);
+#else
+    return NULL;
+#endif
+}
+
+void objc_clear_stack(unsigned long options) {
+    if (!UseGC) return;
+    if (options & OBJC_CLEAR_RESIDENT_STACK) {
+        // clear just the pages of stack that are currently resident.
+        vm_address_t stack_resident_base = _stack_resident_base();
+        vm_address_t stack_top =  (vm_address_t)_get_stack_pointer() - 2 * sizeof(void*);
+        bzero((void*)stack_resident_base, (stack_top - stack_resident_base));
+    } else {
+        // clear the entire unused stack, regardless of whether it's pages are resident or not.
+        pthread_t self = pthread_self();
+        size_t stack_size = pthread_get_stacksize_np(self);
+        vm_address_t stack_base = (vm_address_t)pthread_get_stackaddr_np(self) - stack_size;
+        vm_address_t stack_top =  (vm_address_t)_get_stack_pointer() - 2 * sizeof(void*);
+        bzero((void*)stack_base, stack_top - stack_base);
+    }
+}
 
 /***********************************************************************
 * CF-only write barrier exports
@@ -378,7 +456,7 @@ void* objc_assign_ivar_address_CF(void *value, void *base, void **slot)
 {
     if (value && gc_zone) {
         if (auto_zone_is_valid_pointer(gc_zone, base)) {
-            unsigned int offset = (((char *)slot)-(char *)base);
+            ptrdiff_t offset = (((char *)slot)-(char *)base);
             auto_zone_write_barrier(gc_zone, base, offset, value);
         }
     }
@@ -394,7 +472,7 @@ void* objc_assign_strongCast_CF(void* value, void **slot)
     if (value && gc_zone) {
 	void *base = (void *)auto_zone_base_pointer(gc_zone, (void*)slot);
 	if (base) {
-            unsigned int offset = (((char *)slot)-(char *)base);
+            ptrdiff_t offset = (((char *)slot)-(char *)base);
             auto_zone_write_barrier(gc_zone, base, offset, value);
 	}
     }
@@ -403,347 +481,255 @@ void* objc_assign_strongCast_CF(void* value, void **slot)
 
 
 /***********************************************************************
-* Write barrier implementations, optimized for when GC is known to be on
-* Called by the write barrier exports only.
-* These implementations assume GC is on. The exported function must 
-* either perform the check itself or be conditionally stomped at 
-* startup time.
-**********************************************************************/
-
-__private_extern__ id objc_assign_strongCast_gc(id value, id *slot) 
-{
-    id base;
-    
-    base = (id) auto_zone_base_pointer(gc_zone, (void*)slot);
-    if (base) {
-        unsigned int offset = (((char *)slot)-(char *)base);
-        auto_zone_write_barrier(gc_zone, base, (char*)slot - (char*)base, value);
-    }
-    return (*slot = value);
-}
-
-
-__private_extern__ id objc_assign_global_gc(id value, id *slot) 
-{
-    if (gc_roots_retained) {
-        if (value && ISAUTOOBJECT(value)) {
-            if (auto_zone_is_finalized(gc_zone, value))
-                _objc_inform("GC: storing an already collected object %p into global memory at %p\n", value, slot);
-            auto_zone_retain(gc_zone, value);
-        }
-        if (*slot && ISAUTOOBJECT(*slot)) {
-            auto_zone_release(gc_zone, *slot);
-        }
-    } else {
-        // use explicit root registration.
-        if (value && ISAUTOOBJECT(value)) {
-            if (auto_zone_is_finalized(gc_zone, value))
-                _objc_inform("GC: storing an already collected object %p into global memory at %p\n", value, slot);
-            auto_zone_add_root(gc_zone, slot, sizeof(id*));
-        }
-    }
-    return (*slot = value);
-}
-
-
-__private_extern__ id objc_assign_ivar_gc(id value, id base, unsigned int offset) 
-{
-    id *slot = (id*) ((char *)base + offset);
-
-    if (value) {
-        if (ISAUTOOBJECT(base)) {
-            auto_zone_write_barrier(gc_zone, base, offset, value);
-            if (gc_zone_finalizing && (auto_zone_get_layout_type(gc_zone, value) & AUTO_OBJECT) != AUTO_OBJECT) {
-                // XXX_PCB: Hack, don't allow resurrection by inhibiting assigns of garbage, non-object, pointers.
-		// XXX BG: move this check into auto & institute a new policy for resurrection, to wit:
-		// Resurrected Objects should go on a special list during finalization & be zombified afterwards
-		// using the noisy isa-slam hack.
-                if (auto_zone_is_finalized(gc_zone, value) && !auto_zone_is_finalized(gc_zone, base)) {
-                    _objc_inform("GC: *** objc_assign_ivar_gc: preventing a resurrecting store of %p into %p + %d\n", value, base, offset);
-                    value = nil;
-                }
-            }
-        } else {
-            _objc_inform("GC: *** objc_assign_ivar_gc: %p + %d isn't in the auto_zone.\n", base, offset);
-        }
-    }
-
-    return (*slot = value);
-}
-
-
-
-/***********************************************************************
 * Finalization support
-* Called by auto and Foundation.
 **********************************************************************/
-
-#define USE_ISA_HACK 1
-#define DO_ISA_DEBUG 0
-
-#if USE_ISA_HACK
-
-
-// NSDeallocatedObject silently ignores all messages sent to it.
-@interface NSDeallocatedObject {
-@public
-    Class IsA;
-}
-+ (Class)class;
-@end
-
-
-static unsigned int FTCount, FTSize;
-static struct FTTable {
-    NSDeallocatedObject  *object;
-    Class  class;
-} *FTTablePtr;
-
-/* a quick and very dirty table to map finalized pointers to their isa's */
-static void addPointerFT(NSDeallocatedObject *object, Class class) {
-    if (FTCount >= FTSize) {
-	FTSize = 2*(FTSize + 10);
-	FTTablePtr = realloc(FTTablePtr, FTSize*sizeof(struct FTTable));
-    }
-    FTTablePtr[FTCount].object = object;
-    FTTablePtr[FTCount].class = class;
-    ++FTCount;
-}
-
-static Class classForPointerFT(NSDeallocatedObject *object) {
-    int i;
-    for (i = 0; i < FTCount; ++i)
-	if (FTTablePtr[i].object == object)
-	    return FTTablePtr[i].class;
-    return NULL;
-}
-
-void objc_stale(id object) {
-}
-
-@implementation NSDeallocatedObject
-+ (Class)class { return self; }
-- (Class)class { return classForPointerFT(self); }
-- (BOOL)isKindOfClass:(Class)aClass {
-    Class cls;
-    for (cls = classForPointerFT(self); nil != cls; cls = cls->super_class) 
-	if (cls == (Class)aClass) return YES;
-    return NO;
-}
-+ forward:(SEL)aSelector :(marg_list)args { return nil; }
-- forward:(SEL)aSelector :(marg_list)args {
-    Class class = classForPointerFT(self);
-    if (!class) {
-	if (IsaStompBits & 0x2)
-	    _objc_inform("***finalized & *recovered* object %p of being sent '%s'!!\n", self, sel_getName(aSelector));
-	// if its not in the current table, then its being messaged from a STALE REFERENCE!!
-	objc_stale(self);
-	return nil;
-    }
-    if (IsaStompBits & 0x4)
-	_objc_inform("finalized object %p of class %s being sent %s\n", self, class->name, sel_getName(aSelector));
-    return nil;
-}
-@end
-
-
-static Class _NSDeallocatedObject = Nil;
 
 static IMP _NSObject_finalize = NULL;
 
+// Finalizer crash debugging
+static void *finalizing_object;
+static const char *__crashreporter_info__;
 
-// Handed to and then called by auto
-static void sendFinalize(auto_zone_t *zone, void* ptr, void *context) 
-{
-    if (ptr == NULL) {
-	// special signal to mark end of finalization phase
-	if (IsaStompBits & 0x8)
-	    _objc_inform("----finalization phase over-----");
-	FTCount = 0;
-	return;
-    }
-    
-    id object = ptr;
+static void finalizeOneObject(void *obj, void *sel) {
+    id object = (id)obj;
+    SEL selector = (SEL)sel;
+    finalizing_object = obj;
+    __crashreporter_info__ = object_getClassName(obj);
+
+    /// call -finalize method.
+    objc_msgSend(object, selector);
+    // Call C++ destructors, if any.
+    object_cxxDestruct(object);
+
+    finalizing_object = NULL;
+    __crashreporter_info__ = NULL;
+}
+
+static void finalizeOneMainThreadOnlyObject(void *obj, void *sel) {
+    id object = (id)obj;
     Class cls = object->isa;
-    
-    if (cls == _NSDeallocatedObject) {
-        // already finalized, do nothing
-        _objc_inform("sendFinalize called on NSDeallocatedObject %p", ptr);
-        return;
+    if (cls == NULL) {
+        _objc_fatal("object with NULL ISA passed to finalizeOneMainThreadOnlyObject:  %p\n", obj);
     }
-    
-    IMP finalizeMethod = class_lookupMethod(cls, @selector(finalize));
-    if (finalizeMethod == &_objc_msgForward) {
-        _objc_inform("GC: class '%s' does not implement -finalize!", cls->name);
-    }
-
-    gc_zone_finalizing = YES;
-
-    @try {
-        // fixme later, optimize away calls to NSObject's -finalize
-        (*finalizeMethod)(object, @selector(finalize));
-    } @catch (id exception) {
-        _objc_inform("GC: -finalize resulted in an exception being thrown %p!", exception);
-        // FIXME: what about uncaught C++ exceptions? Here's an idea, define a category
-        // in a .mm file, so we can catch both flavors of exceptions.
-        // @interface NSObject (TryToFinalize)
-        //  - (BOOL)tryToFinalize {
-        //      try {
-        //          @try {
-        //              [self finalize];
-        //          } @catch (id exception) {
-        //              return NO;
-        //          }
-        //      } catch (...) {
-        //          return NO;
-        //      }
-        //      return YES;
-        //  }
-        //  @end
-    }
-
-    gc_zone_finalizing = NO;
-
-    if (IsaStompBits) {
-	NSDeallocatedObject *dead = (NSDeallocatedObject *)object;
-	// examine list of okay classes and leave alone XXX get from file
-	// fixme hack: smash isa to dodge some out-of-order finalize bugs
-	// the following are somewhat finalize order safe
-	//if (!strcmp(dead->oldIsA->name, "NSCFArray")) return;
-	//if (!strcmp(dead->oldIsA->name, "NSSortedArray")) return;
-	if (IsaStompBits & 0x8)
-	    printf("adding [%d] %p %s\n", FTCount, dead, dead->IsA->name);
-	addPointerFT(dead, dead->IsA);
-	objc_assign_ivar(_NSDeallocatedObject, dead, 0);
+    if (_class_shouldFinalizeOnMainThread(cls)) {
+        finalizeOneObject(obj, sel);
     }
 }
 
-static void finalizeOneObject(void *ptr, void *data) {
-    id object = ptr;
+static void finalizeOneAnywhereObject(void *obj, void *sel) {
+    id object = (id)obj;
     Class cls = object->isa;
-    
-    if (cls == _NSDeallocatedObject) {
-        // already finalized, do nothing
-        _objc_inform("finalizeOneObject called on NSDeallocatedObject %p", ptr);
-        return;
+    if (cls == NULL) {
+        _objc_fatal("object with NULL ISA passed to finalizeOneAnywhereObject:  %p\n", obj);
     }
-    
-    IMP finalizeMethod = class_lookupMethod(cls, @selector(finalize));
-    if (finalizeMethod == &_objc_msgForward) {
-        _objc_inform("GC: class '%s' does not implement -finalize!", cls->name);
+    if (!_class_shouldFinalizeOnMainThread(cls)) {
+        finalizeOneObject(obj, sel);
     }
-        
-    // fixme later, optimize away calls to NSObject's -finalize
-    (*finalizeMethod)(object, @selector(finalize));
-    
-    if (IsaStompBits) {
-	NSDeallocatedObject *dead = (NSDeallocatedObject *)object;
-	// examine list of okay classes and leave alone XXX get from file
-	// fixme hack: smash isa to dodge some out-of-order finalize bugs
-	// the following are somewhat finalize order safe
-	//if (!strcmp(dead->oldIsA->name, "NSCFArray")) return;
-	//if (!strcmp(dead->oldIsA->name, "NSSortedArray")) return;
-        if (gc_finalization_safe_classes && NXMapGet(gc_finalization_safe_classes, cls->name)) {
-            // malloc_printf("&&& finalized safe instance of %s &&&\n", cls->name);
-            return;
-        }
-	if (IsaStompBits & 0x8)
-	    printf("adding [%d] %p %s\n", FTCount, dead, dead->IsA->name);
-	addPointerFT(dead, dead->IsA);
-	objc_assign_ivar(_NSDeallocatedObject, dead, 0);
+    else {
+        NeedsMainThreadFinalization = YES;
     }
 }
+
+
 
 static void batchFinalize(auto_zone_t *zone,
                           auto_zone_foreach_object_t foreach,
-                          auto_zone_cursor_t cursor)
+                          auto_zone_cursor_t cursor, 
+                          size_t cursor_size,
+                          void (*finalize)(void *, void*))
 {
-    gc_zone_finalizing = YES;
     for (;;) {
         @try {
-            // eventually foreach(cursor, objc_msgSend, @selector(finalize));
-            // foreach(cursor, finalizeOneObject, NULL);
-            foreach(cursor, objc_msgSend, @selector(finalize));
+            foreach(cursor, finalize, @selector(finalize));
             // non-exceptional return means finalization is complete.
             break;
         } @catch (id exception) {
-            _objc_inform("GC: -finalize resulted in an exception being thrown %p!", exception);
+            // whoops, note exception, then restart at cursor's position
+            __private_extern__ void objc_exception_during_finalize_error(void);
+            _objc_inform("GC: -finalize resulted in an exception (%p) being thrown, break on objc_exception_during_finalize_error to debug\n\t%s", exception, (const char*)[[exception description] UTF8String]);
+            objc_exception_during_finalize_error();
         }
     }
-    gc_zone_finalizing = NO;
 }
 
-@interface NSResurrectedObject {
-    @public
-    Class _isa;                // [NSResurrectedObject class]
-    Class _old_isa;            // original class
-    unsigned _resurrections;   // how many times this object has been resurrected.
-}
-+ (Class)class;
-@end
 
-@implementation NSResurrectedObject
-+ (Class)class { return self; }
-- (Class)class { return _isa; }
-+ forward:(SEL)aSelector :(marg_list)args { return nil; }
-- forward:(SEL)aSelector :(marg_list)args {
-    _objc_inform("**resurrected** object %p of class %s being sent message '%s'\n", self, _old_isa->name, sel_getName(aSelector));
-    return nil;
+static void batchFinalizeOnMainThread(void) {
+    pthread_mutex_lock(&BatchFinalizeBlock.mutex);
+    if (BatchFinalizeBlock.started) {
+        // main thread got here already
+        pthread_mutex_unlock(&BatchFinalizeBlock.mutex);
+        return;
+    }
+    BatchFinalizeBlock.started = YES;
+    pthread_mutex_unlock(&BatchFinalizeBlock.mutex);
+        
+    batchFinalize(gc_zone, BatchFinalizeBlock.foreach, BatchFinalizeBlock.cursor, BatchFinalizeBlock.cursor_size, finalizeOneMainThreadOnlyObject);
+    // signal the collector thread that finalization has finished.
+    pthread_mutex_lock(&BatchFinalizeBlock.mutex);
+    BatchFinalizeBlock.finished = YES;
+    pthread_cond_signal(&BatchFinalizeBlock.condition);
+    pthread_mutex_unlock(&BatchFinalizeBlock.mutex);
 }
-- (void)finalize {
-    _objc_inform("**resurrected** object %p of class %s being finalized\n", self, _old_isa->name);
-}
-@end
 
-static Class _NSResurrectedObject;
+static void batchFinalizeOnTwoThreads(auto_zone_t *zone,
+                                         auto_zone_foreach_object_t foreach,
+                                         auto_zone_cursor_t cursor, 
+                                         size_t cursor_size)
+{
+    // First, lets get rid of everything we can on this thread, then ask main thread to help if needed
+    NeedsMainThreadFinalization = NO;
+    char cursor_copy[cursor_size];
+    memcpy(cursor_copy, cursor, cursor_size);
+    batchFinalize(zone, foreach, cursor_copy, cursor_size, finalizeOneAnywhereObject);
+
+    if (! NeedsMainThreadFinalization)
+        return;     // no help needed
+    
+    // set up the control block.  Either our ping of main thread with _callOnMainThread will get to it, or
+    // an objc_collect_if_needed() will get to it.  Either way, this block will be processed on the main thread.
+    pthread_mutex_lock(&BatchFinalizeBlock.mutex);
+    BatchFinalizeBlock.foreach = foreach;
+    BatchFinalizeBlock.cursor = cursor;
+    BatchFinalizeBlock.cursor_size = cursor_size;
+    BatchFinalizeBlock.started = NO;
+    BatchFinalizeBlock.finished = NO;
+    pthread_mutex_unlock(&BatchFinalizeBlock.mutex);
+    
+    //printf("----->asking main thread to finalize\n");
+    objc_msgSend(objc_getClass("NSGarbageCollector"), @selector(_callOnMainThread:withArgs:), batchFinalizeOnMainThread, &BatchFinalizeBlock);
+    
+    // wait for the main thread to finish finalizing instances of classes marked CLS_FINALIZE_ON_MAIN_THREAD.
+    pthread_mutex_lock(&BatchFinalizeBlock.mutex);
+    while (!BatchFinalizeBlock.finished) pthread_cond_wait(&BatchFinalizeBlock.condition, &BatchFinalizeBlock.mutex);
+    pthread_mutex_unlock(&BatchFinalizeBlock.mutex);
+    //printf("<------ main thread finalize done\n");
+
+}
+
+
+static void objc_will_grow(auto_zone_t *zone, auto_heap_growth_info_t info) {
+    if (MultiThreadedGC) {
+        //printf("objc_will_grow %d\n", info);
+        
+        if (auto_zone_is_collecting(gc_zone)) {
+            ;
+        }
+        else  {
+            auto_collect(gc_zone, AUTO_COLLECT_RATIO_COLLECTION, NULL);
+        }
+    }
+}
+
+
+// collector calls this with garbage ready
+static void BatchInvalidate(auto_zone_t *zone,
+                                         auto_zone_foreach_object_t foreach,
+                                         auto_zone_cursor_t cursor, 
+                                         size_t cursor_size)
+{
+    if (pthread_main_np() || !WantsMainThreadFinalization) {
+        // Collect all objects.  We're either pre-multithreaded on main thread or we're on the collector thread
+        // but no main-thread-only objects have been allocated.
+        batchFinalize(zone, foreach, cursor, cursor_size, finalizeOneObject);
+    }
+    else {
+        // We're on the dedicated thread.  Collect some on main thread, the rest here.
+        batchFinalizeOnTwoThreads(zone, foreach, cursor, cursor_size);
+    }
+    
+}
+
+// idea:  keep a side table mapping resurrected object pointers to their original Class, so we don't
+// need to smash anything. alternatively, could use associative references to track against a secondary
+// object with information about the resurrection, such as a stack crawl, etc.
+
+static Class _NSResurrectedObjectClass;
+static NXMapTable *_NSResurrectedObjectMap = NULL;
+static OBJC_DECLARE_LOCK(_NSResurrectedObjectLock);
+
+static Class resurrectedObjectOriginalClass(id object) {
+    Class originalClass;
+    OBJC_LOCK(&_NSResurrectedObjectLock);
+    originalClass = (Class) NXMapGet(_NSResurrectedObjectMap, object);
+    OBJC_UNLOCK(&_NSResurrectedObjectLock);
+    return originalClass;
+}
+
+static id _NSResurrectedObject_classMethod(id self, SEL selector) { return self; }
+
+static id _NSResurrectedObject_instanceMethod(id self, SEL name) {
+    _objc_inform("**resurrected** object %p of class %s being sent message '%s'\n", self, class_getName(resurrectedObjectOriginalClass(self)), sel_getName(name));
+    return self;
+}
+
+static void _NSResurrectedObject_finalize(id self, SEL _cmd) {
+    Class originalClass;
+    OBJC_LOCK(&_NSResurrectedObjectLock);
+    originalClass = (Class) NXMapRemove(_NSResurrectedObjectMap, self);
+    OBJC_UNLOCK(&_NSResurrectedObjectLock);
+    if (originalClass) _objc_inform("**resurrected** object %p of class %s being finalized\n", self, class_getName(originalClass));
+    _NSObject_finalize(self, _cmd);
+}
+
+static BOOL _NSResurrectedObject_resolveInstanceMethod(id self, SEL _cmd, SEL name) {
+    class_addMethod((Class)self, name, (IMP)_NSResurrectedObject_instanceMethod, "@@:");
+    return YES;
+}
+
+static BOOL _NSResurrectedObject_resolveClassMethod(id self, SEL _cmd, SEL name) {
+    class_addMethod(object_getClass(self), name, (IMP)_NSResurrectedObject_classMethod, "@@:");
+    return YES;
+}
+
+static void _NSResurrectedObject_initialize() {
+    _NSResurrectedObjectMap = NXCreateMapTable(NXPtrValueMapPrototype, 128);
+    _NSResurrectedObjectClass = objc_allocateClassPair(objc_getClass("NSObject"), "_NSResurrectedObject", 0);
+    class_addMethod(_NSResurrectedObjectClass, @selector(finalize), (IMP)_NSResurrectedObject_finalize, "v@:");
+    Class metaClass = object_getClass(_NSResurrectedObjectClass);
+    class_addMethod(metaClass, @selector(resolveInstanceMethod:), (IMP)_NSResurrectedObject_resolveInstanceMethod, "c@::");
+    class_addMethod(metaClass, @selector(resolveClassMethod:), (IMP)_NSResurrectedObject_resolveClassMethod, "c@::");
+    objc_registerClassPair(_NSResurrectedObjectClass);
+}
 
 static void resurrectZombie(auto_zone_t *zone, void *ptr) {
-    NSResurrectedObject *zombie = (NSResurrectedObject*) ptr;
-    if (zombie->_isa != _NSResurrectedObject) {
-        Class old_isa = zombie->_isa;
-        zombie->_isa = _NSResurrectedObject;
-        zombie->_old_isa = old_isa;
-        zombie->_resurrections = 1;
-    } else {
-        zombie->_resurrections++;
+    id object = (id) ptr;
+    Class cls = object->isa;
+    if (cls != _NSResurrectedObjectClass) {
+        // remember the original class for this instance.
+        OBJC_LOCK(&_NSResurrectedObjectLock);
+        NXMapInsert(_NSResurrectedObjectMap, ptr, cls);
+        OBJC_UNLOCK(&_NSResurrectedObjectLock);
+        object->isa = _NSResurrectedObjectClass;
     }
 }
 
 /***********************************************************************
-* Allocation recording
+* Pretty printing support
 * For development purposes.
 **********************************************************************/
 
-static NXMapTable *the_histogram = NULL;
-static pthread_mutex_t the_histogram_lock = PTHREAD_MUTEX_INITIALIZER;
-
-
-static void record_allocation(Class cls) 
-{
-    pthread_mutex_lock(&the_histogram_lock);
-    unsigned long count = (unsigned long) NXMapGet(the_histogram, cls);
-    NXMapInsert(the_histogram, cls, (const void*) (count + 1));
-    pthread_mutex_unlock(&the_histogram_lock);
-}
-
-
-void objc_allocation_histogram(void)
-{
-    Class cls;
-    unsigned long count;
-    NXMapState state = NXInitMapState(the_histogram);
-    printf("struct histogram {\n\tconst char* name;\n\tunsigned long instance_size;\n\tunsigned long count;\n} the_histogram[] = {\n");
-    while (NXNextMapState(the_histogram, &state, (const void**) &cls, (const void**) &count)) {
-        printf("\t{ \"%s\", %lu, %lu },\n", cls->name, (unsigned long) cls->instance_size, count);
-    }
-    printf("};\n");
-}
 
 static char *name_for_address(auto_zone_t *zone, vm_address_t base, vm_address_t offset, int withRetainCount);
 
 static char* objc_name_for_address(auto_zone_t *zone, vm_address_t base, vm_address_t offset)
 {
     return name_for_address(zone, base, offset, false);
+}
+
+/***********************************************************************
+* Collection support
+**********************************************************************/
+
+static const unsigned char *objc_layout_for_address(auto_zone_t *zone, void *address) 
+{
+    Class cls = *(Class *)address;
+    return (const unsigned char *)class_getIvarLayout(cls);
+}
+
+static const unsigned char *objc_weak_layout_for_address(auto_zone_t *zone, void *address) 
+{
+    Class cls = *(Class *)address;
+    return (const unsigned char *)class_getWeakIvarLayout(cls);
 }
 
 /***********************************************************************
@@ -760,34 +746,18 @@ __private_extern__ void gc_init(BOOL on)
     }
 
     if (UseGC) {
+        // Add GC state to crash log reports
+        _objc_inform_on_crash("garbage collection is ON");
+
         // Set up the GC zone
         gc_zone = gc_zone_init();
         
         // no NSObject until Foundation calls objc_collect_init()
         _NSObject_finalize = &_objc_msgForward;
         
-        // Set up allocation recording
-        RecordAllocations = (getenv("OBJC_RECORD_ALLOCATIONS") != NULL);
-        if (RecordAllocations) the_histogram = NXCreateMapTable(NXPtrValueMapPrototype, 1024);
-        
-        if (getenv("OBJC_FINALIZATION_SAFE_CLASSES")) {
-            FILE *f = fopen(getenv("OBJC_FINALIZATION_SAFE_CLASSES"), "r");
-            if (f != NULL) {
-                char *line;
-                size_t length;
-                gc_finalization_safe_classes = NXCreateMapTable(NXStrValueMapPrototype, 17);
-                while ((line = fgetln(f, &length)) != NULL) {
-                    char *last = &line[length - 1];
-                    if (*last == '\n') *last = '\0'; // strip off trailing newline.
-                    char *className = strdup(line);
-                    NXMapInsert(gc_finalization_safe_classes, className, className);
-                }
-                fclose(f);
-            }
-        }
     } else {
         auto_zone_start_monitor(false);
-        auto_zone_set_class_list(objc_getClassList);
+        auto_zone_set_class_list((int (*)(void **, int))objc_getClassList);
     }
 }
 
@@ -797,64 +767,18 @@ static auto_zone_t *gc_zone_init(void)
     auto_zone_t *result;
 
     // result = auto_zone_create("objc auto collected zone");
-    result = auto_zone(); // honor existing entry point for now (fixme)
+    result = auto_zone_create("auto_zone");
     
     auto_collection_control_t *control = auto_collection_parameters(result);
     
     // set up the magic control parameters
-    control->invalidate = sendFinalize;
-    control->batch_invalidate = batchFinalize;
+    control->batch_invalidate = BatchInvalidate;
+    control->will_grow = objc_will_grow;
     control->resurrect = resurrectZombie;
+    control->layout_for_address = objc_layout_for_address;
+    control->weak_layout_for_address = objc_weak_layout_for_address;
     control->name_for_address = objc_name_for_address;
-    
-    // don't collect "on-demand" until... all Cocoa allocations are outside locks
-    control->should_collect = objc_never_collect;   
-    control->ask_should_collect_frequency = UINT_MAX;
-    control->trace_stack_conservatively = YES;
-    
-    // No interruption callback yet. Foundation will install one later.
-    control->collection_should_interrupt = NULL;
-    
-    // debug: if set, only do full generational; sometimes useful for bringup
-    control->disable_generational = getenv("AUTO_DISABLE_GENERATIONAL") != NULL;
-    
-    // debug: always compare generational GC result to full GC garbage list
-    // this *can* catch missing write-barriers and other bugs
-    control->paranoid_generational = (getenv("AUTO_PARANOID_GENERATIONAL") != NULL);
-    
-    // if set take a slightly slower path for object allocation
-    control->malloc_stack_logging = (getenv("MallocStackLogging") != NULL  ||  getenv("MallocStackLoggingNoCompact") != NULL);
-    
-    // logging level: none by default
-    control->log = 0;
-    if (getenv("AUTO_LOG_NOISY"))       control->log |= AUTO_LOG_COLLECTIONS;
-    if (getenv("AUTO_LOG_ALL"))         control->log |= AUTO_LOG_ALL;
-    if (getenv("AUTO_LOG_COLLECTIONS")) control->log |= AUTO_LOG_COLLECTIONS;
-    if (getenv("AUTO_LOG_COLLECT_DECISION"))  control->log |= AUTO_LOG_COLLECT_DECISION;
-    if (getenv("AUTO_LOG_GC_IMPL"))     control->log |= AUTO_LOG_GC_IMPL;
-    if (getenv("AUTO_LOG_REGIONS"))     control->log |= AUTO_LOG_REGIONS;
-    if (getenv("AUTO_LOG_UNUSUAL"))     control->log |= AUTO_LOG_UNUSUAL;
-    if (getenv("AUTO_LOG_WEAK"))        control->log |= AUTO_LOG_WEAK;
-    
-    if (getenv("OBJC_ISA_STOMP")) {
-	// != 0, stomp isa
-	// 0x1, just stomp, no messages
-	// 0x2, log messaging after reclaim (break on objc_stale())
-	// 0x4, log messages sent during finalize
-	// 0x8, log all finalizations
-	IsaStompBits = strtol(getenv("OBJC_ISA_STOMP"), NULL, 0);
-    }
-    
-    if (getenv("OBJC_COLLECTION_THRESHOLD")) {
-        gc_collection_threshold = (size_t) strtoul(getenv("OBJC_COLLECTION_THRESHOLD"), NULL, 0);
-    }
-    
-    if (getenv("OBJC_COLLECTION_RATIO")) {
-        gc_collection_ratio = (size_t) strtoul(getenv("OBJC_COLLECTION_RATIO"), NULL, 0);
-    }
-    
-    if (getenv("OBJC_EXPLICIT_ROOTS")) gc_roots_retained = NO;
-    
+
     return result;
 }
 
@@ -864,20 +788,14 @@ malloc_zone_t *objc_collect_init(int (*callback)(void))
 {
     // Find NSObject's finalize method now that Foundation is loaded.
     // fixme only look for the base implementation, not a category's
-    _NSDeallocatedObject = objc_getClass("NSDeallocatedObject");
-    _NSResurrectedObject = objc_getClass("NSResurrectedObject");
-    _NSObject_finalize = 
-        class_lookupMethod(objc_getClass("NSObject"), @selector(finalize));
+    _NSObject_finalize = class_getMethodImplementation(objc_getClass("NSObject"), @selector(finalize));
     if (_NSObject_finalize == &_objc_msgForward) {
         _objc_fatal("GC: -[NSObject finalize] unimplemented!");
     }
 
-    // Don't install the callback if OBJC_DISABLE_COLLECTION_INTERRUPT is set
-    if (gc_zone  &&  getenv("OBJC_DISABLE_COLLECTION_INTERRUPT") == NULL) {
-        auto_collection_control_t *ctrl = auto_collection_parameters(gc_zone);
-        ctrl->collection_should_interrupt = callback;
-    }
-
+    // create the _NSResurrectedObject class used to track resurrections.
+    _NSResurrectedObject_initialize();
+    
     return (malloc_zone_t *)gc_zone;
 }
 
@@ -912,7 +830,7 @@ static malloc_zone_t *objc_debug_zone(void)
     return z;
 }
 
-static char *_malloc_append_unsigned(unsigned value, unsigned base, char *head) {
+static char *_malloc_append_unsigned(uintptr_t value, unsigned base, char *head) {
     if (!value) {
         head[0] = '0';
     } else {
@@ -923,61 +841,69 @@ static char *_malloc_append_unsigned(unsigned value, unsigned base, char *head) 
     return head+1;
 }
 
-static void strcati(char *str, unsigned value)
+static void strcati(char *str, uintptr_t value)
 {
     str = _malloc_append_unsigned(value, 10, str + strlen(str));
     str[0] = '\0';
 }
 
-static void strcatx(char *str, unsigned value)
+static void strcatx(char *str, uintptr_t value)
 {
     str = _malloc_append_unsigned(value, 16, str + strlen(str));
     str[0] = '\0';
 }
 
 
-static Ivar ivar_for_offset(struct objc_class *cls, vm_address_t offset)
+static Ivar ivar_for_offset(Class cls, vm_address_t offset)
 {
     int i;
     int ivar_offset;
-    Ivar super_ivar;
-    struct objc_ivar_list *ivars;
+    Ivar super_ivar, result;
+    Ivar *ivars;
+    unsigned int ivar_count;
 
     if (!cls) return NULL;
 
     // scan base classes FIRST
-    super_ivar = ivar_for_offset(cls->super_class, offset);
+    super_ivar = ivar_for_offset(class_getSuperclass(cls), offset);
     // result is best-effort; our ivars may be closer
 
-    ivars = cls->ivars;
-    // If we have no ivars, return super's ivar
-    if (!ivars  ||  ivars->ivar_count == 0) return super_ivar;
+    ivars = class_copyIvarList(cls, &ivar_count);
+    if (ivars && ivar_count) {
+        // Try our first ivar. If it's too big, use super's best ivar.
+        ivar_offset = ivar_getOffset(ivars[0]);
+        if (ivar_offset > offset) result = super_ivar;
+        else if (ivar_offset == offset) result = ivars[0];
+        else result = NULL;
 
-    // Try our first ivar. If it's too big, use super's best ivar.
-    ivar_offset = ivars->ivar_list[0].ivar_offset;
-    if (ivar_offset > offset) return super_ivar;
-    else if (ivar_offset == offset) return &ivars->ivar_list[0];
-
-    // Try our other ivars. If any is too big, use the previous.
-    for (i = 1; i < ivars->ivar_count; i++) {
-        int ivar_offset = ivars->ivar_list[i].ivar_offset;
-        if (ivar_offset == offset) {
-            return &ivars->ivar_list[i];
-        } else if (ivar_offset > offset) {
-            return &ivars->ivar_list[i-1];
+        // Try our other ivars. If any is too big, use the previous.
+        for (i = 1; result == NULL && i < ivar_count; i++) {
+            ivar_offset = ivar_getOffset(ivars[i]);
+            if (ivar_offset == offset) {
+                result = ivars[i];
+            } else if (ivar_offset > offset) {
+                result = ivars[i - 1];
+            }
         }
-    }
 
-    // Found nothing. Return our last ivar.
-    return &ivars->ivar_list[ivars->ivar_count - 1];
+        // Found nothing. Return our last ivar.
+        if (result == NULL)
+            result = ivars[ivar_count - 1];
+        
+        free(ivars);
+    } else {
+        result = super_ivar;
+    }
+    
+    return result;
 }
 
-static void append_ivar_at_offset(char *buf, struct objc_class *cls, vm_address_t offset)
+static void append_ivar_at_offset(char *buf, Class cls, vm_address_t offset)
 {
     Ivar ivar = NULL;
 
     if (offset == 0) return;  // don't bother with isa
-    if (offset >= cls->instance_size) {
+    if (offset >= class_getInstanceSize(cls)) {
         strcat(buf, ".<extra>+");
         strcati(buf, offset);
         return;
@@ -992,10 +918,11 @@ static void append_ivar_at_offset(char *buf, struct objc_class *cls, vm_address_
     // fixme doesn't handle structs etc.
     
     strcat(buf, ".");
-    if (ivar->ivar_name) strcat(buf, ivar->ivar_name);
+    const char *ivar_name = ivar_getName(ivar);
+    if (ivar_name) strcat(buf, ivar_name);
     else strcat(buf, "<anonymous ivar>");
 
-    offset -= ivar->ivar_offset;
+    offset -= ivar_getOffset(ivar);
     if (offset > 0) {
         strcat(buf, "+");
         strcati(buf, offset);
@@ -1007,29 +934,33 @@ static const char *cf_class_for_object(void *cfobj)
 {
     // ick - we don't link against CF anymore
 
-    struct {
-        uint32_t version;
-        const char *className;
-        // don't care about the rest
-    } *cfcls;
-    uint32_t cfid;
-    NSSymbol sym;
-    uint32_t (*CFGetTypeID)(void *);
-    void * (*_CFRuntimeGetClassWithTypeID)(uint32_t);
+    const char *result;
+    void *dlh;
+    size_t (*CFGetTypeID)(void *);
+    void * (*_CFRuntimeGetClassWithTypeID)(size_t);
 
-    sym = NSLookupAndBindSymbolWithHint("_CFGetTypeID", "CoreFoundation");
-    if (!sym) return "anonymous_NSCFType";
-    CFGetTypeID = NSAddressOfSymbol(sym);
-    if (!CFGetTypeID) return "NSCFType";
+    result = "anonymous_NSCFType";
 
-    sym = NSLookupAndBindSymbolWithHint("__CFRuntimeGetClassWithTypeID", "CoreFoundation");
-    if (!sym) return "anonymous_NSCFType";
-    _CFRuntimeGetClassWithTypeID = NSAddressOfSymbol(sym);
-    if (!_CFRuntimeGetClassWithTypeID) return "anonymous_NSCFType";
+    dlh = dlopen("/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation", RTLD_LAZY | RTLD_NOLOAD | RTLD_FIRST);
+    if (!dlh) return result;
 
-    cfid = (*CFGetTypeID)(cfobj);
-    cfcls = (*_CFRuntimeGetClassWithTypeID)(cfid);
-    return cfcls->className;
+    CFGetTypeID = (size_t(*)(void*)) dlsym(dlh, "CFGetTypeID");
+    _CFRuntimeGetClassWithTypeID = (void*(*)(size_t)) dlsym(dlh, "_CFRuntimeGetClassWithTypeID");
+    
+    if (CFGetTypeID  &&  _CFRuntimeGetClassWithTypeID) {
+        struct {
+            size_t version;
+            const char *className;
+            // don't care about the rest
+        } *cfcls;
+        size_t cfid;
+        cfid = (*CFGetTypeID)(cfobj);
+        cfcls = (*_CFRuntimeGetClassWithTypeID)(cfid);
+        result = cfcls->className;
+    }
+
+    dlclose(dlh);
+    return result;
 }
 
 
@@ -1045,7 +976,7 @@ static char *name_for_address(auto_zone_t *zone, vm_address_t base, vm_address_t
 
     buf[0] = '\0';
 
-    unsigned int size = 
+    size_t size = 
         auto_zone_size_no_lock(zone, (void *)base);
     auto_memory_type_t type = size ? 
         auto_zone_get_layout_type_no_lock(zone, (void *)base) : AUTO_TYPE_UNKNOWN;
@@ -1055,14 +986,14 @@ static char *name_for_address(auto_zone_t *zone, vm_address_t base, vm_address_t
     switch (type) {
     case AUTO_OBJECT_SCANNED: 
     case AUTO_OBJECT_UNSCANNED: {
-        Class cls = *(struct objc_class **)base;
-        if (0 == strcmp(cls->name, "NSCFType")) {
+        const char *class_name = object_getClassName((id)base);
+        if (0 == strcmp(class_name, "NSCFType")) {
             strcat(buf, cf_class_for_object((void *)base));
         } else {
-            strcat(buf, cls->name);
+            strcat(buf, class_name);
         }
         if (offset) {
-            append_ivar_at_offset(buf, cls, offset);
+            append_ivar_at_offset(buf, object_getClass((id)base), offset);
         }
         APPEND_SIZE(size);
         break;
@@ -1115,10 +1046,10 @@ static void objc_class_recorder(task_t task, void *context, unsigned type_mask,
             // Check if this is an instance of class ctx->cls or some subclass
             Class cls;
             Class isa = *(Class *)r->address;
-            for (cls = isa; cls; cls = cls->super_class) {
+            for (cls = isa; cls; cls = _class_getSuperclass(cls)) {
                 if (cls == ctx->cls) {
                     unsigned int rc;
-                    objc_debug_printf("[%p]    :   %s", r->address, isa->name);
+                    objc_debug_printf("[%p]    :   %s", r->address, _class_getName(isa));
                     if ((rc = auto_zone_retain_count_no_lock(ctx->zone, (void *)r->address))) {
                         objc_debug_printf(" [[refcount %u]]", rc);
                     }
@@ -1131,7 +1062,7 @@ static void objc_class_recorder(task_t task, void *context, unsigned type_mask,
     }
 }
 
-void objc_enumerate_class(char *clsname)
+__private_extern__ void objc_enumerate_class(char *clsname)
 {
     struct objc_class_recorder_context ctx;
     ctx.zone = auto_zone();
@@ -1163,7 +1094,7 @@ static void objc_reference_printer(auto_zone_t *zone, void *ctx,
 }
 
 
-void objc_print_references(void *referent, void *stack_bottom, int lock)
+__private_extern__ void objc_print_references(void *referent, void *stack_bottom, int lock)
 {
     if (lock) {
         auto_enumerate_references(auto_zone(), referent, 
@@ -1194,18 +1125,18 @@ typedef struct {
     unsigned int allocated;
 } blob_queue;
 
-blob_queue blobs = {NULL, 0, 0};
-blob_queue untraced_blobs = {NULL, 0, 0};
-blob_queue root_blobs = {NULL, 0, 0};
-
+static blob_queue blobs = {NULL, 0, 0};
+static blob_queue untraced_blobs = {NULL, 0, 0};
+static blob_queue root_blobs = {NULL, 0, 0};
 
 
 static void spin(void) {    
-    static char* spinner[] = {"\010\010| ", "\010\010/ ", "\010\010- ", "\010\010\\ "};
-    static int spindex = 0;
- 
-    objc_debug_printf(spinner[spindex++]);
-    if (spindex == 4) spindex = 0;
+    static time_t t = 0;
+    time_t now = time(NULL);
+    if (t != now) {
+        objc_debug_printf(".");
+        t = now;
+    }
 }
 
 
@@ -1313,17 +1244,17 @@ static void objc_blob_recorder(auto_zone_t *zone, void *ctx,
 static void objc_print_recursive_refs(vm_address_t target, int which, void *stack_bottom, int lock);
 static void grafflize(blob_queue *blobs, int everything);
 
-void objc_print_instance_roots(vm_address_t target, void *stack_bottom, int lock)
+__private_extern__ void objc_print_instance_roots(vm_address_t target, void *stack_bottom, int lock)
 {
     objc_print_recursive_refs(target, INSTANCE_ROOTS, stack_bottom, lock);
 }
 
-void objc_print_heap_roots(vm_address_t target, void *stack_bottom, int lock)
+__private_extern__ void objc_print_heap_roots(vm_address_t target, void *stack_bottom, int lock)
 {
     objc_print_recursive_refs(target, HEAP_ROOTS, stack_bottom, lock);
 }
 
-void objc_print_all_refs(vm_address_t target, void *stack_bottom, int lock)
+__private_extern__ void objc_print_all_refs(vm_address_t target, void *stack_bottom, int lock)
 {
     objc_print_recursive_refs(target, ALL_REFS, stack_bottom, lock);
 }
@@ -1512,14 +1443,14 @@ static void objc_block_recorder(task_t task, void *context, unsigned type_mask,
 }
 
 
-void objc_dump_block_list(const char* path)
+__private_extern__ void objc_dump_block_list(const char* path)
 {
     struct objc_block_recorder_context ctx;
     char filename[] = "/tmp/blocks-XXXXX.txt";
 
     ctx.zone = auto_zone();
     ctx.count = 0;
-    ctx.fd = (path ? open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666) : mkstemps(filename, strlen(strrchr(filename, '.'))));
+    ctx.fd = (path ? open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666) : mkstemps(filename, (int)strlen(strrchr(filename, '.'))));
 
     objc_debug_printf("\n\nALL AUTO-ALLOCATED BLOCKS\n\n");
     (*ctx.zone->introspect->enumerator)(mach_task_self(), &ctx, MALLOC_PTR_IN_USE_RANGE_TYPE, (vm_address_t)ctx.zone, NULL, objc_block_recorder);
@@ -1598,7 +1529,7 @@ static void grafflize_blob(int gfile, blob *b)
 {
     // fixme include ivar names too
     char *name = name_for_address(auto_zone(), b->address, 0, false);
-    int width = 30 + strlen(name)*6;
+    int width = 30 + (int)strlen(name)*6;
     int height = 40;
     char buf[40] = "";
     char *c;
@@ -1684,7 +1615,7 @@ static void grafflize(blob_queue *blobs, int everything)
     char filename[] = "/tmp/gc-XXXXX.graffle";
 
     // Open file
-    gfile = mkstemps(filename, strlen(strrchr(filename, '.')));
+    gfile = mkstemps(filename, (int)strlen(strrchr(filename, '.')));
     if (gfile < 0) {
         objc_debug_printf("couldn't create a graffle file in /tmp/ (errno %d)\n", errno);
         return;
@@ -1731,110 +1662,3 @@ static void grafflize(blob_queue *blobs, int everything)
     objc_debug_printf("wrote object graph (%d objects)\nopen %s\n", 
                       blobs->used, filename);
 }
-
-#endif
-
-
-
-// Stubs for non-open-source libauto functions
-
-static void auto_collect(auto_zone_t *zone, auto_collection_mode_t mode, void *collection_context)
-{
-}
-
-static auto_collection_control_t *auto_collection_parameters(auto_zone_t *zone)
-{
-    return NULL;
-}
-
-static const auto_statistics_t *auto_collection_statistics(auto_zone_t *zone)
-{
-    return NULL;
-}
-
-static void auto_enumerate_references(auto_zone_t *zone, void *referent, 
-                                      auto_reference_recorder_t callback, 
-                                      void *stack_bottom, void *ctx)
-{
-}
-
-static void auto_enumerate_references_no_lock(auto_zone_t *zone, void *referent, auto_reference_recorder_t callback, void *stack_bottom, void *ctx)
-{
-}
-
-static auto_zone_t *auto_zone(void)
-{
-    return NULL;
-}
-
-static void auto_zone_add_root(auto_zone_t *zone, void *root, size_t size)
-{
-}
-
-static void* auto_zone_allocate_object(auto_zone_t *zone, size_t size, auto_memory_type_t type, boolean_t initial_refcount_to_one, boolean_t clear)
-{
-    return NULL;
-}
-
-static const void *auto_zone_base_pointer(auto_zone_t *zone, const void *ptr)
-{
-    return NULL;
-}
-
-static auto_memory_type_t auto_zone_get_layout_type(auto_zone_t *zone, void *ptr)
-{
-    return 0;
-}
-
-static auto_memory_type_t auto_zone_get_layout_type_no_lock(auto_zone_t *zone, void *ptr)
-{
-    return 0;
-}
-
-static boolean_t auto_zone_is_finalized(auto_zone_t *zone, const void *ptr)
-{
-    return NO;
-}
-
-static boolean_t auto_zone_is_valid_pointer(auto_zone_t *zone, const void *ptr)
-{
-    return NO;
-}
-
-static unsigned int auto_zone_release(auto_zone_t *zone, void *ptr)
-{
-    return 0;
-}
-
-static void auto_zone_retain(auto_zone_t *zone, void *ptr)
-{
-}
-
-static unsigned int auto_zone_retain_count_no_lock(auto_zone_t *zone, const void *ptr)
-{
-    return 0;
-}
-
-static void auto_zone_set_class_list(int (*get_class_list)(void **buffer, int count))
-{
-}
-
-static size_t auto_zone_size_no_lock(auto_zone_t *zone, const void *ptr)
-{
-    return 0;
-}
-
-static void auto_zone_start_monitor(boolean_t force)
-{
-}
-
-static void auto_zone_write_barrier(auto_zone_t *zone, void *recipient, const unsigned int offset_in_bytes, const void *new_value)
-{
-    *(uintptr_t *)(offset_in_bytes + (uint8_t *)recipient) = (uintptr_t)new_value;
-}
-
-static void *auto_zone_write_barrier_memmove(auto_zone_t *zone, void *dst, const void *src, size_t size)
-{
-    return memmove(dst, src, size);
-}
-

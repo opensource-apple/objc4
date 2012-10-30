@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2003, 2006-2007 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -32,35 +30,29 @@
 
 #import <objc/Object.h>
 
-struct objc_method_description {
-	SEL name;
-	char *types;
-};
-struct objc_method_description_list {
-        int count;
-        struct objc_method_description list[1];
-};
+/* Warning: All of these methods will disappear in 64-bit. */
 
 @interface Protocol : Object
 {
 @private
-	char *protocol_name;
- 	struct objc_protocol_list *protocol_list;
-  	struct objc_method_description_list *instance_methods, *class_methods;
+    char *protocol_name OBJC2_UNAVAILABLE;
+    struct objc_protocol_list *protocol_list OBJC2_UNAVAILABLE;
+    struct objc_method_description_list *instance_methods OBJC2_UNAVAILABLE;
+    struct objc_method_description_list *class_methods OBJC2_UNAVAILABLE;
 }
 
 /* Obtaining attributes intrinsic to the protocol */
 
-- (const char *)name;
+- (const char *)name OBJC2_UNAVAILABLE;
 
 /* Testing protocol conformance */
 
-- (BOOL) conformsTo: (Protocol *)aProtocolObject;
+- (BOOL) conformsTo: (Protocol *)aProtocolObject OBJC2_UNAVAILABLE;
 
 /* Looking up information specific to a protocol */
 
-- (struct objc_method_description *) descriptionForInstanceMethod:(SEL)aSel;
-- (struct objc_method_description *) descriptionForClassMethod:(SEL)aSel;
+- (struct objc_method_description *) descriptionForInstanceMethod:(SEL)aSel DEPRECATED_IN_MAC_OS_X_VERSION_10_5_AND_LATER;
+- (struct objc_method_description *) descriptionForClassMethod:(SEL)aSel DEPRECATED_IN_MAC_OS_X_VERSION_10_5_AND_LATER;
 
 @end
 

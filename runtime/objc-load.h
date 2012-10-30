@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2001, 2005-2006 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -33,6 +31,7 @@
 #import <objc/objc-class.h>
 
 #import <mach-o/loader.h>
+#import <AvailabilityMacros.h>
 
 /* dynamically loading Mach-O object files that contain Objective-C code */
 
@@ -42,23 +41,15 @@ OBJC_EXPORT long objc_loadModules (
 	void (*class_callback) (Class, Category),
 	/*headerType*/ struct mach_header **hdr_addr,
 	char *debug_file
-);
+) OBJC2_UNAVAILABLE;
 OBJC_EXPORT int objc_loadModule (
 	char *	moduleName, 
 	void	(*class_callback) (Class, Category),
-	int *	errorCode);
+	int *	errorCode
+) OBJC2_UNAVAILABLE;
 OBJC_EXPORT long objc_unloadModules(
 	void *errorStream,				/* input (optional) */
 	void (*unloadCallback)(Class, Category)		/* input (optional) */
-);
-
-OBJC_EXPORT void objc_register_header_name(
-	char *name					/* input */
-);
-
-OBJC_EXPORT void objc_register_header(
-	char *name					/* input */
-);
-
+) OBJC2_UNAVAILABLE;
 
 #endif /* _OBJC_LOAD_H_ */

@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2001, 2005-2007 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,177 +26,86 @@
 */
 
 
-#include "objc-private.h"
-#import <objc/Protocol.h>
-
-#include <objc/objc-runtime.h>
 #include <stdlib.h>
-
+#include <string.h>
 #include <mach-o/dyld.h>
 #include <mach-o/ldsyms.h>
 
+#define OLD 1
+#import "objc-private.h"
+#import "Protocol.h"
+
+
 /* some forward declarations */
 
-static struct objc_method_description *
-lookup_method(struct objc_method_description_list *mlist, SEL aSel);
+#if !__OBJC2__
+__private_extern__ struct objc_method_description * lookup_protocol_method(Protocol *proto, SEL aSel, BOOL isRequiredMethod, BOOL isInstanceMethod);
+#else
+__private_extern__ Method _protocol_getMethod(Protocol *p, SEL sel, BOOL isRequiredMethod, BOOL isInstanceMethod);
+#endif
 
-static struct objc_method_description *
-lookup_class_method(struct objc_protocol_list *plist, SEL aSel);
-
-static struct objc_method_description *
-lookup_instance_method(struct objc_protocol_list *plist, SEL aSel);
 
 @implementation Protocol 
 
+#if __OBJC2__
+// fixme hack - make Protocol a non-lazy class
++ (void) load { } 
+#endif
 
-+ _fixup: (OBJC_PROTOCOL_PTR)protos numElements: (int) nentries
-{
-  int i;
-  for (i = 0; i < nentries; i++)
-    {
-      /* isa has been overloaded by the compiler to indicate version info */
-      protos[i] OBJC_PROTOCOL_DEREF isa = self;	// install the class descriptor.    
-    }
 
-  return self;
-}
-
-+ load
-{
-  OBJC_PROTOCOL_PTR p;
-  int size;
-  headerType **hp;
-  headerType **hdrs;
-  hdrs = _getObjcHeaders();
-
-  for (hp = hdrs; *hp; hp++) 
-    {
-      p = (OBJC_PROTOCOL_PTR)_getObjcProtocols((headerType*)*hp, &size);
-      if (p && size) { [self _fixup:p numElements: size]; }
-    }
-  free (hdrs);
-
-  return self;
-}
+typedef struct {
+    uintptr_t count;
+    Protocol *list[0];
+} protocol_list_t;
 
 - (BOOL) conformsTo: (Protocol *)aProtocolObj
 {
-  if (!aProtocolObj)
-    return NO;
-
-  if (strcmp(aProtocolObj->protocol_name, protocol_name) == 0)
-    return YES;
-  else if (protocol_list)
-    {
-    int i;
-    
-    for (i = 0; i < protocol_list->count; i++)
-      {
-      Protocol *p = protocol_list->list[i];
-
-      if (strcmp(aProtocolObj->protocol_name, p->protocol_name) == 0)
-        return YES;
-   
-      if ([p conformsTo:aProtocolObj])
-	return YES;
-      }
-    return NO;
-    }
-  else
-    return NO;
+    return protocol_conformsToProtocol(self, aProtocolObj);
 }
 
 - (struct objc_method_description *) descriptionForInstanceMethod:(SEL)aSel
 {
-   struct objc_method_description *m = lookup_method(instance_methods, aSel);
-
-   if (!m && protocol_list)
-     m = lookup_instance_method(protocol_list, aSel);
-
-   return m;
+#if !__OBJC2__
+    return lookup_protocol_method(self,aSel, YES/*required*/, YES/*instance*/);
+#else
+    return method_getDescription(_protocol_getMethod(self, aSel, YES, YES));
+#endif
 }
 
 - (struct objc_method_description *) descriptionForClassMethod:(SEL)aSel
 {
-   struct objc_method_description *m = lookup_method(class_methods, aSel);
-
-   if (!m && protocol_list)
-     m = lookup_class_method(protocol_list, aSel);
-
-   return m;
+#if !__OBJC2__
+    return lookup_protocol_method(self, aSel, YES/*required*/, NO/*instance*/);
+#else
+    return method_getDescription(_protocol_getMethod(self, aSel, YES, NO));
+#endif
 }
 
 - (const char *)name
 {
-  return protocol_name;
+    return protocol_getName(self);
 }
 
 - (BOOL)isEqual:other
 {
+#if __OBJC2__
+    // check isKindOf:
+    Class cls;
+    Class protoClass = objc_getClass("Protocol");
+    for (cls = other->isa; cls; cls = class_getSuperclass(cls)) {
+        if (cls == protoClass) break;
+    }
+    if (!cls) return NO;
+    // check equality
+    return protocol_isEqual(self, other);
+#else
     return [other isKindOf:[Protocol class]] && [self conformsTo: other] && [other conformsTo: self];
+#endif
 }
 
 - (unsigned int)hash
 {
     return 23;
-}
-
-static 
-struct objc_method_description *
-lookup_method(struct objc_method_description_list *mlist, SEL aSel)
-{
-   if (mlist)
-     {
-     int i;
-     for (i = 0; i < mlist->count; i++)
-       if (mlist->list[i].name == aSel)
-         return mlist->list+i;
-     }
-   return 0;
-}
-
-static 
-struct objc_method_description *
-lookup_instance_method(struct objc_protocol_list *plist, SEL aSel)
-{
-   int i;
-   struct objc_method_description *m = 0;
-
-   for (i = 0; i < plist->count; i++)
-     {
-     if (plist->list[i]->instance_methods)
-       m = lookup_method(plist->list[i]->instance_methods, aSel);
-   
-     /* depth first search */  
-     if (!m && plist->list[i]->protocol_list)
-       m = lookup_instance_method(plist->list[i]->protocol_list, aSel);
-
-     if (m)
-       return m;
-     }
-   return 0;
-}
-
-static 
-struct objc_method_description *
-lookup_class_method(struct objc_protocol_list *plist, SEL aSel)
-{
-   int i;
-   struct objc_method_description *m = 0;
-
-   for (i = 0; i < plist->count; i++)
-     {
-     if (plist->list[i]->class_methods)
-       m = lookup_method(plist->list[i]->class_methods, aSel);
-   
-     /* depth first search */  
-     if (!m && plist->list[i]->protocol_list)
-       m = lookup_class_method(plist->list[i]->protocol_list, aSel);
-
-     if (m)
-       return m;
-     }
-   return 0;
 }
 
 @end

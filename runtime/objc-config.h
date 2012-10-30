@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
+ * Copyright (c) 1999-2002, 2005-2006 Apple Inc.  All Rights Reserved.
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * @APPLE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -33,11 +31,6 @@
 // because objc-class.h is public and objc-config.h is not.
 //#define OBJC_INSTRUMENTED
 
-// Turn on support for class refs
-#define OBJC_CLASS_REFS
-
-    #define __S(x) x
-
 // Get the nice macros for subroutine calling, etc.
 // Not available on all architectures.  Not needed
 // (by us) on some configurations.
@@ -45,6 +38,10 @@
     #import <architecture/i386/asm_help.h>
 #elif defined (__ppc__) || defined(ppc)
     #import <architecture/ppc/asm_help.h>
+#elif defined (__ppc64__)
+    // no asm_help for ppc64
+#elif defined (__x86_64__)
+    // no asm_help for x86-64
 #else
     #error We need asm_help.h for this architecture
 #endif
