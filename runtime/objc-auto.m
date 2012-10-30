@@ -334,16 +334,6 @@ id objc_assign_ivar_non_gc(id value, id base, ptrdiff_t offset) {
 * Called by pretty much all GC-supporting code.
 **********************************************************************/
 
-
-#if defined(__i386__)
-
-// These 3 functions are defined in objc-auto-i386.s as 
-// the non-GC variants. Under GC, rtp_init stomps them with jumps to
-// objc_assign_*_gc.
-
-#else
-
-// use generic implementation until time can be spent on optimizations
 id objc_assign_strongCast(id value, id *dest) 
 {
     if (UseGC) {
@@ -380,9 +370,6 @@ id objc_assign_ivar(id value, id dest, ptrdiff_t offset)
         return (*slot = value);
     }
 }
-
-// not defined(__i386__)
-#endif
 
 #if __LP64__
     #define LC_SEGMENT_COMMAND              LC_SEGMENT_64

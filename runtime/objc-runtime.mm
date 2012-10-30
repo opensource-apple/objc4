@@ -56,7 +56,6 @@ int PrintIvars = -1;      // env OBJC_PRINT_IVAR_SETUP
 int PrintVtables = -1;    // env OBJC_PRINT_VTABLE_SETUP
 int PrintVtableImages = -1;//env OBJC_PRINT_VTABLE_IMAGES
 int PrintFuture = -1;     // env OBJC_PRINT_FUTURE_CLASSES
-int PrintRTP = -1;        // env OBJC_PRINT_RTP
 int PrintGC = -1;         // env OBJC_PRINT_GC
 int PrintPreopt = -1;     // env OBJC_PRINT_PREOPTIMIZATION
 int PrintCxxCtors = -1;   // env OBJC_PRINT_CXX_CTORS
@@ -325,8 +324,6 @@ void environ_init(void)
            "log processing of method caches");
     OPTION(PrintFuture, OBJC_PRINT_FUTURE_CLASSES, 
            "log use of future classes for toll-free bridging");
-    OPTION(PrintRTP, OBJC_PRINT_RTP,
-           "log initialization of the Objective-C runtime pages");
     OPTION(PrintGC, OBJC_PRINT_GC,
            "log some GC operations");
     OPTION(PrintPreopt, OBJC_PRINT_PREOPTIMIZATION,

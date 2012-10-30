@@ -674,7 +674,6 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
         verify_gc_readiness(wantsGC, &wantsCompaction, hList, hCount);
         
         gc_init(wantsGC, wantsCompaction);  // needs executable for GC decision
-        rtp_init();                         // needs GC decision first
     } else {
         verify_gc_readiness(wantsGC, &wantsCompaction, hList, hCount);
     }

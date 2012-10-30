@@ -486,10 +486,9 @@ struct objc_method_description * lookup_protocol_method(struct old_protocol *pro
 Method _protocol_getMethod(Protocol *p, SEL sel, BOOL isRequiredMethod, BOOL isInstanceMethod, BOOL recursive);
 #endif
 
-/* GC and RTP startup */
+/* GC startup */
 extern void gc_init(BOOL wantsGC, BOOL wantsCompaction);
 extern void gc_init2(void);
-extern void rtp_init(void);
 
 /* Exceptions */
 struct alt_handler_list;
@@ -571,7 +570,6 @@ ENV(PrintIvars);                // env OBJC_PRINT_IVAR_SETUP
 ENV(PrintVtables);              // env OBJC_PRINT_VTABLE_SETUP
 ENV(PrintVtableImages);         // env OBJC_PRINT_VTABLE_IMAGES
 ENV(PrintFuture);               // env OBJC_PRINT_FUTURE_CLASSES
-ENV(PrintRTP);                  // env OBJC_PRINT_RTP
 ENV(PrintGC);                   // env OBJC_PRINT_GC
 ENV(PrintPreopt);               // env OBJC_PRINT_PREOPTIMIZATION
 ENV(PrintCxxCtors);             // env OBJC_PRINT_CXX_CTORS
