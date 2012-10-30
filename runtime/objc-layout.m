@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004-2007 Apple Inc. All rights reserved.
+ * Copyright (c) 2004-2008 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -24,7 +24,7 @@
 #include <stdlib.h>
 #include <assert.h>
 
-#import "objc-private.h"
+#include "objc-private.h"
 
 /**********************************************************************
 * Object Layouts.
@@ -53,105 +53,62 @@
 
 
 /**********************************************************************
-* generate_layout_bytes
-*
-* Generates the layout bytes representing the specified skip and run.
-* If layout is NULL the can be used to determine the number of bytes added
-* to the layout.  Returns number of bytes added.
-*
+* compress_layout
+* Allocates and returns a compressed string matching the given layout bitmap.
 **********************************************************************/
-#define NIBBLE_MAX 0xf
-static long generate_layout_bytes(long skip, long run, unsigned char *layout) {
-    // number of bytes added
-    long count = 0;
-    
-    // if the skip is greater what can be put in a nibble
-    while (skip > NIBBLE_MAX) {
-        // add a skip with no run if layout is not NULL
-        if (layout) *layout++ = NIBBLE_MAX << 4;
-        
-        // another byte added
-        count++;
-        
-        // decrement skip by nibble maximum
-        skip -= NIBBLE_MAX;
-    }
-    
-    // add remaining skip and run (modulo nibble size) if layout is not NULL
-    if (layout) *layout++ = (skip << 4) | (run % NIBBLE_MAX);
-    
-    // another byte added
-    count++;
-    
-    
-    // if the run is greater what can be put in a nibble
-    while (run > NIBBLE_MAX) {
-        // add a run with no skip if layout is not NULL
-        if (layout) *layout++ = NIBBLE_MAX;
-        
-        // another byte added
-        count++;
-        
-        // decrement run by nibble maximum
-        run -= NIBBLE_MAX;
-    }
-    
-    // return number of bytes added
-    return count;
-}
-
-
-/**********************************************************************
-* scan_bits_for_layout
-*
-* Generate the layout from the bit map.  If layout is NULL then can be used to
-* determine the size of the layout.  Returns size of layout array in bytes
-* including the '\0' terminator.
-*
-**********************************************************************/
-static unsigned char *compress_layout(const uint8_t *bits, size_t bitmap_bits, BOOL weak)
+static unsigned char *
+compress_layout(const uint8_t *bits, size_t bitmap_bits, BOOL weak)
 {
-    long count = 0;                     // number of bytes generated     
-    long skip = 0;                      // number of slots to skip to get to next references
-    long run = 0;                       // number of consecutive references
-    long last_bit = 0;                  // state of last bit encountered
     BOOL all_set = YES;
     BOOL none_set = YES;
+    unsigned char *result;
 
-    unsigned char *layout = _calloc_internal(bitmap_bits + 1, 1);
-    
-    // iterate through bits in bits array
-    long i;
-    for (i = 0; i < bitmap_bits; i++) {
-        // determine next bit, 0 = not a reference, 1 indicates a reference
-        long bit = (bits[i/8] >> (i % 8)) & 1;
-        
-        // if not a reference and last bit was a reference then record skip and run
-        if (!bit && last_bit) {
-            //  record skip and run
-            count += generate_layout_bytes(skip, run, layout + count);
-            
-            // reset counts
-            skip = 0; run = 0;
+    // overallocate a lot; reallocate at correct size later
+    unsigned char * const layout = _calloc_internal(bitmap_bits + 1, 1);
+    unsigned char *l = layout;
+
+    size_t i = 0;
+    while (i < bitmap_bits) {
+        size_t skip = 0;
+        size_t scan = 0;
+
+        // Count one range each of skip and scan.
+        while (i < bitmap_bits) {
+            uint8_t bit = (bits[i/8] >> (i % 8)) & 1;
+            if (bit) break;
+            i++;
+            skip++;
+        }
+        while (i < bitmap_bits) {
+            uint8_t bit = (bits[i/8] >> (i % 8)) & 1;
+            if (!bit) break;
+            i++;
+            scan++;
+            none_set = NO;
         }
 
-        // record the skip or run
-        if (bit) run++, none_set = NO;
-        else skip++, all_set = NO;
-        
-        // track state of last bit
-        last_bit = bit;
+        // Record skip and scan
+        if (skip) all_set = NO;
+        if (scan) none_set = NO;
+        while (skip > 0xf) {
+            *l++ = 0xf0;
+            skip -= 0xf;
+        }
+        if (skip || scan) {
+            *l = skip << 4;    // NOT incremented - merges with scan
+            while (scan > 0xf) {
+                *l++ |= 0x0f;  // May merge with short skip; must calloc
+                scan -= 0xf;
+            }
+            *l++ |= scan;      // NOT checked for zero - always increments
+                               // May merge with short skip; must calloc
+        }
     }
-
-    // Record last skip and run, if any.
-    if (skip || run) count += generate_layout_bytes(skip, run, layout + count);
     
     // insert terminating byte
-    layout[count] = '\0';
-    count++;
+    *l++ = '\0';
     
     // return result
-    unsigned char *result;
     if (none_set  &&  weak) {
         result = NULL;  // NULL weak layout means none-weak
     } else if (all_set  &&  !weak) {
@@ -242,13 +199,11 @@ layout_bitmap_create(const unsigned char *layout_string,
 {
     layout_bitmap result;
     size_t words = instanceSize / sizeof(id);
-    size_t bitmap_bytes = (words+7)/8;
     
-    result.bits = _calloc_internal(bitmap_bytes, 1);
     result.weak = weak;
     result.bitCount = words;
-    result.bitsAllocated = bitmap_bytes * 8;
-    assert(bits->bitsAllocated % 8 == 0);
+    result.bitsAllocated = words;
+    result.bits = _calloc_internal((words+7)/8, 1);
 
     if (!layout_string) {
         if (!weak) {
@@ -278,52 +233,27 @@ layout_string_create(layout_bitmap bits)
 }
 
 
-/***********************************************************************
-* layout_bitmap_or
-* Set dst=dst|src.
-* dst must be at least as long as src.
-* Returns YES if any of dst's bits were changed.
-**********************************************************************/
-__private_extern__ BOOL
-layout_bitmap_or(layout_bitmap dst, layout_bitmap src, const char *msg)
-{
-    if (dst.bitCount < src.bitCount) {
-      _objc_fatal("layout bitmap too short%s%s", msg ? ": " : "", msg ?: "");
-    }
-
-    BOOL changed = NO;
-    
-    // fixme optimize for byte/word at a time
-    size_t bit;
-    for (bit = 0; bit < src.bitCount; bit++) {
-        int dstset = dst.bits[bit/8] & (1 << (bit % 8));
-        int srcset = src.bits[bit/8] & (1 << (bit % 8));
-        if (srcset  &&  !dstset) {
-            changed = YES;
-            dst.bits[bit/8] |= 1 << (bit % 8);
-        }
-    }
-
-    return changed;
-}
-
-
 __private_extern__ void
 layout_bitmap_set_ivar(layout_bitmap bits, const char *type, size_t offset)
 {
-    // fixme only handles id and array of id
+    // fixme only handles some types
     size_t bit = offset / sizeof(id);
 
     if (!type) return;
-    if (type[0] == '@') {
+    if (type[0] == '@'  ||  0 == strcmp(type, "^@")) {
+        // id
+        // id *
         set_bits(bits, bit, 1);
-    } else if (type[0] == '[') {
+    } 
+    else if (type[0] == '[') {
+        // id[]
         char *t;
         unsigned long count = strtoul(type+1, &t, 10);
         if (t  &&  t[0] == '@') {
             set_bits(bits, bit, count);
         }
-    } else if (strchr(type, '@')) {
+    } 
+    else if (strchr(type, '@')) {
         _objc_inform("warning: failing to set GC layout for '%s'\n", type);
     }
 }
@@ -339,13 +269,15 @@ __private_extern__ void
 layout_bitmap_grow(layout_bitmap *bits, size_t newCount)
 {
     if (bits->bitCount >= newCount) return;
-    size_t addition = newCount - bits->bitCount;
     bits->bitCount = newCount;
-    if (bits->bitCount > bits->bitsAllocated) {
-        bits->bitsAllocated += bits->bitsAllocated + (addition+7)/8;
-        bits->bits = _realloc_internal(bits->bits, bits->bitsAllocated);
+    if (bits->bitsAllocated < newCount) {
+        size_t newAllocated = bits->bitsAllocated * 2;
+        if (newAllocated < newCount) newAllocated = newCount;
+        bits->bits = _realloc_internal(bits->bits, (newAllocated+7) / 8);
+        bits->bitsAllocated = newAllocated;
     }
-    assert(bits->bitsAllocated % 8 == 0);
+    assert(bits->bitsAllocated >= bits->bitCount);
+    assert(bits->bitsAllocated >= newCount);
 }
 
 
@@ -360,10 +292,14 @@ layout_bitmap_grow(layout_bitmap *bits, size_t newCount)
 __private_extern__ void
 layout_bitmap_slide(layout_bitmap *bits, size_t oldPos, size_t newPos)
 {
-    if (oldPos >= newPos) _objc_fatal("layout bitmap sliding backwards");
+    size_t shift;
+    size_t count;
 
-    size_t shift = newPos - oldPos;
-    size_t count = bits->bitCount - oldPos;
+    if (oldPos == newPos) return;
+    if (oldPos > newPos) _objc_fatal("layout bitmap sliding backwards");
+
+    shift = newPos - oldPos;
+    count = bits->bitCount - oldPos;
     layout_bitmap_grow(bits, bits->bitCount + shift);
     move_bits(*bits, oldPos, newPos, count);  // slide
     clear_bits(*bits, oldPos, shift);         // zero-fill
@@ -381,13 +317,16 @@ __private_extern__ BOOL
 layout_bitmap_splat(layout_bitmap dst, layout_bitmap src, 
                     size_t oldSrcInstanceSize)
 {
+    BOOL changed;
+    size_t oldSrcBitCount;
+    size_t bit;
+
     if (dst.bitCount < src.bitCount) _objc_fatal("layout bitmap too short");
 
-    BOOL changed = NO;
-    size_t oldSrcBitCount = oldSrcInstanceSize / sizeof(id);
+    changed = NO;
+    oldSrcBitCount = oldSrcInstanceSize / sizeof(id);
     
     // fixme optimize for byte/word at a time
-    size_t bit;
     for (bit = 0; bit < oldSrcBitCount; bit++) {
         int dstset = dst.bits[bit/8] & (1 << (bit % 8));
         int srcset = (bit < src.bitCount) 
@@ -404,6 +343,81 @@ layout_bitmap_splat(layout_bitmap dst, layout_bitmap src,
     }
 
     return changed;
+}
+
+
+/***********************************************************************
+* layout_bitmap_or
+* Set dst=dst|src.
+* dst must be at least as long as src.
+* Returns YES if any of dst's bits were changed.
+**********************************************************************/
+__private_extern__ BOOL
+layout_bitmap_or(layout_bitmap dst, layout_bitmap src, const char *msg)
+{
+    BOOL changed = NO;
+    size_t bit;
+
+    if (dst.bitCount < src.bitCount) {
+        _objc_fatal("layout_bitmap_or: layout bitmap too short%s%s", 
+                    msg ? ": " : "", msg ? msg : "");
+    }
+    
+    // fixme optimize for byte/word at a time
+    for (bit = 0; bit < src.bitCount; bit++) {
+        int dstset = dst.bits[bit/8] & (1 << (bit % 8));
+        int srcset = src.bits[bit/8] & (1 << (bit % 8));
+        if (srcset  &&  !dstset) {
+            changed = YES;
+            dst.bits[bit/8] |= 1 << (bit % 8);
+        }
+    }
+
+    return changed;
+}
+
+
+/***********************************************************************
+* layout_bitmap_clear
+* Set dst=dst&~src.
+* dst must be at least as long as src.
+* Returns YES if any of dst's bits were changed.
+**********************************************************************/
+__private_extern__ BOOL
+layout_bitmap_clear(layout_bitmap dst, layout_bitmap src, const char *msg)
+{
+    BOOL changed = NO;
+    size_t bit;
+
+    if (dst.bitCount < src.bitCount) {
+        _objc_fatal("layout_bitmap_clear: layout bitmap too short%s%s", 
+                    msg ? ": " : "", msg ? msg : "");
+    }
+    
+    // fixme optimize for byte/word at a time
+    for (bit = 0; bit < src.bitCount; bit++) {
+        int dstset = dst.bits[bit/8] & (1 << (bit % 8));
+        int srcset = src.bits[bit/8] & (1 << (bit % 8));
+        if (srcset  &&  dstset) {
+            changed = YES;
+            dst.bits[bit/8] &= ~(1 << (bit % 8));
+        }
+    }
+
+    return changed;
+}
+
+
+__private_extern__ void
+layout_bitmap_print(layout_bitmap bits)
+{
+    size_t i;
+    printf("%zu: ", bits.bitCount);
+    for (i = 0; i < bits.bitCount; i++) {
+        int set = bits.bits[i/8] & (1 << (i % 8));
+        printf("%c", set ? '#' : '_');
+    }
+    printf("\n");
 }
 
 

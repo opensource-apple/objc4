@@ -26,7 +26,7 @@
 * Support for +load methods.
 **********************************************************************/
 
-#import "objc-private.h"
+#include "objc-private.h"
 
 extern void add_class_to_loadable_list(Class cls);
 extern void add_category_to_loadable_list(Category cat);

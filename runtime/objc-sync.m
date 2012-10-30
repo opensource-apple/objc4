@@ -21,53 +21,20 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#include <stdbool.h>
-#include <stdlib.h>
-#include <sys/time.h>
-#include <pthread.h>
-#include <errno.h>
-#include <AssertMacros.h>
-#include <libkern/OSAtomic.h>
-
-#include "objc-sync.h"
 #include "objc-private.h"
+#include "objc-sync.h"
 
 //
 // Allocate a lock only when needed.  Since few locks are needed at any point
 // in time, keep them on a single list.
 //
 
-static pthread_mutexattr_t	sRecursiveLockAttr;
-static bool			sRecursiveLockAttrIntialized = false;
-
-static pthread_mutexattr_t* recursiveAttributes()
-{
-    if ( !sRecursiveLockAttrIntialized ) {
-	int err = pthread_mutexattr_init(&sRecursiveLockAttr);
-        require_noerr_string(err, done, "pthread_mutexattr_init failed");
-
-	err = pthread_mutexattr_settype(&sRecursiveLockAttr, PTHREAD_MUTEX_RECURSIVE);
-        require_noerr_string(err, done, "pthread_mutexattr_settype failed");
-
-	sRecursiveLockAttrIntialized = true;
-   }
-
-done:
-    return &sRecursiveLockAttr;
-}
-
-
-typedef uintptr_t spin_lock_t;
-extern void _spin_lock(spin_lock_t *lockp);
-extern int  _spin_lock_try(spin_lock_t *lockp);
-extern void _spin_unlock(spin_lock_t *lockp);
 
 typedef struct SyncData {
     struct SyncData* nextData;
     id               object;
     int              threadCount;  // number of THREADS using this block
-    pthread_mutex_t  mutex;
-    pthread_cond_t   conditionVariable;
+    recursive_mutex_t        mutex;
 } SyncData;
 
 typedef struct {
@@ -81,9 +48,19 @@ typedef struct SyncCache {
     SyncCacheItem list[0];
 } SyncCache;
 
+/*
+  Fast cache: two fixed pthread keys store a single SyncCacheItem. 
+  This avoids malloc of the SyncCache for threads that only synchronize 
+  a single object at a time.
+  SYNC_DATA_DIRECT_KEY  == SyncCacheItem.data
+  SYNC_COUNT_DIRECT_KEY == SyncCacheItem.lockCount
+ */
+
 typedef struct {
-    spin_lock_t lock;
     SyncData *data;
+    OSSpinLock lock;
+
+    char align[64 - sizeof (OSSpinLock) - sizeof (SyncData *)];
 } SyncList __attribute__((aligned(64)));
 // aligned to put locks on separate cache lines
 
@@ -135,15 +112,59 @@ __private_extern__ void _destroySyncCache(struct SyncCache *cache)
 
 static SyncData* id2data(id object, enum usage why)
 {
-    spin_lock_t *lockp = &LOCK_FOR_OBJ(object);
+    OSSpinLock *lockp = &LOCK_FOR_OBJ(object);
     SyncData **listp = &LIST_FOR_OBJ(object);
     SyncData* result = NULL;
-    int err;
+
+#ifndef NO_DIRECT_THREAD_KEYS
+    // Check per-thread single-entry fast cache for matching object
+    BOOL fastCacheOccupied = NO;
+    SyncData *data = tls_get_direct(SYNC_DATA_DIRECT_KEY);
+    if (data) {
+        fastCacheOccupied = YES;
+
+        if (data->object == object) {
+            // Found a match in fast cache.
+            uintptr_t lockCount;
+
+            result = data;
+            lockCount = (uintptr_t)tls_get_direct(SYNC_COUNT_DIRECT_KEY);
+            require_action_string(result->threadCount > 0, fastcache_done, 
+                                  result = NULL, "id2data fastcache is buggy");
+            require_action_string(lockCount > 0, fastcache_done, 
+                                  result = NULL, "id2data fastcache is buggy");
+
+            switch(why) {
+            case ACQUIRE: {
+                lockCount++;
+                tls_set_direct(SYNC_COUNT_DIRECT_KEY, (void*)lockCount);
+                break;
+            }
+            case RELEASE:
+                lockCount--;
+                tls_set_direct(SYNC_COUNT_DIRECT_KEY, (void*)lockCount);
+                if (lockCount == 0) {
+                    // remove from fast cache
+                    tls_set_direct(SYNC_DATA_DIRECT_KEY, NULL);
+                    // atomic because may collide with concurrent ACQUIRE
+                    OSAtomicDecrement32Barrier(&result->threadCount);
+                }
+                break;
+            case CHECK:
+                // do nothing
+                break;
+            }
+
+        fastcache_done:     
+            return result;            
+        }
+    }
+#endif
 
     // Check per-thread cache of already-owned locks for matching object
     SyncCache *cache = fetch_cache(NO);
     if (cache) {
-        int i;
+        unsigned int i;
         for (i = 0; i < cache->used; i++) {
             SyncCacheItem *item = &cache->list[i];
             if (item->data->object != object) continue;
@@ -173,7 +194,7 @@ static SyncData* id2data(id object, enum usage why)
                 break;
             }
 
-        cache_done:            
+        cache_done:
             return result;
         }
     }
@@ -185,62 +206,73 @@ static SyncData* id2data(id object, enum usage why)
     // We could keep the nodes in some hash table if we find that there are
     // more than 20 or so distinct locks active, but we don't do that now.
     
-    _spin_lock(lockp);
+    OSSpinLockLock(lockp);
 
-    SyncData* p;
-    SyncData* firstUnused = NULL;
-    for (p = *listp; p != NULL; p = p->nextData) {
-        if ( p->object == object ) {
-            result = p;
-            // atomic because may collide with concurrent RELEASE
-            OSAtomicIncrement32Barrier(&result->threadCount);
+    {
+        SyncData* p;
+        SyncData* firstUnused = NULL;
+        for (p = *listp; p != NULL; p = p->nextData) {
+            if ( p->object == object ) {
+                result = p;
+                // atomic because may collide with concurrent RELEASE
+                OSAtomicIncrement32Barrier(&result->threadCount);
+                goto done;
+            }
+            if ( (firstUnused == NULL) && (p->threadCount == 0) )
+                firstUnused = p;
+        }
+    
+        // no SyncData currently associated with object
+        if ( (why == RELEASE) || (why == CHECK) )
+            goto done;
+    
+        // an unused one was found, use it
+        if ( firstUnused != NULL ) {
+            result = firstUnused;
+            result->object = object;
+            result->threadCount = 1;
             goto done;
         }
-        if ( (firstUnused == NULL) && (p->threadCount == 0) )
-            firstUnused = p;
-    }
-    
-    // no SyncData currently associated with object
-    if ( (why == RELEASE) || (why == CHECK) )
-	goto done;
-    
-    // an unused one was found, use it
-    if ( firstUnused != NULL ) {
-        result = firstUnused;
-        result->object = object;
-        result->threadCount = 1;
-        goto done;
     }
                             
     // malloc a new SyncData and add to list.
     // XXX calling malloc with a global lock held is bad practice,
     // might be worth releasing the lock, mallocing, and searching again.
     // But since we never free these guys we won't be stuck in malloc very often.
-    result = (SyncData*)malloc(sizeof(SyncData));
+    result = (SyncData*)calloc(sizeof(SyncData), 1);
     result->object = object;
     result->threadCount = 1;
-    err = pthread_mutex_init(&result->mutex, recursiveAttributes());
-    require_noerr_string(err, done, "pthread_mutex_init failed");
-    err = pthread_cond_init(&result->conditionVariable, NULL);
-    require_noerr_string(err, done, "pthread_cond_init failed");
+    recursive_mutex_init(&result->mutex);
     result->nextData = *listp;
     *listp = result;
     
  done:
-    _spin_unlock(lockp);
+    OSSpinLockUnlock(lockp);
     if (result) {
         // Only new ACQUIRE should get here.
         // All RELEASE and CHECK and recursive ACQUIRE are 
-        // handled by the per-thread cache above.
+        // handled by the per-thread caches above.
         
         require_string(result != NULL, really_done, "id2data is buggy");
         require_action_string(why == ACQUIRE, really_done, 
                               result = NULL, "id2data is buggy");
         require_action_string(result->object == object, really_done, 
                               result = NULL, "id2data is buggy");
-        
-        if (!cache) cache = fetch_cache(YES);
-        cache->list[cache->used++] = (SyncCacheItem){result, 1};
+
+#ifndef NO_DIRECT_THREAD_KEYS
+        if (!fastCacheOccupied) {
+            // Save in fast thread cache
+            tls_set_direct(SYNC_DATA_DIRECT_KEY, result);
+            tls_set_direct(SYNC_COUNT_DIRECT_KEY, (void*)1);
+        } else 
+#endif
+        {
+            // Save in thread cache
+            if (!cache) cache = fetch_cache(YES);
+            cache->list[cache->used].data = result;
+            cache->list[cache->used].lockCount = 1;
+            cache->used++;
+        }
     }
 
  really_done:
@@ -255,8 +287,8 @@ int objc_sync_nil(void)
 }
 
 
-// Begin synchronizing on 'obj'.  
-// Allocates recursive pthread_mutex associated with 'obj' if needed.
+// Begin synchronizing on 'obj'. 
+// Allocates recursive mutex associated with 'obj' if needed.
 // Returns OBJC_SYNC_SUCCESS once lock is acquired.  
 int objc_sync_enter(id obj)
 {
@@ -266,8 +298,8 @@ int objc_sync_enter(id obj)
         SyncData* data = id2data(obj, ACQUIRE);
         require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_INITIALIZED, "id2data failed");
 	
-        result = pthread_mutex_lock(&data->mutex);
-        require_noerr_string(result, done, "pthread_mutex_lock failed");
+        result = recursive_mutex_lock(&data->mutex);
+        require_noerr_string(result, done, "mutex_lock failed");
     } else {
         // @synchronized(nil) does nothing
         if (DebugNilSync) {
@@ -291,96 +323,35 @@ int objc_sync_exit(id obj)
         SyncData* data = id2data(obj, RELEASE); 
         require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR, "id2data failed");
         
-        result = pthread_mutex_unlock(&data->mutex);
-        require_noerr_string(result, done, "pthread_mutex_unlock failed");
+        result = recursive_mutex_unlock(&data->mutex);
+        require_noerr_string(result, done, "mutex_unlock failed");
     } else {
         // @synchronized(nil) does nothing
     }
 	
 done:
-    if ( result == EPERM )
-        result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR;
+    if ( result == RECURSIVE_MUTEX_NOT_LOCKED )
+         result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR;
 
     return result;
 }
 
 
-// Temporarily release lock on 'obj' and wait for another thread to notify on 'obj'
-// Return OBJC_SYNC_SUCCESS, OBJC_SYNC_NOT_OWNING_THREAD_ERROR, OBJC_SYNC_TIMED_OUT, OBJC_SYNC_INTERRUPTED
-int objc_sync_wait(id obj, long long milliSecondsMaxWait)
+#if TARGET_OS_MAC && !TARGET_OS_EMBEDDED
+
+int objc_sync_wait(id obj, long long max)
 {
-    int result = OBJC_SYNC_SUCCESS;
-            
-    SyncData* data = id2data(obj, CHECK);
-    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR, "id2data failed");
-    
-    
-    // XXX need to retry cond_wait under out-of-our-control failures
-    if ( milliSecondsMaxWait == 0 ) {
-        result = pthread_cond_wait(&data->conditionVariable, &data->mutex);
-        require_noerr_string(result, done, "pthread_cond_wait failed");
-    }
-    else {
-       	struct timespec maxWait;
-        maxWait.tv_sec  = (time_t)(milliSecondsMaxWait / 1000);
-        maxWait.tv_nsec = (long)((milliSecondsMaxWait - (maxWait.tv_sec * 1000)) * 1000000);
-        result = pthread_cond_timedwait_relative_np(&data->conditionVariable, &data->mutex, &maxWait);
-     	require_noerr_string(result, done, "pthread_cond_timedwait_relative_np failed");
-    }
-    // no-op to keep compiler from complaining about branch to next instruction
-    data = NULL;
-
-done:
-    if ( result == EPERM )
-        result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR;
-    else if ( result == ETIMEDOUT )
-        result = OBJC_SYNC_TIMED_OUT;
-    
-    return result;
+    _objc_fatal("Do not call objc_sync_wait.");
 }
 
-
-// Wake up another thread waiting on 'obj'
-// Return OBJC_SYNC_SUCCESS, OBJC_SYNC_NOT_OWNING_THREAD_ERROR
 int objc_sync_notify(id obj)
 {
-    int result = OBJC_SYNC_SUCCESS;
-        
-    SyncData* data = id2data(obj, CHECK);
-    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR, "id2data failed");
-
-    result = pthread_cond_signal(&data->conditionVariable);
-    require_noerr_string(result, done, "pthread_cond_signal failed");
-
-done:
-    if ( result == EPERM )
-        result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR;
-    
-    return result;
+    _objc_fatal("Do not call objc_sync_notify.");
 }
 
-
-// Wake up all threads waiting on 'obj'
-// Return OBJC_SYNC_SUCCESS, OBJC_SYNC_NOT_OWNING_THREAD_ERROR
 int objc_sync_notifyAll(id obj)
 {
-    int result = OBJC_SYNC_SUCCESS;
-        
-    SyncData* data = id2data(obj, CHECK);
-    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR, "id2data failed");
-
-    result = pthread_cond_broadcast(&data->conditionVariable);
-    require_noerr_string(result, done, "pthread_cond_broadcast failed");
-
-done:
-    if ( result == EPERM )
-        result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR;
-    
-    return result;
+    _objc_fatal("Do not call objc_sync_notifyAll.");
 }
 
-
-
-
-
-
+#endif

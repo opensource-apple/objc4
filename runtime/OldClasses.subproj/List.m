@@ -27,7 +27,7 @@
 	Responsibility: Bertrand Serlet
 */
 
-#ifndef __LP64__
+#ifndef __OBJC2__
 
 #import <stdlib.h>
 #import <stdio.h>

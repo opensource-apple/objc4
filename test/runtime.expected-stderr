@@ -1,0 +1,2 @@
+objc\[\d+\]: class `DoesNotExist\' not linked into application
+OK: runtime.m

@@ -30,10 +30,10 @@
     All rights reserved.
 */
 
-#if defined(__LP64__)
+#if defined(__OBJC2__)
 
-// This header contains definitions for Libstreams, which will never be 64-bit.
-#warning objc/error.h is unavailable in 64-bit.
+// This header contains definitions for Libstreams.
+#warning objc/error.h is unavailable.
 
 #endif
 
@@ -43,7 +43,7 @@
 #define _OBJC_ERROR_H_
 
 #include <setjmp.h>
-#import <objc/objc-api.h>
+#include <objc/objc-api.h>
 
 
 typedef struct _NXHandler {	/* a node in the handler chain */

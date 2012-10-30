@@ -1,0 +1,729 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 45;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		393CEAC00DC69E3E000B69DE /* objc-references.mm in Sources */ = {isa = PBXBuildFile; fileRef = 393CEABF0DC69E3E000B69DE /* objc-references.mm */; settings = {COMPILER_FLAGS = "-fvisibility=hidden"; }; };
+		393CEAC60DC69E67000B69DE /* objc-references.h in Headers */ = {isa = PBXBuildFile; fileRef = 393CEAC50DC69E67000B69DE /* objc-references.h */; };
+		830F2A740D737FB800392440 /* objc-msg-arm.s in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A690D737FB800392440 /* objc-msg-arm.s */; };
+		830F2A750D737FB900392440 /* objc-msg-i386.s in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A6A0D737FB800392440 /* objc-msg-i386.s */; };
+		830F2A760D737FB900392440 /* objc-msg-ppc.s in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A6B0D737FB800392440 /* objc-msg-ppc.s */; };
+		830F2A7D0D737FBB00392440 /* objc-msg-x86_64.s in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A720D737FB800392440 /* objc-msg-x86_64.s */; };
+		830F2A890D73819A00392440 /* objc-auto-i386.s in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A850D73819A00392440 /* objc-auto-i386.s */; };
+		830F2A8A0D73819A00392440 /* objc-auto-ppc.s in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A860D73819A00392440 /* objc-auto-ppc.s */; };
+		830F2A8B0D73819A00392440 /* objc-auto-ppc64.s in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A870D73819A00392440 /* objc-auto-ppc64.s */; };
+		830F2A940D73876100392440 /* objc-accessors.h in Headers */ = {isa = PBXBuildFile; fileRef = 830F2A920D73876100392440 /* objc-accessors.h */; };
+		830F2A950D73876100392440 /* objc-accessors.m in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A930D73876100392440 /* objc-accessors.m */; };
+		830F2A980D738DC200392440 /* hashtable.h in Headers */ = {isa = PBXBuildFile; fileRef = 830F2A970D738DC200392440 /* hashtable.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		830F2AB10D73962200392440 /* markgc.c in Sources */ = {isa = PBXBuildFile; fileRef = 830F2AA50D7394C200392440 /* markgc.c */; };
+		83112ED40F00599600A5FBAF /* objc-internal.h in Headers */ = {isa = PBXBuildFile; fileRef = 83112ED30F00599600A5FBAF /* objc-internal.h */; settings = {ATTRIBUTES = (Private, ); }; };
+		831C85D50E10CF850066E64C /* objc-os.h in Headers */ = {isa = PBXBuildFile; fileRef = 831C85D30E10CF850066E64C /* objc-os.h */; };
+		831C85D60E10CF850066E64C /* objc-os.m in Sources */ = {isa = PBXBuildFile; fileRef = 831C85D40E10CF850066E64C /* objc-os.m */; };
+		834266D80E665A8B002E4DA2 /* objc-gdb.h in Headers */ = {isa = PBXBuildFile; fileRef = 834266D70E665A8B002E4DA2 /* objc-gdb.h */; settings = {ATTRIBUTES = (Private, ); }; };
+		838485BE0D6D687300CEA253 /* error.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485B60D6D687300CEA253 /* error.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838485BF0D6D687300CEA253 /* hashtable2.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485B70D6D687300CEA253 /* hashtable2.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838485C00D6D687300CEA253 /* hashtable2.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485B80D6D687300CEA253 /* hashtable2.m */; };
+		838485C30D6D687300CEA253 /* maptable.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485BB0D6D687300CEA253 /* maptable.h */; settings = {ATTRIBUTES = (Private, ); }; };
+		838485C40D6D687300CEA253 /* maptable.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485BC0D6D687300CEA253 /* maptable.m */; };
+		838485EF0D6D68A200CEA253 /* objc-api.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485C80D6D68A200CEA253 /* objc-api.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838485F00D6D68A200CEA253 /* objc-auto.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485C90D6D68A200CEA253 /* objc-auto.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838485F10D6D68A200CEA253 /* objc-auto.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485CA0D6D68A200CEA253 /* objc-auto.m */; };
+		838485F20D6D68A200CEA253 /* objc-cache.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485CB0D6D68A200CEA253 /* objc-cache.m */; };
+		838485F30D6D68A200CEA253 /* objc-class-old.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485CC0D6D68A200CEA253 /* objc-class-old.m */; };
+		838485F40D6D68A200CEA253 /* objc-class.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485CD0D6D68A200CEA253 /* objc-class.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838485F50D6D68A200CEA253 /* objc-class.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485CE0D6D68A200CEA253 /* objc-class.m */; };
+		838485F60D6D68A200CEA253 /* objc-config.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485CF0D6D68A200CEA253 /* objc-config.h */; };
+		838485F70D6D68A200CEA253 /* objc-errors.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485D00D6D68A200CEA253 /* objc-errors.m */; };
+		838485F80D6D68A200CEA253 /* objc-exception.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485D10D6D68A200CEA253 /* objc-exception.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838485F90D6D68A200CEA253 /* objc-exception.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485D20D6D68A200CEA253 /* objc-exception.m */; };
+		838485FA0D6D68A200CEA253 /* objc-file.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485D30D6D68A200CEA253 /* objc-file.m */; };
+		838485FB0D6D68A200CEA253 /* objc-initialize.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485D40D6D68A200CEA253 /* objc-initialize.h */; };
+		838485FC0D6D68A200CEA253 /* objc-initialize.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485D50D6D68A200CEA253 /* objc-initialize.m */; };
+		838485FD0D6D68A200CEA253 /* objc-layout.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485D60D6D68A200CEA253 /* objc-layout.m */; };
+		838485FE0D6D68A200CEA253 /* objc-load.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485D70D6D68A200CEA253 /* objc-load.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838485FF0D6D68A200CEA253 /* objc-load.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485D80D6D68A200CEA253 /* objc-load.m */; };
+		838486000D6D68A200CEA253 /* objc-loadmethod.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485D90D6D68A200CEA253 /* objc-loadmethod.h */; };
+		838486010D6D68A200CEA253 /* objc-loadmethod.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485DA0D6D68A200CEA253 /* objc-loadmethod.m */; };
+		838486020D6D68A200CEA253 /* objc-lockdebug.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485DB0D6D68A200CEA253 /* objc-lockdebug.m */; };
+		838486030D6D68A200CEA253 /* objc-private.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485DC0D6D68A200CEA253 /* objc-private.h */; };
+		838486050D6D68A200CEA253 /* objc-rtp.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485DE0D6D68A200CEA253 /* objc-rtp.h */; };
+		838486060D6D68A200CEA253 /* objc-rtp.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485DF0D6D68A200CEA253 /* objc-rtp.m */; };
+		838486070D6D68A200CEA253 /* objc-runtime-new.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485E00D6D68A200CEA253 /* objc-runtime-new.h */; };
+		838486080D6D68A200CEA253 /* objc-runtime-new.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485E10D6D68A200CEA253 /* objc-runtime-new.m */; };
+		838486090D6D68A200CEA253 /* objc-runtime-old.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485E20D6D68A200CEA253 /* objc-runtime-old.m */; };
+		8384860A0D6D68A200CEA253 /* objc-runtime.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485E30D6D68A200CEA253 /* objc-runtime.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		8384860B0D6D68A200CEA253 /* objc-runtime.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485E40D6D68A200CEA253 /* objc-runtime.m */; };
+		8384860C0D6D68A200CEA253 /* objc-sel-set.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485E50D6D68A200CEA253 /* objc-sel-set.h */; };
+		8384860D0D6D68A200CEA253 /* objc-sel-set.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485E60D6D68A200CEA253 /* objc-sel-set.m */; };
+		8384860F0D6D68A200CEA253 /* objc-sel.mm in Sources */ = {isa = PBXBuildFile; fileRef = 838485E80D6D68A200CEA253 /* objc-sel.mm */; };
+		838486100D6D68A200CEA253 /* objc-sync.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485E90D6D68A200CEA253 /* objc-sync.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838486110D6D68A200CEA253 /* objc-sync.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485EA0D6D68A200CEA253 /* objc-sync.m */; };
+		838486120D6D68A200CEA253 /* objc-typeencoding.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485EB0D6D68A200CEA253 /* objc-typeencoding.m */; };
+		838486130D6D68A200CEA253 /* objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485EC0D6D68A200CEA253 /* objc.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838486140D6D68A200CEA253 /* Object.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485ED0D6D68A200CEA253 /* Object.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838486150D6D68A200CEA253 /* Object.m in Sources */ = {isa = PBXBuildFile; fileRef = 838485EE0D6D68A200CEA253 /* Object.m */; };
+		8384861E0D6D68A800CEA253 /* Protocol.h in Headers */ = {isa = PBXBuildFile; fileRef = 838486180D6D68A800CEA253 /* Protocol.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		8384861F0D6D68A800CEA253 /* Protocol.m in Sources */ = {isa = PBXBuildFile; fileRef = 838486190D6D68A800CEA253 /* Protocol.m */; };
+		838486200D6D68A800CEA253 /* runtime.h in Headers */ = {isa = PBXBuildFile; fileRef = 8384861A0D6D68A800CEA253 /* runtime.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838486250D6D68F000CEA253 /* List.m in Sources */ = {isa = PBXBuildFile; fileRef = 838486230D6D68F000CEA253 /* List.m */; };
+		838486260D6D68F000CEA253 /* List.h in Headers */ = {isa = PBXBuildFile; fileRef = 838486240D6D68F000CEA253 /* List.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838486280D6D6A2400CEA253 /* message.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485BD0D6D687300CEA253 /* message.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		838B85700DB8915A0029D21A /* objc-sel-table.s in Sources */ = {isa = PBXBuildFile; fileRef = 838B856F0DB8915A0029D21A /* objc-sel-table.s */; };
+		83CDE7530E2E0040003703C1 /* objc-selopt.h in Headers */ = {isa = PBXBuildFile; fileRef = 83CDE7520E2E0040003703C1 /* objc-selopt.h */; settings = {ATTRIBUTES = (Private, ); }; };
+		87BB4EA70EC39854005D08E1 /* objc-probes.d in Sources */ = {isa = PBXBuildFile; fileRef = 87BB4E900EC39633005D08E1 /* objc-probes.d */; };
+		BC07A00C0EF72D360014EC61 /* objc-auto-dump.h in Headers */ = {isa = PBXBuildFile; fileRef = BC07A00B0EF72D360014EC61 /* objc-auto-dump.h */; settings = {ATTRIBUTES = (Private, ); }; };
+		BC07A0110EF72D9C0014EC61 /* objc-auto-dump.m in Sources */ = {isa = PBXBuildFile; fileRef = BC07A0100EF72D9C0014EC61 /* objc-auto-dump.m */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		830F2AAF0D7394E900392440 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 830F2AA80D7394D000392440;
+			remoteInfo = markgc;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		393CEABF0DC69E3E000B69DE /* objc-references.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-references.mm"; path = "runtime/objc-references.mm"; sourceTree = "<group>"; };
+		393CEAC50DC69E67000B69DE /* objc-references.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-references.h"; path = "runtime/objc-references.h"; sourceTree = "<group>"; };
+		830F2A690D737FB800392440 /* objc-msg-arm.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-arm.s"; path = "runtime/Messengers.subproj/objc-msg-arm.s"; sourceTree = "<group>"; };
+		830F2A6A0D737FB800392440 /* objc-msg-i386.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-i386.s"; path = "runtime/Messengers.subproj/objc-msg-i386.s"; sourceTree = "<group>"; };
+		830F2A6B0D737FB800392440 /* objc-msg-ppc.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-ppc.s"; path = "runtime/Messengers.subproj/objc-msg-ppc.s"; sourceTree = "<group>"; };
+		830F2A720D737FB800392440 /* objc-msg-x86_64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-x86_64.s"; path = "runtime/Messengers.subproj/objc-msg-x86_64.s"; sourceTree = "<group>"; };
+		830F2A850D73819A00392440 /* objc-auto-i386.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-auto-i386.s"; path = "runtime/Auto.subproj/objc-auto-i386.s"; sourceTree = "<group>"; };
+		830F2A860D73819A00392440 /* objc-auto-ppc.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-auto-ppc.s"; path = "runtime/Auto.subproj/objc-auto-ppc.s"; sourceTree = "<group>"; };
+		830F2A870D73819A00392440 /* objc-auto-ppc64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-auto-ppc64.s"; path = "runtime/Auto.subproj/objc-auto-ppc64.s"; sourceTree = "<group>"; };
+		830F2A920D73876100392440 /* objc-accessors.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-accessors.h"; path = "runtime/Accessors.subproj/objc-accessors.h"; sourceTree = "<group>"; };
+		830F2A930D73876100392440 /* objc-accessors.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-accessors.m"; path = "runtime/Accessors.subproj/objc-accessors.m"; sourceTree = "<group>"; };
+		830F2A970D738DC200392440 /* hashtable.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = hashtable.h; path = runtime/hashtable.h; sourceTree = "<group>"; };
+		830F2AA50D7394C200392440 /* markgc.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = markgc.c; sourceTree = "<group>"; };
+		830F2AA90D7394D000392440 /* markgc */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = markgc; sourceTree = BUILT_PRODUCTS_DIR; };
+		83112ED30F00599600A5FBAF /* objc-internal.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-internal.h"; path = "runtime/objc-internal.h"; sourceTree = "<group>"; };
+		831C85D30E10CF850066E64C /* objc-os.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-os.h"; path = "runtime/objc-os.h"; sourceTree = "<group>"; };
+		831C85D40E10CF850066E64C /* objc-os.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-os.m"; path = "runtime/objc-os.m"; sourceTree = "<group>"; };
+		834266D70E665A8B002E4DA2 /* objc-gdb.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-gdb.h"; path = "runtime/objc-gdb.h"; sourceTree = "<group>"; };
+		838485B30D6D682B00CEA253 /* libobjc.order */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = libobjc.order; sourceTree = "<group>"; };
+		838485B40D6D683300CEA253 /* APPLE_LICENSE */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = APPLE_LICENSE; sourceTree = "<group>"; };
+		838485B50D6D683300CEA253 /* ReleaseNotes.rtf */ = {isa = PBXFileReference; lastKnownFileType = text.rtf; path = ReleaseNotes.rtf; sourceTree = "<group>"; };
+		838485B60D6D687300CEA253 /* error.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = error.h; path = runtime/error.h; sourceTree = "<group>"; };
+		838485B70D6D687300CEA253 /* hashtable2.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = hashtable2.h; path = runtime/hashtable2.h; sourceTree = "<group>"; };
+		838485B80D6D687300CEA253 /* hashtable2.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = hashtable2.m; path = runtime/hashtable2.m; sourceTree = "<group>"; };
+		838485BB0D6D687300CEA253 /* maptable.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = maptable.h; path = runtime/maptable.h; sourceTree = "<group>"; };
+		838485BC0D6D687300CEA253 /* maptable.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = maptable.m; path = runtime/maptable.m; sourceTree = "<group>"; };
+		838485BD0D6D687300CEA253 /* message.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = message.h; path = runtime/message.h; sourceTree = "<group>"; };
+		838485C80D6D68A200CEA253 /* objc-api.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-api.h"; path = "runtime/objc-api.h"; sourceTree = "<group>"; };
+		838485C90D6D68A200CEA253 /* objc-auto.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-auto.h"; path = "runtime/objc-auto.h"; sourceTree = "<group>"; };
+		838485CA0D6D68A200CEA253 /* objc-auto.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-auto.m"; path = "runtime/objc-auto.m"; sourceTree = "<group>"; };
+		838485CB0D6D68A200CEA253 /* objc-cache.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-cache.m"; path = "runtime/objc-cache.m"; sourceTree = "<group>"; };
+		838485CC0D6D68A200CEA253 /* objc-class-old.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-class-old.m"; path = "runtime/objc-class-old.m"; sourceTree = "<group>"; };
+		838485CD0D6D68A200CEA253 /* objc-class.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-class.h"; path = "runtime/objc-class.h"; sourceTree = "<group>"; };
+		838485CE0D6D68A200CEA253 /* objc-class.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-class.m"; path = "runtime/objc-class.m"; sourceTree = "<group>"; };
+		838485CF0D6D68A200CEA253 /* objc-config.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-config.h"; path = "runtime/objc-config.h"; sourceTree = "<group>"; };
+		838485D00D6D68A200CEA253 /* objc-errors.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-errors.m"; path = "runtime/objc-errors.m"; sourceTree = "<group>"; };
+		838485D10D6D68A200CEA253 /* objc-exception.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-exception.h"; path = "runtime/objc-exception.h"; sourceTree = "<group>"; };
+		838485D20D6D68A200CEA253 /* objc-exception.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-exception.m"; path = "runtime/objc-exception.m"; sourceTree = "<group>"; };
+		838485D30D6D68A200CEA253 /* objc-file.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-file.m"; path = "runtime/objc-file.m"; sourceTree = "<group>"; };
+		838485D40D6D68A200CEA253 /* objc-initialize.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-initialize.h"; path = "runtime/objc-initialize.h"; sourceTree = "<group>"; };
+		838485D50D6D68A200CEA253 /* objc-initialize.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-initialize.m"; path = "runtime/objc-initialize.m"; sourceTree = "<group>"; };
+		838485D60D6D68A200CEA253 /* objc-layout.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-layout.m"; path = "runtime/objc-layout.m"; sourceTree = "<group>"; };
+		838485D70D6D68A200CEA253 /* objc-load.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-load.h"; path = "runtime/objc-load.h"; sourceTree = "<group>"; };
+		838485D80D6D68A200CEA253 /* objc-load.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-load.m"; path = "runtime/objc-load.m"; sourceTree = "<group>"; };
+		838485D90D6D68A200CEA253 /* objc-loadmethod.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-loadmethod.h"; path = "runtime/objc-loadmethod.h"; sourceTree = "<group>"; };
+		838485DA0D6D68A200CEA253 /* objc-loadmethod.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-loadmethod.m"; path = "runtime/objc-loadmethod.m"; sourceTree = "<group>"; };
+		838485DB0D6D68A200CEA253 /* objc-lockdebug.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-lockdebug.m"; path = "runtime/objc-lockdebug.m"; sourceTree = "<group>"; };
+		838485DC0D6D68A200CEA253 /* objc-private.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-private.h"; path = "runtime/objc-private.h"; sourceTree = "<group>"; };
+		838485DE0D6D68A200CEA253 /* objc-rtp.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-rtp.h"; path = "runtime/objc-rtp.h"; sourceTree = "<group>"; };
+		838485DF0D6D68A200CEA253 /* objc-rtp.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-rtp.m"; path = "runtime/objc-rtp.m"; sourceTree = "<group>"; };
+		838485E00D6D68A200CEA253 /* objc-runtime-new.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-runtime-new.h"; path = "runtime/objc-runtime-new.h"; sourceTree = "<group>"; };
+		838485E10D6D68A200CEA253 /* objc-runtime-new.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-runtime-new.m"; path = "runtime/objc-runtime-new.m"; sourceTree = "<group>"; };
+		838485E20D6D68A200CEA253 /* objc-runtime-old.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-runtime-old.m"; path = "runtime/objc-runtime-old.m"; sourceTree = "<group>"; };
+		838485E30D6D68A200CEA253 /* objc-runtime.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-runtime.h"; path = "runtime/objc-runtime.h"; sourceTree = "<group>"; };
+		838485E40D6D68A200CEA253 /* objc-runtime.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-runtime.m"; path = "runtime/objc-runtime.m"; sourceTree = "<group>"; };
+		838485E50D6D68A200CEA253 /* objc-sel-set.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-sel-set.h"; path = "runtime/objc-sel-set.h"; sourceTree = "<group>"; };
+		838485E60D6D68A200CEA253 /* objc-sel-set.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-sel-set.m"; path = "runtime/objc-sel-set.m"; sourceTree = "<group>"; };
+		838485E80D6D68A200CEA253 /* objc-sel.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-sel.mm"; path = "runtime/objc-sel.mm"; sourceTree = "<group>"; };
+		838485E90D6D68A200CEA253 /* objc-sync.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-sync.h"; path = "runtime/objc-sync.h"; sourceTree = "<group>"; };
+		838485EA0D6D68A200CEA253 /* objc-sync.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-sync.m"; path = "runtime/objc-sync.m"; sourceTree = "<group>"; };
+		838485EB0D6D68A200CEA253 /* objc-typeencoding.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-typeencoding.m"; path = "runtime/objc-typeencoding.m"; sourceTree = "<group>"; };
+		838485EC0D6D68A200CEA253 /* objc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = objc.h; path = runtime/objc.h; sourceTree = "<group>"; };
+		838485ED0D6D68A200CEA253 /* Object.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Object.h; path = runtime/Object.h; sourceTree = "<group>"; };
+		838485EE0D6D68A200CEA253 /* Object.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = Object.m; path = runtime/Object.m; sourceTree = "<group>"; };
+		838486180D6D68A800CEA253 /* Protocol.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Protocol.h; path = runtime/Protocol.h; sourceTree = "<group>"; };
+		838486190D6D68A800CEA253 /* Protocol.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = Protocol.m; path = runtime/Protocol.m; sourceTree = "<group>"; };
+		8384861A0D6D68A800CEA253 /* runtime.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = runtime.h; path = runtime/runtime.h; sourceTree = "<group>"; };
+		838486230D6D68F000CEA253 /* List.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = List.m; path = runtime/OldClasses.subproj/List.m; sourceTree = "<group>"; };
+		838486240D6D68F000CEA253 /* List.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = List.h; path = runtime/OldClasses.subproj/List.h; sourceTree = "<group>"; };
+		838B856F0DB8915A0029D21A /* objc-sel-table.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-sel-table.s"; path = "runtime/objc-sel-table.s"; sourceTree = "<group>"; };
+		83CDE7520E2E0040003703C1 /* objc-selopt.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-selopt.h"; path = "runtime/objc-selopt.h"; sourceTree = "<group>"; };
+		87BB4E900EC39633005D08E1 /* objc-probes.d */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.dtrace; name = "objc-probes.d"; path = "runtime/objc-probes.d"; sourceTree = "<group>"; };
+		BC07A00B0EF72D360014EC61 /* objc-auto-dump.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-auto-dump.h"; path = "runtime/objc-auto-dump.h"; sourceTree = "<group>"; };
+		BC07A0100EF72D9C0014EC61 /* objc-auto-dump.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = "objc-auto-dump.m"; path = "runtime/objc-auto-dump.m"; sourceTree = "<group>"; };
+		D2AAC0630554660B00DB518D /* libobjc.A.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libobjc.A.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		830F2AA70D7394D000392440 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D289988505E68E00004EDB86 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		08FB7794FE84155DC02AAC07 /* objc */ = {
+			isa = PBXGroup;
+			children = (
+				838485C60D6D687700CEA253 /* Public Headers */,
+				838485C70D6D688200CEA253 /* Private Headers */,
+				8384862A0D6D6ABC00CEA253 /* Project Headers */,
+				838486220D6D68E300CEA253 /* Obsolete Headers */,
+				838486270D6D690F00CEA253 /* Obsolete Source */,
+				08FB7795FE84155DC02AAC07 /* Source */,
+				838485B20D6D67F900CEA253 /* Other */,
+				1AB674ADFE9D54B511CA2CBB /* Products */,
+			);
+			name = objc;
+			sourceTree = "<group>";
+		};
+		08FB7795FE84155DC02AAC07 /* Source */ = {
+			isa = PBXGroup;
+			children = (
+				838B856F0DB8915A0029D21A /* objc-sel-table.s */,
+				838485B80D6D687300CEA253 /* hashtable2.m */,
+				838485BC0D6D687300CEA253 /* maptable.m */,
+				830F2A930D73876100392440 /* objc-accessors.m */,
+				838485CA0D6D68A200CEA253 /* objc-auto.m */,
+				BC07A0100EF72D9C0014EC61 /* objc-auto-dump.m */,
+				838485CB0D6D68A200CEA253 /* objc-cache.m */,
+				838485CC0D6D68A200CEA253 /* objc-class-old.m */,
+				838485CE0D6D68A200CEA253 /* objc-class.m */,
+				838485D00D6D68A200CEA253 /* objc-errors.m */,
+				838485D20D6D68A200CEA253 /* objc-exception.m */,
+				838485D30D6D68A200CEA253 /* objc-file.m */,
+				838485D50D6D68A200CEA253 /* objc-initialize.m */,
+				838485D60D6D68A200CEA253 /* objc-layout.m */,
+				838485D80D6D68A200CEA253 /* objc-load.m */,
+				838485DA0D6D68A200CEA253 /* objc-loadmethod.m */,
+				838485DB0D6D68A200CEA253 /* objc-lockdebug.m */,
+				831C85D40E10CF850066E64C /* objc-os.m */,
+				393CEABF0DC69E3E000B69DE /* objc-references.mm */,
+				838485DF0D6D68A200CEA253 /* objc-rtp.m */,
+				838485E10D6D68A200CEA253 /* objc-runtime-new.m */,
+				838485E20D6D68A200CEA253 /* objc-runtime-old.m */,
+				838485E40D6D68A200CEA253 /* objc-runtime.m */,
+				838485E60D6D68A200CEA253 /* objc-sel-set.m */,
+				838485E80D6D68A200CEA253 /* objc-sel.mm */,
+				838485EA0D6D68A200CEA253 /* objc-sync.m */,
+				838485EB0D6D68A200CEA253 /* objc-typeencoding.m */,
+				830F2A850D73819A00392440 /* objc-auto-i386.s */,
+				830F2A860D73819A00392440 /* objc-auto-ppc.s */,
+				830F2A870D73819A00392440 /* objc-auto-ppc64.s */,
+				830F2A690D737FB800392440 /* objc-msg-arm.s */,
+				830F2A6A0D737FB800392440 /* objc-msg-i386.s */,
+				830F2A6B0D737FB800392440 /* objc-msg-ppc.s */,
+				830F2A720D737FB800392440 /* objc-msg-x86_64.s */,
+				87BB4E900EC39633005D08E1 /* objc-probes.d */,
+			);
+			name = Source;
+			sourceTree = "<group>";
+		};
+		1AB674ADFE9D54B511CA2CBB /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D2AAC0630554660B00DB518D /* libobjc.A.dylib */,
+				830F2AA90D7394D000392440 /* markgc */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		838485B20D6D67F900CEA253 /* Other */ = {
+			isa = PBXGroup;
+			children = (
+				830F2AA50D7394C200392440 /* markgc.c */,
+				838485B40D6D683300CEA253 /* APPLE_LICENSE */,
+				838485B50D6D683300CEA253 /* ReleaseNotes.rtf */,
+				838485B30D6D682B00CEA253 /* libobjc.order */,
+			);
+			name = Other;
+			sourceTree = "<group>";
+		};
+		838485C60D6D687700CEA253 /* Public Headers */ = {
+			isa = PBXGroup;
+			children = (
+				838485BD0D6D687300CEA253 /* message.h */,
+				838485C80D6D68A200CEA253 /* objc-api.h */,
+				838485C90D6D68A200CEA253 /* objc-auto.h */,
+				838485D10D6D68A200CEA253 /* objc-exception.h */,
+				838485E90D6D68A200CEA253 /* objc-sync.h */,
+				838485EC0D6D68A200CEA253 /* objc.h */,
+				8384861A0D6D68A800CEA253 /* runtime.h */,
+			);
+			name = "Public Headers";
+			sourceTree = "<group>";
+		};
+		838485C70D6D688200CEA253 /* Private Headers */ = {
+			isa = PBXGroup;
+			children = (
+				83112ED30F00599600A5FBAF /* objc-internal.h */,
+				838485BB0D6D687300CEA253 /* maptable.h */,
+				BC07A00B0EF72D360014EC61 /* objc-auto-dump.h */,
+				834266D70E665A8B002E4DA2 /* objc-gdb.h */,
+				83CDE7520E2E0040003703C1 /* objc-selopt.h */,
+			);
+			name = "Private Headers";
+			sourceTree = "<group>";
+		};
+		838486220D6D68E300CEA253 /* Obsolete Headers */ = {
+			isa = PBXGroup;
+			children = (
+				838485B60D6D687300CEA253 /* error.h */,
+				830F2A970D738DC200392440 /* hashtable.h */,
+				838485B70D6D687300CEA253 /* hashtable2.h */,
+				838485CD0D6D68A200CEA253 /* objc-class.h */,
+				838485D70D6D68A200CEA253 /* objc-load.h */,
+				838485E30D6D68A200CEA253 /* objc-runtime.h */,
+				838486240D6D68F000CEA253 /* List.h */,
+				838485ED0D6D68A200CEA253 /* Object.h */,
+				838486180D6D68A800CEA253 /* Protocol.h */,
+			);
+			name = "Obsolete Headers";
+			sourceTree = "<group>";
+		};
+		838486270D6D690F00CEA253 /* Obsolete Source */ = {
+			isa = PBXGroup;
+			children = (
+				838486230D6D68F000CEA253 /* List.m */,
+				838485EE0D6D68A200CEA253 /* Object.m */,
+				838486190D6D68A800CEA253 /* Protocol.m */,
+			);
+			name = "Obsolete Source";
+			sourceTree = "<group>";
+		};
+		8384862A0D6D6ABC00CEA253 /* Project Headers */ = {
+			isa = PBXGroup;
+			children = (
+				831C85D30E10CF850066E64C /* objc-os.h */,
+				830F2A920D73876100392440 /* objc-accessors.h */,
+				838485CF0D6D68A200CEA253 /* objc-config.h */,
+				838485D40D6D68A200CEA253 /* objc-initialize.h */,
+				838485D90D6D68A200CEA253 /* objc-loadmethod.h */,
+				838485DC0D6D68A200CEA253 /* objc-private.h */,
+				393CEAC50DC69E67000B69DE /* objc-references.h */,
+				838485DE0D6D68A200CEA253 /* objc-rtp.h */,
+				838485E00D6D68A200CEA253 /* objc-runtime-new.h */,
+				838485E50D6D68A200CEA253 /* objc-sel-set.h */,
+			);
+			name = "Project Headers";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXHeadersBuildPhase section */
+		D2AAC0600554660B00DB518D /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				838485BE0D6D687300CEA253 /* error.h in Headers */,
+				838485BF0D6D687300CEA253 /* hashtable2.h in Headers */,
+				838485C30D6D687300CEA253 /* maptable.h in Headers */,
+				838485EF0D6D68A200CEA253 /* objc-api.h in Headers */,
+				838485F00D6D68A200CEA253 /* objc-auto.h in Headers */,
+				BC07A00C0EF72D360014EC61 /* objc-auto-dump.h in Headers */,
+				838485F40D6D68A200CEA253 /* objc-class.h in Headers */,
+				838485F60D6D68A200CEA253 /* objc-config.h in Headers */,
+				838485F80D6D68A200CEA253 /* objc-exception.h in Headers */,
+				838485FB0D6D68A200CEA253 /* objc-initialize.h in Headers */,
+				838485FE0D6D68A200CEA253 /* objc-load.h in Headers */,
+				838486000D6D68A200CEA253 /* objc-loadmethod.h in Headers */,
+				838486030D6D68A200CEA253 /* objc-private.h in Headers */,
+				838486050D6D68A200CEA253 /* objc-rtp.h in Headers */,
+				838486070D6D68A200CEA253 /* objc-runtime-new.h in Headers */,
+				8384860A0D6D68A200CEA253 /* objc-runtime.h in Headers */,
+				83CDE7530E2E0040003703C1 /* objc-selopt.h in Headers */,
+				8384860C0D6D68A200CEA253 /* objc-sel-set.h in Headers */,
+				838486100D6D68A200CEA253 /* objc-sync.h in Headers */,
+				838486130D6D68A200CEA253 /* objc.h in Headers */,
+				838486140D6D68A200CEA253 /* Object.h in Headers */,
+				8384861E0D6D68A800CEA253 /* Protocol.h in Headers */,
+				838486200D6D68A800CEA253 /* runtime.h in Headers */,
+				838486260D6D68F000CEA253 /* List.h in Headers */,
+				838486280D6D6A2400CEA253 /* message.h in Headers */,
+				830F2A940D73876100392440 /* objc-accessors.h in Headers */,
+				830F2A980D738DC200392440 /* hashtable.h in Headers */,
+				393CEAC60DC69E67000B69DE /* objc-references.h in Headers */,
+				831C85D50E10CF850066E64C /* objc-os.h in Headers */,
+				834266D80E665A8B002E4DA2 /* objc-gdb.h in Headers */,
+				83112ED40F00599600A5FBAF /* objc-internal.h in Headers */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
+
+/* Begin PBXNativeTarget section */
+		830F2AA80D7394D000392440 /* markgc */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 830F2AAE0D7394D600392440 /* Build configuration list for PBXNativeTarget "markgc" */;
+			buildPhases = (
+				830F2AA60D7394D000392440 /* Sources */,
+				830F2AA70D7394D000392440 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = markgc;
+			productName = markgc;
+			productReference = 830F2AA90D7394D000392440 /* markgc */;
+			productType = "com.apple.product-type.tool";
+		};
+		D2AAC0620554660B00DB518D /* objc */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1DEB914A08733D8E0010E9CD /* Build configuration list for PBXNativeTarget "objc" */;
+			buildPhases = (
+				D2AAC0600554660B00DB518D /* Headers */,
+				D2AAC0610554660B00DB518D /* Sources */,
+				D289988505E68E00004EDB86 /* Frameworks */,
+				830F2AB60D739AB600392440 /* Run Script (markgc) */,
+				830F2AFA0D73BC5800392440 /* Run Script (symlink) */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				830F2AB00D7394E900392440 /* PBXTargetDependency */,
+			);
+			name = objc;
+			productName = objc;
+			productReference = D2AAC0630554660B00DB518D /* libobjc.A.dylib */;
+			productType = "com.apple.product-type.library.dynamic";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		08FB7793FE84155DC02AAC07 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = NO;
+			};
+			buildConfigurationList = 1DEB914E08733D8E0010E9CD /* Build configuration list for PBXProject "objc" */;
+			compatibilityVersion = "Xcode 3.1";
+			hasScannedForEncodings = 1;
+			mainGroup = 08FB7794FE84155DC02AAC07 /* objc */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D2AAC0620554660B00DB518D /* objc */,
+				830F2AA80D7394D000392440 /* markgc */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		830F2AB60D739AB600392440 /* Run Script (markgc) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			comments = "Set the GC-supported bit in libobjc itself.\n\nlibobjc cannot be built with -fobjc-gc, because it needs more precise control over write-barrier use.\n\nThis is done on all architectures and platforms, even though some don't actually support GC. In those cases, a program that actually tries to use GC will fail with link errors.";
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Run Script (markgc)";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${BUILT_PRODUCTS_DIR}/markgc\" -p \"${BUILT_PRODUCTS_DIR}/libobjc.A.dylib\"\n";
+		};
+		830F2AFA0D73BC5800392440 /* Run Script (symlink) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 8;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Run Script (symlink)";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+			shellPath = /bin/sh;
+			shellScript = "cd \"${INSTALL_DIR}\"\n/bin/ln -s libobjc.A.dylib libobjc.dylib\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		830F2AA60D7394D000392440 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				830F2AB10D73962200392440 /* markgc.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D2AAC0610554660B00DB518D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				838485C00D6D687300CEA253 /* hashtable2.m in Sources */,
+				838485C40D6D687300CEA253 /* maptable.m in Sources */,
+				838485F10D6D68A200CEA253 /* objc-auto.m in Sources */,
+				838485F20D6D68A200CEA253 /* objc-cache.m in Sources */,
+				838485F30D6D68A200CEA253 /* objc-class-old.m in Sources */,
+				838485F50D6D68A200CEA253 /* objc-class.m in Sources */,
+				838485F70D6D68A200CEA253 /* objc-errors.m in Sources */,
+				838485F90D6D68A200CEA253 /* objc-exception.m in Sources */,
+				838485FA0D6D68A200CEA253 /* objc-file.m in Sources */,
+				838485FC0D6D68A200CEA253 /* objc-initialize.m in Sources */,
+				838485FD0D6D68A200CEA253 /* objc-layout.m in Sources */,
+				838485FF0D6D68A200CEA253 /* objc-load.m in Sources */,
+				838486010D6D68A200CEA253 /* objc-loadmethod.m in Sources */,
+				838486020D6D68A200CEA253 /* objc-lockdebug.m in Sources */,
+				838486060D6D68A200CEA253 /* objc-rtp.m in Sources */,
+				838486080D6D68A200CEA253 /* objc-runtime-new.m in Sources */,
+				838486090D6D68A200CEA253 /* objc-runtime-old.m in Sources */,
+				8384860B0D6D68A200CEA253 /* objc-runtime.m in Sources */,
+				8384860D0D6D68A200CEA253 /* objc-sel-set.m in Sources */,
+				8384860F0D6D68A200CEA253 /* objc-sel.mm in Sources */,
+				838486110D6D68A200CEA253 /* objc-sync.m in Sources */,
+				838486120D6D68A200CEA253 /* objc-typeencoding.m in Sources */,
+				838486150D6D68A200CEA253 /* Object.m in Sources */,
+				8384861F0D6D68A800CEA253 /* Protocol.m in Sources */,
+				838486250D6D68F000CEA253 /* List.m in Sources */,
+				830F2A740D737FB800392440 /* objc-msg-arm.s in Sources */,
+				830F2A750D737FB900392440 /* objc-msg-i386.s in Sources */,
+				830F2A760D737FB900392440 /* objc-msg-ppc.s in Sources */,
+				830F2A7D0D737FBB00392440 /* objc-msg-x86_64.s in Sources */,
+				830F2A890D73819A00392440 /* objc-auto-i386.s in Sources */,
+				830F2A8A0D73819A00392440 /* objc-auto-ppc.s in Sources */,
+				830F2A8B0D73819A00392440 /* objc-auto-ppc64.s in Sources */,
+				830F2A950D73876100392440 /* objc-accessors.m in Sources */,
+				838B85700DB8915A0029D21A /* objc-sel-table.s in Sources */,
+				393CEAC00DC69E3E000B69DE /* objc-references.mm in Sources */,
+				831C85D60E10CF850066E64C /* objc-os.m in Sources */,
+				87BB4EA70EC39854005D08E1 /* objc-probes.d in Sources */,
+				BC07A0110EF72D9C0014EC61 /* objc-auto-dump.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		830F2AB00D7394E900392440 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 830F2AA80D7394D000392440 /* markgc */;
+			targetProxy = 830F2AAF0D7394E900392440 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1DEB914B08733D8E0010E9CD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COPY_PHASE_STRIP = NO;
+				DYLIB_CURRENT_VERSION = 227;
+				EXECUTABLE_PREFIX = lib;
+				GCC_CW_ASM_SYNTAX = NO;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_FAST_OBJC_DISPATCH = NO;
+				GCC_MODEL_TUNING = G5;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_THREADSAFE_STATICS = NO;
+				GCC_WARN_ABOUT_DEPRECATED_FUNCTIONS = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(DSTROOT)/usr/include/**",
+					"$(DSTROOT)/usr/local/include/**",
+					"$(CONFIGURATION_BUILD_DIR)/usr/include/**",
+					"$(CONFIGURATION_BUILD_DIR)/usr/local/include/**",
+				);
+				INSTALL_PATH = /usr/lib;
+				ORDER_FILE = libobjc.order;
+				OTHER_CFLAGS = "-fdollars-in-identifiers";
+				"OTHER_LDFLAGS[arch=i386]" = "-lauto";
+				"OTHER_LDFLAGS[arch=ppc64]" = (
+					"-lauto",
+					"-lstdc++",
+				);
+				"OTHER_LDFLAGS[arch=ppc]" = "-lauto";
+				"OTHER_LDFLAGS[arch=x86_64]" = (
+					"-lauto",
+					"-lstdc++",
+				);
+				PRIVATE_HEADERS_FOLDER_PATH = /usr/local/include/objc;
+				PRODUCT_NAME = objc.A;
+				PUBLIC_HEADERS_FOLDER_PATH = /usr/include/objc;
+				UNEXPORTED_SYMBOLS_FILE = unexported_symbols;
+			};
+			name = Debug;
+		};
+		1DEB914C08733D8E0010E9CD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DYLIB_CURRENT_VERSION = 227;
+				EXECUTABLE_PREFIX = lib;
+				GCC_CW_ASM_SYNTAX = NO;
+				GCC_FAST_OBJC_DISPATCH = NO;
+				GCC_MODEL_TUNING = G5;
+				GCC_THREADSAFE_STATICS = NO;
+				GCC_WARN_ABOUT_DEPRECATED_FUNCTIONS = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(DSTROOT)/usr/include/**",
+					"$(DSTROOT)/usr/local/include/**",
+					"$(CONFIGURATION_BUILD_DIR)/usr/include/**",
+					"$(CONFIGURATION_BUILD_DIR)/usr/local/include/**",
+				);
+				INSTALL_PATH = /usr/lib;
+				ORDER_FILE = libobjc.order;
+				OTHER_CFLAGS = "-fdollars-in-identifiers";
+				"OTHER_LDFLAGS[arch=i386]" = "-lauto";
+				"OTHER_LDFLAGS[arch=ppc64]" = (
+					"-lauto",
+					"-lstdc++",
+				);
+				"OTHER_LDFLAGS[arch=ppc]" = "-lauto";
+				"OTHER_LDFLAGS[arch=x86_64]" = (
+					"-lauto",
+					"-lstdc++",
+				);
+				PRIVATE_HEADERS_FOLDER_PATH = /usr/local/include/objc;
+				PRODUCT_NAME = objc.A;
+				PUBLIC_HEADERS_FOLDER_PATH = /usr/include/objc;
+				UNEXPORTED_SYMBOLS_FILE = unexported_symbols;
+			};
+			name = Release;
+		};
+		1DEB914F08733D8E0010E9CD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = (
+					i386,
+					x86_64,
+					ppc,
+				);
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				GCC_ENABLE_CPP_EXCEPTIONS = NO;
+				GCC_ENABLE_CPP_RTTI = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				ONLY_ACTIVE_ARCH = NO;
+				PREBINDING = NO;
+				SDKROOT = "";
+				STANDARD_C_PLUS_PLUS_LIBRARY_TYPE = dynamic;
+				UNEXPORTED_SYMBOLS_FILE = unexported_symbols;
+				WARNING_CFLAGS = (
+					"-Wall",
+					"-Wno-four-char-constants",
+				);
+			};
+			name = Debug;
+		};
+		1DEB915008733D8E0010E9CD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = (
+					i386,
+					x86_64,
+					ppc,
+				);
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_ENABLE_CPP_EXCEPTIONS = NO;
+				GCC_ENABLE_CPP_RTTI = NO;
+				GCC_PREPROCESSOR_DEFINITIONS = NDEBUG;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				ONLY_ACTIVE_ARCH = NO;
+				PREBINDING = NO;
+				SDKROOT = "";
+				STANDARD_C_PLUS_PLUS_LIBRARY_TYPE = dynamic;
+				WARNING_CFLAGS = (
+					"-Wall",
+					"-Wno-four-char-constants",
+				);
+			};
+			name = Release;
+		};
+		830F2AAB0D7394D100392440 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(NATIVE_ARCH)";
+				COPY_PHASE_STRIP = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_ENABLE_FIX_AND_CONTINUE = YES;
+				GCC_MODEL_TUNING = G5;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				INSTALL_PATH = /usr/local/bin;
+				PREBINDING = NO;
+				PRODUCT_NAME = markgc;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		830F2AAC0D7394D100392440 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(NATIVE_ARCH)";
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_ENABLE_FIX_AND_CONTINUE = NO;
+				GCC_MODEL_TUNING = G5;
+				INSTALL_PATH = /usr/local/bin;
+				PREBINDING = NO;
+				PRODUCT_NAME = markgc;
+				SKIP_INSTALL = YES;
+				ZERO_LINK = NO;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1DEB914A08733D8E0010E9CD /* Build configuration list for PBXNativeTarget "objc" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1DEB914B08733D8E0010E9CD /* Debug */,
+				1DEB914C08733D8E0010E9CD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1DEB914E08733D8E0010E9CD /* Build configuration list for PBXProject "objc" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1DEB914F08733D8E0010E9CD /* Debug */,
+				1DEB915008733D8E0010E9CD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		830F2AAE0D7394D600392440 /* Build configuration list for PBXNativeTarget "markgc" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				830F2AAB0D7394D100392440 /* Debug */,
+				830F2AAC0D7394D100392440 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 08FB7793FE84155DC02AAC07 /* Project object */;
+}

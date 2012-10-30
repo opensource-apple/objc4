@@ -29,12 +29,11 @@
 #ifndef _OBJC_MAPTABLE_H_
 #define _OBJC_MAPTABLE_H_
 
-
 #ifndef _OBJC_PRIVATE_H_
 #warning the API in this header is obsolete
 #endif
 
-#import <objc/objc.h>
+#include <objc/objc.h>
 
 /***************	Definitions		***************/
 

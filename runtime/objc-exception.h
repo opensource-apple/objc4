@@ -24,10 +24,10 @@
 #ifndef __OBJC_EXCEPTION_H_
 #define __OBJC_EXCEPTION_H_
 
-#import <objc/objc.h>
+#include <objc/objc.h>
+#include <stdint.h>
 
-// ZEROCOST_SWITCH
-#if !__LP64__  ||  !OBJC_ZEROCOST_EXCEPTIONS
+#if !__OBJC2__
 
 // compiler reserves a setjmp buffer + 4 words as localExceptionData
 
@@ -55,9 +55,9 @@ OBJC_EXPORT void objc_exception_get_functions(objc_exception_functions_t *table)
 OBJC_EXPORT void objc_exception_set_functions(objc_exception_functions_t *table);
 
 
-// !__LP64__
+// !__OBJC2__
 #else
-// __LP64__
+// __OBJC2__
 
 typedef id (*objc_exception_preprocessor)(id exception);
 typedef int (*objc_exception_matcher)(Class catch_type, id exception);
@@ -69,15 +69,16 @@ OBJC_EXPORT void objc_exception_rethrow(void);
 OBJC_EXPORT id objc_begin_catch(void *exc_buf);
 OBJC_EXPORT void objc_end_catch(void);
 
-OBJC_EXPORT uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context);
-OBJC_EXPORT void objc_removeExceptionHandler(uintptr_t token);
-
 OBJC_EXPORT objc_exception_preprocessor objc_setExceptionPreprocessor(objc_exception_preprocessor fn);
 OBJC_EXPORT objc_exception_matcher objc_setExceptionMatcher(objc_exception_matcher fn);
 OBJC_EXPORT objc_uncaught_exception_handler objc_setUncaughtExceptionHandler(objc_uncaught_exception_handler fn);
 
+#ifndef __arm__
+OBJC_EXPORT uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context);
+OBJC_EXPORT void objc_removeExceptionHandler(uintptr_t token);
+#endif
 
-// __LP64__
+// __OBJC2__
 #endif
 
 #endif  // __OBJC_EXCEPTION_H_

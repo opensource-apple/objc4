@@ -26,8 +26,8 @@
 * Support for +load methods.
 **********************************************************************/
 
-#import "objc-loadmethod.h"
-#import "objc-private.h"
+#include "objc-loadmethod.h"
+#include "objc-private.h"
 
 struct loadable_class {
     Class cls;  // may be NULL
@@ -59,7 +59,11 @@ static int loadable_categories_allocated NOBSS = 0;
 **********************************************************************/
 __private_extern__ void add_class_to_loadable_list(Class cls)
 {
-    IMP method = _class_getLoadMethod(cls);
+    IMP method;
+
+    recursive_mutex_assert_locked(&loadMethodLock);
+
+    method = _class_getLoadMethod(cls);
     if (!method) return;  // Don't bother if cls has no +load method
     
     if (PrintLoading) {
@@ -88,7 +92,11 @@ __private_extern__ void add_class_to_loadable_list(Class cls)
 **********************************************************************/
 __private_extern__ void add_category_to_loadable_list(Category cat)
 {
-    IMP method = _category_getLoadMethod(cat);
+    IMP method;
+
+    recursive_mutex_assert_locked(&loadMethodLock);
+
+    method = _category_getLoadMethod(cat);
 
     // Don't bother if cat has no +load method
     if (!method) return;
@@ -119,6 +127,8 @@ __private_extern__ void add_category_to_loadable_list(Category cat)
 **********************************************************************/
 __private_extern__ void remove_class_from_loadable_list(Class cls)
 {
+    recursive_mutex_assert_locked(&loadMethodLock);
+
     if (loadable_classes) {
         int i;
         for (i = 0; i < loadable_classes_used; i++) {
@@ -141,6 +151,8 @@ __private_extern__ void remove_class_from_loadable_list(Class cls)
 **********************************************************************/
 __private_extern__ void remove_category_from_loadable_list(Category cat)
 {
+    recursive_mutex_assert_locked(&loadMethodLock);
+
     if (loadable_categories) {
         int i;
         for (i = 0; i < loadable_categories_used; i++) {
@@ -185,7 +197,7 @@ static void call_class_loads(void)
         if (PrintLoading) {
             _objc_inform("LOAD: +[%s load]\n", _class_getName(cls));
         }
-        (*load_method) ((id) cls, @selector(load));
+        (*load_method) ((id) cls, SEL_load);
     }
     
     // Destroy the detached list.
@@ -232,7 +244,7 @@ static BOOL call_category_loads(void)
                              _class_getName(cls), 
                              _category_getName(cat));
             }
-            (*load_method) ((id) cls, @selector(load));
+            (*load_method) ((id) cls, SEL_load);
             cats[i].cat = NULL;
         }
     }
@@ -314,26 +326,19 @@ static BOOL call_category_loads(void)
 * ordering, even if a category +load triggers a new loadable class 
 * and a new loadable category attached to that class. 
 *
-* fixme this is not thread-safe, but neither is the rest of image mapping.
+* Locking: loadMethodLock must be held by the caller 
+*   All other locks must not be held.
 **********************************************************************/
 __private_extern__ void call_load_methods(void)
 {
-    static pthread_t load_method_thread NOBSS = NULL;
+    static BOOL loading = NO;
     BOOL more_categories;
 
-    if (load_method_thread) {
-        // +loads are already being called. Do nothing, but complain 
-        // if it looks like multithreaded use of this thread-unsafe code.
+    recursive_mutex_assert_locked(&loadMethodLock);
 
-        if (! pthread_equal(load_method_thread, pthread_self())) {
-            _objc_inform("WARNING: multi-threaded library loading detected "
-                         "(implementation is not thread-safe)");
-        }
-        return;
-    }
-    
-    // Nobody else is calling +loads, so we should do it ourselves.
-    load_method_thread = pthread_self();
+    // Re-entrant calls do nothing; the outermost call will finish the job.
+    if (loading) return;
+    loading = YES;
 
     do {
         // 1. Repeatedly call class +loads until there aren't any more
@@ -347,7 +352,7 @@ __private_extern__ void call_load_methods(void)
         // 3. Run more +loads if there are classes OR more untried categories
     } while (loadable_classes_used > 0  ||  more_categories);
 
-    load_method_thread = NULL;
+    loading = NO;
 }
 
 

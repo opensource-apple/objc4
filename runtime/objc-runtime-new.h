@@ -35,6 +35,10 @@
 #define RO_HIDDEN             (1<<4)
 // class has attribute(objc_exception): OBJC_EHTYPE_$_ThisClass is non-weak
 #define RO_EXCEPTION          (1<<5)
+// class is in an unloadable bundle - must never be set by compiler
+#define RO_FROM_BUNDLE        (1<<29)
+// class is unrealized future class - must never be set by compiler
+#define RO_FUTURE             (1<<30)
 // class is realized - must never be set by compiler
 #define RO_REALIZED           (1<<31)
 
@@ -43,8 +47,8 @@
 // Their presence should be considered in future ABI versions.
 // class_t->data is class_rw_t, not class_ro_t
 #define RW_REALIZED           (1<<31)
-// class's method lists are fixed up
-#define RW_METHODIZED         (1<<30)
+// class is unresolved future class
+#define RW_FUTURE             (1<<30)
 // class is initialized
 #define RW_INITIALIZED        (1<<29)
 // class is initializing
@@ -59,6 +63,10 @@
 #define RW_FINALIZE_ON_MAIN_THREAD (1<<24)
 // class +load has been called
 #define RW_LOADED             (1<<23)
+// class does not share super's vtable
+#define RW_SPECIALIZED_VTABLE (1<<22)
+// class instances may have associative references
+#define RW_INSTANCES_HAVE_ASSOCIATED_OBJECTS (1<<21)
 
 typedef struct method_t {
     SEL name;
@@ -67,7 +75,7 @@ typedef struct method_t {
 } method_t;
 
 typedef struct method_list_t {
-    uint32_t entsize;
+    uint32_t entsize_NEVER_USE;  // low 2 bits used for fixup markers
     uint32_t count;
     struct method_t first;
 } method_list_t;
@@ -78,7 +86,8 @@ typedef struct ivar_t {
     uintptr_t *offset;
     const char *name;
     const char *type;
-    uint32_t alignment;
+    // alignment is sometimes -1; use ivar_alignment() instead
+    uint32_t alignment  __attribute__((deprecated));
     uint32_t size;
 } ivar_t;
 
@@ -87,6 +96,8 @@ typedef struct ivar_list_t {
     uint32_t count;
     struct ivar_t first;
 } ivar_list_t;
+
+typedef uintptr_t protocol_ref_t;  // protocol_t *, but unremapped
 
 typedef struct protocol_t {
     id isa;
@@ -102,14 +113,16 @@ typedef struct protocol_t {
 typedef struct protocol_list_t {
     // count is 64-bit by accident. 
     uintptr_t count;
-    protocol_t *list[0]; // variable-size
+    protocol_ref_t list[0]; // variable-size
 } protocol_list_t;
 
 typedef struct class_ro_t {
     uint32_t flags;
     uint32_t instanceStart;
     uint32_t instanceSize;
+#ifdef __LP64__
     uint32_t reserved;
+#endif
 
     const uint8_t * ivarLayout;
     
@@ -128,9 +141,9 @@ typedef struct class_rw_t {
 
     const class_ro_t *ro;
     
-    struct chained_method_list *methods;
+    struct method_list_t **methods;
     struct chained_property_list *properties;
-    struct protocol_list_t ** protocols;  // these are UNREMAPPED protocols!
+    struct protocol_list_t ** protocols;
 
     struct class_t *firstSubclass;
     struct class_t *nextSiblingClass;

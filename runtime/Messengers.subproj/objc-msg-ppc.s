@@ -20,6 +20,9 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+
+#ifdef __ppc__
+
 /********************************************************************
  *
  *  objc-msg-ppc.s - PowerPC code to support objc messaging.
@@ -194,7 +197,7 @@ LAZY_PIC_FUNCTION_STUB(mcount)
  *
  ********************************************************************/
 
-// In case the implementation is _objc_msgForward, indicate to it
+// In case the implementation is _objc_msgForward_internal, indicate to it
 // whether the method was invoked as a word-return or struct-return.
 // The li instruction costs nothing because it fits into spare
 // processor cycles. We choose to make the MsgSend indicator non-zero
@@ -732,7 +735,7 @@ LLoop_$0_$1:
  * If not found, returns NULL.
  *
  * NOTE: _cache_getMethod never returns any cache entry whose implementation
- * is _objc_msgForward. It returns NULL instead. This prevents thread-
+ * is _objc_msgForward. It returns (Method)1 instead. This prevents thread-
  * safety and memory management bugs in _class_lookupMethodAndLoadCache. 
  * See _class_lookupMethodAndLoadCache for details.
  *
@@ -753,7 +756,9 @@ LLoop_$0_$1:
     cmplw   r12, r5                 ; check for _objc_msgForward
     mr      r3, r2                  ; optimistically get the return value
     bnelr                           ; Not _objc_msgForward, return the triplet address
-
+    li      r3, 1                   ; Is _objc_msgForward, return (Method)1
+    blr
+	
 LGetMethodMiss:
     li      r3, 0                   ; cache miss or _objc_msgForward, return nil
     blr
@@ -1143,6 +1148,24 @@ __objc_forward_stret_handler:	.long 0
 	
 
 	ENTRY __objc_msgForward
+	// Non-stret version
+	li	r11,kFwdMsgSend
+	b	__objc_msgForward_internal
+	END_ENTRY _objc_msgForward
+
+	ENTRY __objc_msgForward_stret
+	// Struct-return version
+	li	r11,kFwdMsgSendStret
+	b	__objc_msgForward_internal
+	END_ENTRY _objc_msgForward_stret
+
+	
+	ENTRY __objc_msgForward_internal
+	// Method cache version
+
+	// THIS IS NOT A CALLABLE C FUNCTION
+	// Out-of-band register %r11 is zero for stret, nonzero otherwise
+
 ; do profiling when enabled
 	CALL_MCOUNT
 
@@ -1233,7 +1256,7 @@ LMsgForwardError:
 	CALL_EXTERN(___objc_error)	; never returns
 	trap
 
-	END_ENTRY __objc_msgForward
+	END_ENTRY __objc_msgForward_internal
 
 
 /********************************************************************
@@ -1466,3 +1489,5 @@ LMsgSendvStretSendIt:
 	bctr
 	
 	END_ENTRY _method_invoke_stret
+
+#endif

@@ -21,6 +21,8 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+#ifdef __i386__
+
 /*
     This file defines the non-GC variants of objc_assign_* on a dedicated
     page in the (__DATA,__data) section. At load time under GC, each
@@ -33,7 +35,8 @@
     must not contain anything other than the objc_assign_* routines.
 */
 
-.data
+.section __IMPORT, __objctext, regular, pure_instructions + self_modifying_code
+
 .align 12   // align to page boundary
 
 LNonGCAssigns$Begin:
@@ -80,3 +83,5 @@ LNonGCAssigns$End:
 // Claim the remainder of the page.
 .set    L$set$assignsSize,LNonGCAssigns$End-LNonGCAssigns$Begin
 .space  4096-L$set$assignsSize
+
+#endif

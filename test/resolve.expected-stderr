@@ -1,0 +1,3 @@
+objc\[\d+\]: \+\[Sub resolveClassMethod:lyingClassMethod\] returned YES, but no new implementation of \+\[Sub lyingClassMethod\] was found
+objc\[\d+\]: \+\[Sub resolveInstanceMethod:lyingInstanceMethod\] returned YES, but no new implementation of -\[Sub lyingInstanceMethod\] was found
+OK: resolve\.m

@@ -21,47 +21,54 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+#import "objc-auto.h"
+
+#ifndef OBJC_NO_GC
+
 #import <stdint.h>
 #import <stdbool.h>
 #import <fcntl.h>
+#import <dlfcn.h>
 #import <mach/mach.h>
 #import <mach-o/dyld.h>
 #import <sys/types.h>
 #import <sys/mman.h>
 #import <libkern/OSAtomic.h>
+#import <auto_zone.h>
+
+#import <Block_private.h>
+#include <dispatch/dispatch.h>
 
 #define OLD 1
 #import "objc-private.h"
-#import "auto_zone.h"
-#import "objc-auto.h"
+#import "objc-references.h"
 #import "objc-rtp.h"
 #import "maptable.h"
+#import "message.h"
+#import "objc-gdb.h"
+
 
 
 static auto_zone_t *gc_zone_init(void);
+static void gc_block_init(void);
+static void registeredClassTableInit(void);
 
 
 __private_extern__ BOOL UseGC NOBSS = NO;
-static BOOL RecordAllocations = NO;
 static BOOL MultiThreadedGC = NO;
 static BOOL WantsMainThreadFinalization = NO;
-static BOOL NeedsMainThreadFinalization = NO;
-
-static struct {
-    auto_zone_foreach_object_t foreach;
-    auto_zone_cursor_t cursor;
-    size_t cursor_size;
-    volatile BOOL finished;
-    volatile BOOL started;
-    pthread_mutex_t mutex;
-    pthread_cond_t condition;
-} BatchFinalizeBlock;
-
 
 __private_extern__ auto_zone_t *gc_zone = NULL;
 
 // Pointer magic to make dyld happy. See notes in objc-private.h
 __private_extern__ id (*objc_assign_ivar_internal)(id, id, ptrdiff_t) = objc_assign_ivar;
+
+
+/* Method prototypes */
+@interface DoesNotExist
+- (const char *)UTF8String;
+- (id)description;
+@end
 
 
 /***********************************************************************
@@ -100,17 +107,36 @@ void objc_finalizeOnMainThread(Class cls) {
     }
 }
 
+// stack based data structure queued if/when there is main-thread-only finalization work TBD
+typedef struct BatchFinalizeBlock {
+    auto_zone_foreach_object_t foreach;
+    auto_zone_cursor_t cursor;
+    size_t cursor_size;
+    volatile BOOL finished;
+    volatile BOOL started;
+    struct BatchFinalizeBlock *next;
+} BatchFinalizeBlock_t;
+
+// The Main Thread Finalization Work Queue Head
+static struct {
+    pthread_mutex_t mutex;
+    pthread_cond_t condition;
+    BatchFinalizeBlock_t *head;
+    BatchFinalizeBlock_t *tail;
+} MainThreadWorkQ;
+
 
 void objc_startCollectorThread(void) {
     static int didOnce = 0;
+    if (!UseGC) return;
     if (!didOnce) {
         didOnce = 1;
         
-        // pretend we're done to start out with.
-        BatchFinalizeBlock.started = YES;
-        BatchFinalizeBlock.finished = YES;
-        pthread_mutex_init(&BatchFinalizeBlock.mutex, NULL);
-        pthread_cond_init(&BatchFinalizeBlock.condition, NULL);
+        // initialize the batch finalization queue
+        MainThreadWorkQ.head = NULL;
+        MainThreadWorkQ.tail = NULL;
+        pthread_mutex_init(&MainThreadWorkQ.mutex, NULL);
+        pthread_cond_init(&MainThreadWorkQ.condition, NULL);
         auto_collect_multithreaded(gc_zone);
         MultiThreadedGC = YES;
     }
@@ -127,7 +153,9 @@ void objc_collect(unsigned long options) {
     BOOL onMainThread = pthread_main_np() ? YES : NO;
 
     if (MultiThreadedGC || onMainThread) {
+        // while we're here, sneak off and do some finalization work (if any)
         if (MultiThreadedGC && onMainThread) batchFinalizeOnMainThread();
+        // now on with our normally scheduled programming
         auto_collection_mode_t amode = AUTO_COLLECT_RATIO_COLLECTION;
         switch (options & 0x3) {
           case OBJC_RATIO_COLLECTION:        amode = AUTO_COLLECT_RATIO_COLLECTION;        break;
@@ -140,44 +168,10 @@ void objc_collect(unsigned long options) {
         auto_collect(gc_zone, amode, NULL);
     }
     else {
-        objc_msgSend(objc_getClass("NSGarbageCollector"), @selector(_callOnMainThread:withArgs:), objc_collect, (void *)options);
+        dispatch_async(dispatch_get_main_queue(), ^{ objc_collect(options); });
     }
 }
 
-// SPI
-// 0 - exhaustively NSGarbageCollector.m
-//   - from AppKit /Developer/Applications/Xcode.app/Contents/MacOS/Xcode via idleTimer
-// GENERATIONAL
-//   - from autoreleasepool
-//   - several other places
-void objc_collect_if_needed(unsigned long options) {
-    if (!UseGC) return;
-    BOOL onMainThread = pthread_main_np() ? YES : NO;
-
-    if (MultiThreadedGC || onMainThread) {
-        auto_collection_mode_t mode;
-        if (options & OBJC_GENERATIONAL) {
-            mode = AUTO_COLLECT_IF_NEEDED | AUTO_COLLECT_RATIO_COLLECTION;
-        }
-        else {
-            mode = AUTO_COLLECT_EXHAUSTIVE_COLLECTION;
-        }
-        if (MultiThreadedGC && onMainThread) batchFinalizeOnMainThread();
-        auto_collect(gc_zone, mode, NULL);
-    }
-    else {      // XXX could be optimized (e.g. ask auto for threshold check, if so, set ASKING if not already ASKING,...
-        objc_msgSend(objc_getClass("NSGarbageCollector"), @selector(_callOnMainThread:withArgs:), objc_collect_if_needed, (void *)options);
-    }
-}
-
-// NEVER USED.
-size_t objc_numberAllocated(void) 
-{
-    auto_statistics_t stats;
-    stats.version = 0;
-    auto_zone_statistics(gc_zone, &stats);
-    return stats.malloc_statistics.blocks_in_use;
-}
 
 // USED BY CF & ONE OTHER
 BOOL objc_isAuto(id object) 
@@ -190,9 +184,26 @@ BOOL objc_collectingEnabled(void)
 {
     return UseGC;
 }
+
 BOOL objc_collecting_enabled(void) // Old naming
 {
     return UseGC;
+}
+
+BOOL objc_dumpHeap(char *filenamebuffer, unsigned long length) {
+    static int counter = 0;
+    ++counter;
+    char buffer[1024];
+    sprintf(buffer, OBJC_HEAP_DUMP_FILENAME_FORMAT, getpid(), counter);
+    if (!_objc_dumpHeap(gc_zone, buffer)) return NO;
+    if (filenamebuffer) {
+        unsigned long blen = strlen(buffer);
+        if (blen < length)
+            strncpy(filenamebuffer, buffer, blen+1);
+        else if (length > 0)
+            filenamebuffer[0] = 0;  // give some answer
+    }
+    return YES;
 }
 
 
@@ -250,7 +261,7 @@ __private_extern__ id objc_assign_ivar_gc(id value, id base, ptrdiff_t offset)
         if (!auto_zone_set_write_barrier(gc_zone, (char *)base + offset, value)) {
             __private_extern__  void objc_assign_ivar_error(id base, ptrdiff_t offset);
 
-            _objc_inform("GC: %p + %d isn't in the auto_zone, break on objc_assign_ivar_error to debug.\n", base, offset);
+            _objc_inform("GC: %p + %tu isn't in the auto_zone, break on objc_assign_ivar_error to debug.\n", base, offset);
             objc_assign_ivar_error(base, offset);
         }
     }
@@ -303,12 +314,12 @@ id objc_assign_ivar_generic(id value, id dest, ptrdiff_t offset)
     }
 }
 
-#if defined(__ppc__) || defined(__i386__) || defined(__x86_64__)
+#if defined(__ppc__) || defined(__i386__)
 
 // PPC write barriers are in objc-auto-ppc.s
 // write_barrier_init conditionally stomps those to jump to the _impl versions.
 
-// These 3 functions are defined in objc-auto-i386.s and objc-auto-x86_64.s as
+// These 3 functions are defined in objc-auto-i386.s as 
 // the non-GC variants. Under GC, rtp_init stomps them with jumps to
 // objc_assign_*_gc.
 
@@ -319,7 +330,7 @@ id objc_assign_strongCast(id value, id *dest) { return objc_assign_strongCast_ge
 id objc_assign_global(id value, id *dest) { return objc_assign_global_generic(value, dest); }
 id objc_assign_ivar(id value, id dest, ptrdiff_t offset) { return objc_assign_ivar_generic(value, dest, offset); }
 
-// not (defined(__ppc__)) && not defined(__i386__) && not defined(__x86_64__)
+// not (defined(__ppc__)) && not defined(__i386__)
 #endif
 
 
@@ -332,30 +343,54 @@ void *objc_memmove_collectable(void *dst, const void *src, size_t size)
     }
 }
 
-BOOL objc_atomicCompareAndSwapGlobal(id predicate, id replacement, volatile id *objectLocation) {
+BOOL objc_atomicCompareAndSwapPtr(id predicate, id replacement, volatile id *objectLocation) {
+    const BOOL issueMemoryBarrier = NO;
     if (UseGC)
-        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, YES, NO);
+        return auto_zone_atomicCompareAndSwapPtr(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, issueMemoryBarrier);
+    else
+        return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+}
+
+BOOL objc_atomicCompareAndSwapPtrBarrier(id predicate, id replacement, volatile id *objectLocation) {
+    const BOOL issueMemoryBarrier = YES;
+    if (UseGC)
+        return auto_zone_atomicCompareAndSwapPtr(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, issueMemoryBarrier);
+    else
+        return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+}
+
+BOOL objc_atomicCompareAndSwapGlobal(id predicate, id replacement, volatile id *objectLocation) {
+    const BOOL isGlobal = YES;
+    const BOOL issueMemoryBarrier = NO;
+    if (UseGC)
+        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, isGlobal, issueMemoryBarrier);
     else
         return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
 }
 
 BOOL objc_atomicCompareAndSwapGlobalBarrier(id predicate, id replacement, volatile id *objectLocation) {
+    const BOOL isGlobal = YES;
+    const BOOL issueMemoryBarrier = YES;
     if (UseGC)
-        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, YES, YES);
+        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, isGlobal, issueMemoryBarrier);
     else
         return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
 }
 
 BOOL objc_atomicCompareAndSwapInstanceVariable(id predicate, id replacement, volatile id *objectLocation) {
+    const BOOL isGlobal = NO;
+    const BOOL issueMemoryBarrier = NO;
     if (UseGC)
-        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, NO, NO);
+        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, isGlobal, issueMemoryBarrier);
     else
         return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
 }
 
 BOOL objc_atomicCompareAndSwapInstanceVariableBarrier(id predicate, id replacement, volatile id *objectLocation) {
+    const BOOL isGlobal = NO;
+    const BOOL issueMemoryBarrier = YES;
     if (UseGC)
-        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, NO, YES);
+        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, isGlobal, issueMemoryBarrier);
     else
         return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
 }
@@ -385,6 +420,24 @@ void* objc_assign_strongCast_CF(void* value, void **slot)
     return value;
 }
 
+__private_extern__ void gc_fixup_weakreferences(id newObject, id oldObject) {
+    // fix up weak references if any.
+    const unsigned char *weakLayout = (const unsigned char *)class_getWeakIvarLayout(newObject->isa);
+    if (weakLayout) {
+        void **newPtr = (void **)newObject, **oldPtr = (void **)oldObject;
+        unsigned char byte;
+        while ((byte = *weakLayout++)) {
+            unsigned skips = (byte >> 4);
+            unsigned weaks = (byte & 0x0F);
+            newPtr += skips, oldPtr += skips;
+            while (weaks--) {
+                *newPtr = NULL;
+                auto_assign_weak_reference(gc_zone, auto_read_weak_reference(gc_zone, oldPtr), newPtr, NULL);
+                ++newPtr, ++oldPtr;
+            }
+        }
+    }
+}
 
 /***********************************************************************
 * Weak ivar support
@@ -408,6 +461,50 @@ id objc_assign_weak(id value, id *location) {
     return value;
 }
 
+/* Associative Reference Support. */
+
+id objc_getAssociatedObject(id object, void *key) {
+    if (UseGC) {
+        return auto_zone_get_associative_ref(gc_zone, object, key);
+    } else {
+        return _object_get_associative_reference(object, key);
+    }
+}
+
+void objc_setAssociatedObject(id object, void *key, id value, objc_AssociationPolicy policy) {
+    if (UseGC) {
+        if ((policy & OBJC_ASSOCIATION_COPY_NONATOMIC) == OBJC_ASSOCIATION_COPY_NONATOMIC) {
+            value = objc_msgSend(value, @selector(copy));
+        }
+        auto_zone_set_associative_ref(gc_zone, object, key, value);
+    } else {
+        // Note, creates a retained reference in non-GC.
+        _object_set_associative_reference(object, key, value, policy);
+    }
+}
+
+void objc_removeAssociatedObjects(id object) {
+    if (UseGC) {
+        auto_zone_erase_associative_refs(gc_zone, object);
+    } else {
+        if (_class_instancesHaveAssociatedObjects(object->isa)) _object_remove_assocations(object);
+    }
+}
+
+BOOL class_instancesHaveAssociatedObjects(Class cls) {
+    return _class_instancesHaveAssociatedObjects(cls);
+}
+
+id objc_getAssociatedProperties(id object, Class dataClass) {
+    id data = objc_getAssociatedObject(object, dataClass);
+    if (data == nil) {
+        // FIXME:  Need to make this atomic.
+        data = objc_msgSend(dataClass, @selector(new));
+        objc_setAssociatedObject(object, dataClass, data, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_msgSend(data, @selector(release));
+    }
+    return data;
+}
 
 /***********************************************************************
 * Testing tools
@@ -449,29 +546,9 @@ static vm_address_t _stack_resident_base() {
     return stack_resident_base;
 }
 
-static __attribute__((noinline)) void* _get_stack_pointer() {
-#if defined(__i386__) || defined(__ppc__) || defined(__ppc64__) || defined(__x86_64__)
-    return __builtin_frame_address(0);
-#else
-    return NULL;
-#endif
-}
-
 void objc_clear_stack(unsigned long options) {
     if (!UseGC) return;
-    if (options & OBJC_CLEAR_RESIDENT_STACK) {
-        // clear just the pages of stack that are currently resident.
-        vm_address_t stack_resident_base = _stack_resident_base();
-        vm_address_t stack_top =  (vm_address_t)_get_stack_pointer() - 2 * sizeof(void*);
-        bzero((void*)stack_resident_base, (stack_top - stack_resident_base));
-    } else {
-        // clear the entire unused stack, regardless of whether it's pages are resident or not.
-        pthread_t self = pthread_self();
-        size_t stack_size = pthread_get_stacksize_np(self);
-        vm_address_t stack_base = (vm_address_t)pthread_get_stackaddr_np(self) - stack_size;
-        vm_address_t stack_top =  (vm_address_t)_get_stack_pointer() - 2 * sizeof(void*);
-        bzero((void*)stack_base, stack_top - stack_base);
-    }
+    auto_zone_clear_stack(gc_zone, 0);
 }
 
 /***********************************************************************
@@ -484,14 +561,17 @@ static IMP _NSObject_finalize = NULL;
 static void *finalizing_object;
 static const char *__crashreporter_info__;
 
-static void finalizeOneObject(void *obj, void *sel) {
+
+// finalize a single object without fuss
+// When there are no main-thread-only classes this is used directly
+// Otherwise, it is used indirectly by smarter code that knows main-thread-affinity requirements
+static void finalizeOneObject(void *obj, void *ignored) {
     id object = (id)obj;
-    SEL selector = (SEL)sel;
     finalizing_object = obj;
     __crashreporter_info__ = object_getClassName(obj);
 
     /// call -finalize method.
-    objc_msgSend(object, selector);
+    objc_msgSend(object, @selector(finalize));
     // Call C++ destructors, if any.
     object_cxxDestruct(object);
 
@@ -499,42 +579,53 @@ static void finalizeOneObject(void *obj, void *sel) {
     __crashreporter_info__ = NULL;
 }
 
-static void finalizeOneMainThreadOnlyObject(void *obj, void *sel) {
+// finalize object only if it is a main-thread-only object.
+// Called only from the main thread.
+static void finalizeOneMainThreadOnlyObject(void *obj, void *arg) {
     id object = (id)obj;
     Class cls = object->isa;
     if (cls == NULL) {
         _objc_fatal("object with NULL ISA passed to finalizeOneMainThreadOnlyObject:  %p\n", obj);
     }
     if (_class_shouldFinalizeOnMainThread(cls)) {
-        finalizeOneObject(obj, sel);
+        finalizeOneObject(obj, NULL);
     }
 }
 
-static void finalizeOneAnywhereObject(void *obj, void *sel) {
+// finalize one object only if it is not a main-thread-only object
+// called from any other thread than the main thread
+// Important: if a main-thread-only object is passed, return that fact in the needsMain argument
+static void finalizeOneAnywhereObject(void *obj, void *needsMain) {
     id object = (id)obj;
     Class cls = object->isa;
+    bool *needsMainThreadWork = needsMain;
     if (cls == NULL) {
         _objc_fatal("object with NULL ISA passed to finalizeOneAnywhereObject:  %p\n", obj);
     }
     if (!_class_shouldFinalizeOnMainThread(cls)) {
-        finalizeOneObject(obj, sel);
+        finalizeOneObject(obj, NULL);
     }
     else {
-        NeedsMainThreadFinalization = YES;
+        *needsMainThreadWork = true;
     }
 }
 
 
-
-static void batchFinalize(auto_zone_t *zone,
+// Utility workhorse.
+// Set up the expensive @try block and ask the collector to hand the next object to
+// our finalizeAnObject function.
+// Track and return a boolean that records whether or not any main thread work is necessary.
+// (When we know that there are no main thread only objects then the boolean isn't even computed)
+static bool batchFinalize(auto_zone_t *zone,
                           auto_zone_foreach_object_t foreach,
                           auto_zone_cursor_t cursor, 
                           size_t cursor_size,
-                          void (*finalize)(void *, void*))
+                          void (*finalizeAnObject)(void *, void*))
 {
+    bool needsMainThreadWork = false;
     for (;;) {
         @try {
-            foreach(cursor, finalize, @selector(finalize));
+            foreach(cursor, finalizeAnObject, &needsMainThreadWork);
             // non-exceptional return means finalization is complete.
             break;
         } @catch (id exception) {
@@ -544,78 +635,93 @@ static void batchFinalize(auto_zone_t *zone,
             objc_exception_during_finalize_error();
         }
     }
+    return needsMainThreadWork;
 }
 
-
-static void batchFinalizeOnMainThread(void) {
-    pthread_mutex_lock(&BatchFinalizeBlock.mutex);
-    if (BatchFinalizeBlock.started) {
-        // main thread got here already
-        pthread_mutex_unlock(&BatchFinalizeBlock.mutex);
+// Called on main thread-only.
+// Pick up work from global queue.
+// called parasitically by anyone requesting a collection
+// called explicitly when there is known to be main thread only finalization work
+// In both cases we are on the main thread
+// Guard against recursion by something called from a finalizer
+static void batchFinalizeOnMainThread() {
+    pthread_mutex_lock(&MainThreadWorkQ.mutex);
+    if (!MainThreadWorkQ.head || MainThreadWorkQ.head->started) {
+        // No work or we're already here
+        pthread_mutex_unlock(&MainThreadWorkQ.mutex);
         return;
     }
-    BatchFinalizeBlock.started = YES;
-    pthread_mutex_unlock(&BatchFinalizeBlock.mutex);
-        
-    batchFinalize(gc_zone, BatchFinalizeBlock.foreach, BatchFinalizeBlock.cursor, BatchFinalizeBlock.cursor_size, finalizeOneMainThreadOnlyObject);
-    // signal the collector thread that finalization has finished.
-    pthread_mutex_lock(&BatchFinalizeBlock.mutex);
-    BatchFinalizeBlock.finished = YES;
-    pthread_cond_signal(&BatchFinalizeBlock.condition);
-    pthread_mutex_unlock(&BatchFinalizeBlock.mutex);
+    while (MainThreadWorkQ.head) {
+        BatchFinalizeBlock_t *bfb = MainThreadWorkQ.head;
+        bfb->started = YES;
+        pthread_mutex_unlock(&MainThreadWorkQ.mutex);
+            
+        batchFinalize(gc_zone, bfb->foreach, bfb->cursor, bfb->cursor_size, finalizeOneMainThreadOnlyObject);
+        // signal the collector thread(s) that finalization has finished.
+        pthread_mutex_lock(&MainThreadWorkQ.mutex);
+        bfb->finished = YES;
+        pthread_cond_broadcast(&MainThreadWorkQ.condition);
+        MainThreadWorkQ.head = bfb->next;
+    }
+    MainThreadWorkQ.tail = NULL;
+    pthread_mutex_unlock(&MainThreadWorkQ.mutex);
 }
 
+
+// Knowing that we possibly have main thread only work to do, first process everything
+// that is not main-thread-only.  If we discover main thread only work, queue a work block
+// to the main thread that will do just the main thread only work.  Wait for it.
+// Called from a non main thread.
 static void batchFinalizeOnTwoThreads(auto_zone_t *zone,
                                          auto_zone_foreach_object_t foreach,
                                          auto_zone_cursor_t cursor, 
                                          size_t cursor_size)
 {
     // First, lets get rid of everything we can on this thread, then ask main thread to help if needed
-    NeedsMainThreadFinalization = NO;
     char cursor_copy[cursor_size];
     memcpy(cursor_copy, cursor, cursor_size);
-    batchFinalize(zone, foreach, cursor_copy, cursor_size, finalizeOneAnywhereObject);
+    bool needsMainThreadFinalization = batchFinalize(zone, foreach, (auto_zone_cursor_t)cursor_copy, cursor_size, finalizeOneAnywhereObject);
 
-    if (! NeedsMainThreadFinalization)
+    if (! needsMainThreadFinalization)
         return;     // no help needed
     
     // set up the control block.  Either our ping of main thread with _callOnMainThread will get to it, or
-    // an objc_collect_if_needed() will get to it.  Either way, this block will be processed on the main thread.
-    pthread_mutex_lock(&BatchFinalizeBlock.mutex);
-    BatchFinalizeBlock.foreach = foreach;
-    BatchFinalizeBlock.cursor = cursor;
-    BatchFinalizeBlock.cursor_size = cursor_size;
-    BatchFinalizeBlock.started = NO;
-    BatchFinalizeBlock.finished = NO;
-    pthread_mutex_unlock(&BatchFinalizeBlock.mutex);
+    // an objc_collect(if_needed) will get to it.  Either way, this block will be processed on the main thread.
+    BatchFinalizeBlock_t bfb;
+    bfb.foreach = foreach;
+    bfb.cursor = cursor;
+    bfb.cursor_size = cursor_size;
+    bfb.started = NO;
+    bfb.finished = NO;
+    bfb.next = NULL;
+    pthread_mutex_lock(&MainThreadWorkQ.mutex);
+    if (MainThreadWorkQ.tail) {
+    
+        // link to end so that ordering of finalization is preserved.
+        MainThreadWorkQ.tail->next = &bfb;
+        MainThreadWorkQ.tail = &bfb;
+    }
+    else {
+        MainThreadWorkQ.head = &bfb;
+        MainThreadWorkQ.tail = &bfb;
+    }
+    pthread_mutex_unlock(&MainThreadWorkQ.mutex);
     
     //printf("----->asking main thread to finalize\n");
-    objc_msgSend(objc_getClass("NSGarbageCollector"), @selector(_callOnMainThread:withArgs:), batchFinalizeOnMainThread, &BatchFinalizeBlock);
+    dispatch_async(dispatch_get_main_queue(), ^{ batchFinalizeOnMainThread(); });
     
     // wait for the main thread to finish finalizing instances of classes marked CLS_FINALIZE_ON_MAIN_THREAD.
-    pthread_mutex_lock(&BatchFinalizeBlock.mutex);
-    while (!BatchFinalizeBlock.finished) pthread_cond_wait(&BatchFinalizeBlock.condition, &BatchFinalizeBlock.mutex);
-    pthread_mutex_unlock(&BatchFinalizeBlock.mutex);
+    pthread_mutex_lock(&MainThreadWorkQ.mutex);
+    while (!bfb.finished) pthread_cond_wait(&MainThreadWorkQ.condition, &MainThreadWorkQ.mutex);
+    pthread_mutex_unlock(&MainThreadWorkQ.mutex);
     //printf("<------ main thread finalize done\n");
 
 }
 
 
-static void objc_will_grow(auto_zone_t *zone, auto_heap_growth_info_t info) {
-    if (MultiThreadedGC) {
-        //printf("objc_will_grow %d\n", info);
-        
-        if (auto_zone_is_collecting(gc_zone)) {
-            ;
-        }
-        else  {
-            auto_collect(gc_zone, AUTO_COLLECT_RATIO_COLLECTION, NULL);
-        }
-    }
-}
-
 
 // collector calls this with garbage ready
+// thread collectors, too, so this needs to be thread-safe
 static void BatchInvalidate(auto_zone_t *zone,
                                          auto_zone_foreach_object_t foreach,
                                          auto_zone_cursor_t cursor, 
@@ -633,19 +739,26 @@ static void BatchInvalidate(auto_zone_t *zone,
     
 }
 
+
+/*
+ * Zombie support
+ * Collector calls into this system when it finds resurrected objects.
+ * This keeps them pitifully alive and leaked, even if they reference garbage.
+ */
+ 
 // idea:  keep a side table mapping resurrected object pointers to their original Class, so we don't
 // need to smash anything. alternatively, could use associative references to track against a secondary
 // object with information about the resurrection, such as a stack crawl, etc.
 
 static Class _NSResurrectedObjectClass;
 static NXMapTable *_NSResurrectedObjectMap = NULL;
-static OBJC_DECLARE_LOCK(_NSResurrectedObjectLock);
+static pthread_mutex_t _NSResurrectedObjectLock = PTHREAD_MUTEX_INITIALIZER;
 
 static Class resurrectedObjectOriginalClass(id object) {
     Class originalClass;
-    OBJC_LOCK(&_NSResurrectedObjectLock);
+    pthread_mutex_lock(&_NSResurrectedObjectLock);
     originalClass = (Class) NXMapGet(_NSResurrectedObjectMap, object);
-    OBJC_UNLOCK(&_NSResurrectedObjectLock);
+    pthread_mutex_unlock(&_NSResurrectedObjectLock);
     return originalClass;
 }
 
@@ -658,9 +771,9 @@ static id _NSResurrectedObject_instanceMethod(id self, SEL name) {
 
 static void _NSResurrectedObject_finalize(id self, SEL _cmd) {
     Class originalClass;
-    OBJC_LOCK(&_NSResurrectedObjectLock);
+    pthread_mutex_lock(&_NSResurrectedObjectLock);
     originalClass = (Class) NXMapRemove(_NSResurrectedObjectMap, self);
-    OBJC_UNLOCK(&_NSResurrectedObjectLock);
+    pthread_mutex_unlock(&_NSResurrectedObjectLock);
     if (originalClass) _objc_inform("**resurrected** object %p of class %s being finalized\n", self, class_getName(originalClass));
     _NSObject_finalize(self, _cmd);
 }
@@ -690,9 +803,9 @@ static void resurrectZombie(auto_zone_t *zone, void *ptr) {
     Class cls = object->isa;
     if (cls != _NSResurrectedObjectClass) {
         // remember the original class for this instance.
-        OBJC_LOCK(&_NSResurrectedObjectLock);
+        pthread_mutex_lock(&_NSResurrectedObjectLock);
         NXMapInsert(_NSResurrectedObjectMap, ptr, cls);
-        OBJC_UNLOCK(&_NSResurrectedObjectLock);
+        pthread_mutex_unlock(&_NSResurrectedObjectLock);
         object->isa = _NSResurrectedObjectClass;
     }
 }
@@ -714,44 +827,45 @@ static char* objc_name_for_address(auto_zone_t *zone, vm_address_t base, vm_addr
 * Collection support
 **********************************************************************/
 
+static BOOL objc_isRegisteredClass(Class candidate);
+
 static const unsigned char *objc_layout_for_address(auto_zone_t *zone, void *address) 
 {
     Class cls = *(Class *)address;
+    if (!objc_isRegisteredClass(cls)) return NULL;
     return (const unsigned char *)class_getIvarLayout(cls);
 }
 
 static const unsigned char *objc_weak_layout_for_address(auto_zone_t *zone, void *address) 
 {
     Class cls = *(Class *)address;
+    if (!objc_isRegisteredClass(cls)) return NULL;
     return (const unsigned char *)class_getWeakIvarLayout(cls);
 }
+
+__private_extern__ void gc_register_datasegment(uintptr_t base, size_t size) {
+    auto_zone_register_datasegment(gc_zone, (void*)base, size);
+}
+
+__private_extern__ void gc_unregister_datasegment(uintptr_t base, size_t size) {
+    auto_zone_unregister_datasegment(gc_zone, (void*)base, size);
+}
+
 
 /***********************************************************************
 * Initialization
 **********************************************************************/
 
-// Always called by _objcInit, even if GC is off.
-__private_extern__ void gc_init(BOOL on)
-{
-    UseGC = on;
-
-    if (PrintGC) {
-        _objc_inform("GC: is %s", on ? "ON" : "OFF");
-    }
-
-    if (UseGC) {
-        // Add GC state to crash log reports
-        _objc_inform_on_crash("garbage collection is ON");
-
-        // Set up the GC zone
-        gc_zone = gc_zone_init();
+static void objc_will_grow(auto_zone_t *zone, auto_heap_growth_info_t info) {
+    if (MultiThreadedGC) {
+        //printf("objc_will_grow %d\n", info);
         
-        // no NSObject until Foundation calls objc_collect_init()
-        _NSObject_finalize = &_objc_msgForward;
-        
-    } else {
-        auto_zone_start_monitor(false);
-        auto_zone_set_class_list((int (*)(void **, int))objc_getClassList);
+        if (auto_zone_is_collecting(gc_zone)) {
+            ;
+        }
+        else  {
+            auto_collect(gc_zone, AUTO_COLLECT_RATIO_COLLECTION, NULL);
+        }
     }
 }
 
@@ -777,13 +891,68 @@ static auto_zone_t *gc_zone_init(void)
 }
 
 
+/* should be defined in /usr/local/include/libdispatch_private.h. */
+extern void (*dispatch_begin_thread_4GC)(void);
+extern void (*dispatch_end_thread_4GC)(void);
+
+void objc_registerThreadWithCollector()
+{
+    if (UseGC) auto_zone_register_thread(gc_zone);
+}
+
+void objc_unregisterThreadWithCollector()
+{
+    if (UseGC) auto_zone_unregister_thread(gc_zone);
+}
+
+void objc_assertRegisteredThreadWithCollector()
+{
+    if (UseGC) auto_zone_assert_thread_registered(gc_zone);
+}
+
+// Always called by _objcInit, even if GC is off.
+__private_extern__ void gc_init(BOOL on)
+{
+    UseGC = on;
+
+    if (PrintGC) {
+        _objc_inform("GC: is %s", on ? "ON" : "OFF");
+    }
+
+    if (UseGC) {
+        // Add GC state to crash log reports
+        _objc_inform_on_crash("garbage collection is ON");
+
+        // Set up the GC zone
+        gc_zone = gc_zone_init();
+        
+        // no NSObject until Foundation calls objc_collect_init()
+        _NSObject_finalize = &_objc_msgForward_internal;
+        
+        // set up the registered classes list
+        registeredClassTableInit();
+
+        // tell Blocks to use collectable memory.  CF will cook up the classes separately.
+        gc_block_init();
+    
+        // tell libdispatch to register its threads with the GC.
+        dispatch_begin_thread_4GC = objc_registerThreadWithCollector;
+        dispatch_end_thread_4GC = objc_unregisterThreadWithCollector;
+    } else {
+        auto_zone_start_monitor(false);
+        auto_zone_set_class_list((int (*)(void **, int))objc_getClassList);
+    }
+}
+
+
+
 // Called by Foundation to install auto's interruption callback.
 malloc_zone_t *objc_collect_init(int (*callback)(void))
 {
     // Find NSObject's finalize method now that Foundation is loaded.
     // fixme only look for the base implementation, not a category's
     _NSObject_finalize = class_getMethodImplementation(objc_getClass("NSObject"), @selector(finalize));
-    if (_NSObject_finalize == &_objc_msgForward) {
+    if (_NSObject_finalize == &_objc_msgForward /* not _internal! */) {
         _objc_fatal("GC: -[NSObject finalize] unimplemented!");
     }
 
@@ -793,26 +962,190 @@ malloc_zone_t *objc_collect_init(int (*callback)(void))
     return (malloc_zone_t *)gc_zone;
 }
 
+/*
+ * Support routines for the Block implementation
+ */
 
 
+// The Block runtime now needs to sometimes allocate a Block that is an Object - namely
+// when it neesd to have a finalizer which, for now, is only if there are C++ destructors
+// in the helper function.  Hence the isObject parameter.
+// Under GC a -copy message should allocate a refcount 0 block, ergo the isOne parameter.
+static void *block_gc_alloc5(const unsigned long size, const bool isOne, const bool isObject) {
+    auto_memory_type_t type = isObject ? (AUTO_OBJECT|AUTO_MEMORY_SCANNED) : AUTO_MEMORY_SCANNED;
+    return auto_zone_allocate_object(gc_zone, size, type, isOne, false);
+}
 
+// The Blocks runtime keeps track of everything above 1 and so it only calls
+// up to the collector to tell it about the 0->1 transition and then the 1->0 transition
+static void block_gc_setHasRefcount(const void *block, const bool hasRefcount) {
+    if (hasRefcount)
+        auto_zone_retain(gc_zone, (void *)block);
+    else
+        auto_zone_release(gc_zone, (void *)block);
+}
+
+static void block_gc_memmove(void *dst, void *src, unsigned long size) {
+    auto_zone_write_barrier_memmove(gc_zone, dst, src, (size_t)size);
+}
+
+
+// Initialize the Block subsystem iff running under GC.
+static void gc_block_init(void) {
+    // set up the callout functions that enable _Block_copy to do the right thing under GC
+    _Block_use_GC(
+        block_gc_alloc5,
+        block_gc_setHasRefcount,
+        (void (*)(void *, void **))objc_assign_strongCast_gc,
+        (void (*)(const void *, void *))objc_assign_weak,
+        block_gc_memmove
+    );
+}
 
 
 /***********************************************************************
-* Debugging
+* Track classes.
+* In addition to the global class hashtable (set) indexed by name, we
+* also keep one based purely by pointer when running under Garbage Collection.
+* This allows the background collector to race against objects recycled from TLC.
+* Specifically, the background collector can read the admin byte and see that
+* a thread local object is an object, get scheduled out, and the TLC recovers it,
+* linking it into the cache, then the background collector reads the isa field and
+* finds linkage info.  By qualifying all isa fields read we avoid this.
 **********************************************************************/
 
-/* This is non-deadlocking with respect to malloc's locks EXCEPT:
- * %ls, %a, %A formats
- * more than 8 args
- */
-static void objc_debug_printf(const char *format, ...)
-{
-    va_list ap;
-    va_start(ap, format);
-    vfprintf(stderr, format, ap);
-    va_end(ap);
+// This is a self-contained hash table of all classes.  The first two elements contain the (size-1) and count.
+static volatile Class *AllClasses = nil;
+
+#define SHIFT 3
+#define INITIALSIZE 512
+#define REMOVED -1
+
+// Allocate the side table.
+static void registeredClassTableInit() {
+    assert(UseGC);
+    // allocate a collectable (refcount 0) zeroed hunk of unscanned memory
+    uintptr_t *table = (uintptr_t *)auto_zone_allocate_object(gc_zone, INITIALSIZE*sizeof(void *), AUTO_MEMORY_UNSCANNED, false, true);
+    // set initial capacity (as mask)
+    table[0] = INITIALSIZE - 1;
+    // set initial count
+    table[1] = 0;
+    // register it so that the collector will keep it around.  We could instead allocate it refcount 1 and then decr when done.
+    auto_zone_add_root(gc_zone, &AllClasses, table);
 }
+
+// Verify that a particular pointer is to a class.
+// Safe from any thread anytime
+static BOOL objc_isRegisteredClass(Class candidate) {
+    assert(UseGC);
+    // We don't care about a race with another thread adding a class to which we randomly might have a pointer
+    // Get local copy of classes so that we're immune from updates.
+    // We keep the size of the list as the first element so there is no race as the list & size get updated.
+    uintptr_t *allClasses = (uintptr_t *)AllClasses;
+    // Slot 0 is always the size of the list in log 2 masked terms (e.g. size - 1) where size is always power of 2
+    // Slot 1 is count
+    uintptr_t slot = (((uintptr_t)candidate) >> SHIFT) & allClasses[0];
+    // avoid slot 0 and 1
+    if (slot < 2) slot = 2;
+    for(;;) {
+        long int slotValue = allClasses[slot];
+        if (slotValue == (long int)candidate) {
+            return YES;
+        }
+        if (slotValue == 0) {
+            return NO;
+        }
+        ++slot;
+        if (slot > allClasses[0])
+            slot = 2;   // skip size, count
+    }
+}
+
+// Utility used when growing
+// Assumes lock held
+static void addClassHelper(uintptr_t *table, uintptr_t candidate) {
+    uintptr_t slot = (((long int)candidate) >> SHIFT) & table[0];
+    if (slot < 2) slot = 2;
+    for(;;) {
+        uintptr_t slotValue = table[slot];
+        if (slotValue == 0) {
+            table[slot] = candidate;
+            ++table[1];
+            return;
+        }
+        ++slot;
+        if (slot > table[0])
+            slot = 2;   // skip size, count
+    }
+}
+
+// lock held by callers
+__private_extern__
+void objc_addRegisteredClass(Class candidate) {
+    if (!UseGC) return;
+    uintptr_t *table = (uintptr_t *)AllClasses;
+    // Slot 0 is always the size of the list in log 2 masked terms (e.g. size - 1) where size is always power of 2
+    // Slot 1 is count - always non-zero
+    uintptr_t slot = (((long int)candidate) >> SHIFT) & table[0];
+    if (slot < 2) slot = 2;
+    for(;;) {
+        uintptr_t slotValue = table[slot];
+        assert(slotValue != (uintptr_t)candidate);
+        if (slotValue == REMOVED) {
+            table[slot] = (long)candidate;
+            return;
+        }
+        else if (slotValue == 0) {
+            table[slot] = (long)candidate;
+            if (2*++table[1] > table[0]) {  // add to count; check if we cross 50% utilization
+                // grow
+                uintptr_t oldSize = table[0]+1;
+                uintptr_t *newTable = (uintptr_t *)auto_zone_allocate_object(gc_zone, oldSize*2*sizeof(void *), AUTO_MEMORY_UNSCANNED, false, true);
+                uintptr_t i;
+                newTable[0] = 2*oldSize - 1;
+                newTable[1] = 0;
+                for (i = 2; i < oldSize; ++i) {
+                    if (table[i] && table[i] != REMOVED)
+                        addClassHelper(newTable, table[i]);
+                }
+                // this does the write-barrier.  Don't use objc_assignGlobal because it trips a linker error on 64-bit.
+                auto_zone_add_root(gc_zone, &AllClasses, newTable);
+            }
+            return;
+        }
+        ++slot;
+        if (slot > table[0])
+            slot = 2;   // skip size, count
+    }
+}
+
+// lock held by callers
+__private_extern__
+void objc_removeRegisteredClass(Class candidate) {
+    if (!UseGC) return;
+    uintptr_t *table = (uintptr_t *)AllClasses;
+    // Slot 0 is always the size of the list in log 2 masked terms (e.g. size - 1) where size is always power of 2
+    // Slot 1 is count - always non-zero
+    uintptr_t slot = (((uintptr_t)candidate) >> SHIFT) & table[0];
+    if (slot < 2) slot = 2;
+    for(;;) {
+        uintptr_t slotValue = table[slot];
+        if (slotValue == (uintptr_t)candidate) {
+            table[slot] = REMOVED;  // if next slot == 0 we could set to 0 here and decr count
+            return;
+        }
+        assert(slotValue != 0);
+        ++slot;
+        if (slot > table[0])
+            slot = 2;   // skip size, count
+    }
+}
+
+
+/***********************************************************************
+* Debugging - support for smart printouts when errors occur
+**********************************************************************/
+
 
 static malloc_zone_t *objc_debug_zone(void)
 {
@@ -835,14 +1168,18 @@ static char *_malloc_append_unsigned(uintptr_t value, unsigned base, char *head)
     return head+1;
 }
 
-static void strcati(char *str, uintptr_t value)
+static void strlcati(char *str, uintptr_t value, size_t bufSize)
 {
+    if ( (bufSize - strlen(str)) < 30)
+        return;
     str = _malloc_append_unsigned(value, 10, str + strlen(str));
     str[0] = '\0';
 }
 
-static void strcatx(char *str, uintptr_t value)
+static void strlcatx(char *str, uintptr_t value, size_t bufSize)
 {
+    if ( (bufSize- strlen(str)) < 30)
+        return;
     str = _malloc_append_unsigned(value, 16, str + strlen(str));
     str[0] = '\0';
 }
@@ -851,7 +1188,7 @@ static void strcatx(char *str, uintptr_t value)
 static Ivar ivar_for_offset(Class cls, vm_address_t offset)
 {
     int i;
-    int ivar_offset;
+    ptrdiff_t ivar_offset;
     Ivar super_ivar, result;
     Ivar *ivars;
     unsigned int ivar_count;
@@ -865,6 +1202,7 @@ static Ivar ivar_for_offset(Class cls, vm_address_t offset)
     ivars = class_copyIvarList(cls, &ivar_count);
     if (ivars && ivar_count) {
         // Try our first ivar. If it's too big, use super's best ivar.
+        // (lose 64-bit precision)
         ivar_offset = ivar_getOffset(ivars[0]);
         if (ivar_offset > offset) result = super_ivar;
         else if (ivar_offset == offset) result = ivars[0];
@@ -892,34 +1230,34 @@ static Ivar ivar_for_offset(Class cls, vm_address_t offset)
     return result;
 }
 
-static void append_ivar_at_offset(char *buf, Class cls, vm_address_t offset)
+static void append_ivar_at_offset(char *buf, Class cls, vm_address_t offset, size_t bufSize)
 {
     Ivar ivar = NULL;
 
     if (offset == 0) return;  // don't bother with isa
     if (offset >= class_getInstanceSize(cls)) {
-        strcat(buf, ".<extra>+");
-        strcati(buf, offset);
+        strlcat(buf, ".<extra>+", bufSize);
+        strlcati(buf, offset, bufSize);
         return;
     }
 
     ivar = ivar_for_offset(cls, offset);
     if (!ivar) {
-        strcat(buf, ".<?>");
+        strlcat(buf, ".<?>", bufSize);
         return;
     }
 
     // fixme doesn't handle structs etc.
     
-    strcat(buf, ".");
+    strlcat(buf, ".", bufSize);
     const char *ivar_name = ivar_getName(ivar);
-    if (ivar_name) strcat(buf, ivar_name);
-    else strcat(buf, "<anonymous ivar>");
+    if (ivar_name) strlcat(buf, ivar_name, bufSize);
+    else strlcat(buf, "<anonymous ivar>", bufSize);
 
     offset -= ivar_getOffset(ivar);
     if (offset > 0) {
-        strcat(buf, "+");
-        strcati(buf, offset);
+        strlcat(buf, "+", bufSize);
+        strlcati(buf, offset, bufSize);
     }
 }
 
@@ -961,698 +1299,64 @@ static const char *cf_class_for_object(void *cfobj)
 static char *name_for_address(auto_zone_t *zone, vm_address_t base, vm_address_t offset, int withRetainCount)
 {
 #define APPEND_SIZE(s) \
-    strcat(buf, "["); \
-    strcati(buf, s); \
-    strcat(buf, "]");
+    strlcat(buf, "[", sizeof(buf)); \
+    strlcati(buf, s, sizeof(buf)); \
+    strlcat(buf, "]", sizeof(buf));
 
-    char buf[500];
+    char buf[1500];
     char *result;
 
     buf[0] = '\0';
 
     size_t size = 
-        auto_zone_size_no_lock(zone, (void *)base);
+        auto_zone_size(zone, (void *)base);
     auto_memory_type_t type = size ? 
-        auto_zone_get_layout_type_no_lock(zone, (void *)base) : AUTO_TYPE_UNKNOWN;
+        auto_zone_get_layout_type(zone, (void *)base) : AUTO_TYPE_UNKNOWN;
     unsigned int refcount = size ? 
-        auto_zone_retain_count_no_lock(zone, (void *)base) : 0;
+        auto_zone_retain_count(zone, (void *)base) : 0;
 
     switch (type) {
     case AUTO_OBJECT_SCANNED: 
     case AUTO_OBJECT_UNSCANNED: {
         const char *class_name = object_getClassName((id)base);
-        if (0 == strcmp(class_name, "NSCFType")) {
-            strcat(buf, cf_class_for_object((void *)base));
+        if ((0 == strcmp(class_name, "__NSCFType")) || (0 == strcmp(class_name, "NSCFType"))) {
+            strlcat(buf, cf_class_for_object((void *)base), sizeof(buf));
         } else {
-            strcat(buf, class_name);
+            strlcat(buf, class_name, sizeof(buf));
         }
         if (offset) {
-            append_ivar_at_offset(buf, object_getClass((id)base), offset);
+            append_ivar_at_offset(buf, object_getClass((id)base), offset, sizeof(buf));
         }
         APPEND_SIZE(size);
         break;
     }
     case AUTO_MEMORY_SCANNED:
-        strcat(buf, "{conservative-block}");
+        strlcat(buf, "{conservative-block}", sizeof(buf));
         APPEND_SIZE(size);
         break;
     case AUTO_MEMORY_UNSCANNED:
-        strcat(buf, "{no-pointers-block}");
+        strlcat(buf, "{no-pointers-block}", sizeof(buf));
         APPEND_SIZE(size);
         break;
     default:
-        strcat(buf, "{unallocated-or-stack}");
+        strlcat(buf, "{unallocated-or-stack}", sizeof(buf));
     } 
     
     if (withRetainCount  &&  refcount > 0) {
-        strcat(buf, " [[refcount=");
-        strcati(buf, refcount);
-        strcat(buf, "]]");
+        strlcat(buf, " [[refcount=", sizeof(buf));
+        strlcati(buf, refcount, sizeof(buf));
+        strlcat(buf, "]]", sizeof(buf));
     }
 
     result = malloc_zone_malloc(objc_debug_zone(), 1 + strlen(buf));
-    strcpy(result, buf);
+    strlcpy(result, buf, sizeof(buf));
     return result;
 
 #undef APPEND_SIZE
 }
 
 
-struct objc_class_recorder_context {
-    malloc_zone_t *zone;
-    void *cls;
-    char *clsname;
-    unsigned int count;
-};
 
-static void objc_class_recorder(task_t task, void *context, unsigned type_mask,
-                                vm_range_t *ranges, unsigned range_count)
-{
-    struct objc_class_recorder_context *ctx = 
-        (struct objc_class_recorder_context *)context;
 
-    vm_range_t *r;
-    vm_range_t *end;
-    for (r = ranges, end = ranges + range_count; r < end; r++) {
-        auto_memory_type_t type = 
-            auto_zone_get_layout_type_no_lock(ctx->zone, (void *)r->address);
-        if (type == AUTO_OBJECT_SCANNED || type == AUTO_OBJECT_UNSCANNED) {
-            // Check if this is an instance of class ctx->cls or some subclass
-            Class cls;
-            Class isa = *(Class *)r->address;
-            for (cls = isa; cls; cls = _class_getSuperclass(cls)) {
-                if (cls == ctx->cls) {
-                    unsigned int rc;
-                    objc_debug_printf("[%p]    :   %s", r->address, _class_getName(isa));
-                    if ((rc = auto_zone_retain_count_no_lock(ctx->zone, (void *)r->address))) {
-                        objc_debug_printf(" [[refcount %u]]", rc);
-                    }
-                    objc_debug_printf("\n");
-                    ctx->count++;
-                    break;
-                }
-            }
-        }
-    }
-}
 
-__private_extern__ void objc_enumerate_class(char *clsname)
-{
-    struct objc_class_recorder_context ctx;
-    ctx.zone = auto_zone();
-    ctx.clsname = clsname;
-    ctx.cls = objc_getClass(clsname);  // GrP fixme may deadlock if classHash lock is already owned
-    ctx.count = 0;
-    if (!ctx.cls) {
-        objc_debug_printf("No class '%s'\n", clsname);
-        return;
-    }
-    objc_debug_printf("\n\nINSTANCES OF CLASS '%s':\n\n", clsname);
-    (*ctx.zone->introspect->enumerator)(mach_task_self(), &ctx, MALLOC_PTR_IN_USE_RANGE_TYPE, (vm_address_t)ctx.zone, NULL, objc_class_recorder);
-    objc_debug_printf("\n%d instances\n\n", ctx.count);
-}
-
-
-static void objc_reference_printer(auto_zone_t *zone, void *ctx, 
-                                   auto_reference_t ref)
-{
-    char *referrer_name = name_for_address(zone, ref.referrer_base, ref.referrer_offset, true);
-    char *referent_name = name_for_address(zone, ref.referent, 0, true);
-
-    objc_debug_printf("[%p%+d -> %p]  :  %s  ->  %s\n", 
-                      ref.referrer_base, ref.referrer_offset, ref.referent,
-                      referrer_name, referent_name);
-
-    malloc_zone_free(objc_debug_zone(), referrer_name);
-    malloc_zone_free(objc_debug_zone(), referent_name);
-}
-
-
-__private_extern__ void objc_print_references(void *referent, void *stack_bottom, int lock)
-{
-    if (lock) {
-        auto_enumerate_references(auto_zone(), referent, 
-                                  objc_reference_printer, stack_bottom, NULL);
-    } else {
-        auto_enumerate_references_no_lock(auto_zone(), referent, 
-                                          objc_reference_printer, stack_bottom, NULL);
-    }
-}
-
-
-
-typedef struct {
-    vm_address_t address;          // of this object
-    int refcount;                  // of this object - nonzero means ROOT
-    int depth;                     // number of links away from referent, or -1
-    auto_reference_t *referrers; // of this object
-    int referrers_used;
-    int referrers_allocated;
-    auto_reference_t back; // reference from this object back toward the target
-    uint32_t ID; // Graphic ID for grafflization
-} blob;
-
-
-typedef struct {
-    blob **list;
-    unsigned int used;
-    unsigned int allocated;
-} blob_queue;
-
-static blob_queue blobs = {NULL, 0, 0};
-static blob_queue untraced_blobs = {NULL, 0, 0};
-static blob_queue root_blobs = {NULL, 0, 0};
-
-
-static void spin(void) {    
-    static time_t t = 0;
-    time_t now = time(NULL);
-    if (t != now) {
-        objc_debug_printf(".");
-        t = now;
-    }
-}
-
-
-static void enqueue_blob(blob_queue *q, blob *b)
-{
-    if (q->used == q->allocated) {
-        q->allocated = q->allocated * 2 + 1;
-        q->list = malloc_zone_realloc(objc_debug_zone(), q->list, q->allocated * sizeof(blob *));
-    }
-    q->list[q->used++] = b;
-}
-
-
-static blob *dequeue_blob(blob_queue *q)
-{
-    blob *result = q->list[0];
-    q->used--;
-    memmove(&q->list[0], &q->list[1], q->used * sizeof(blob *));
-    return result;
-}
-
-
-static blob *blob_for_address(vm_address_t addr)
-{
-    blob *b, **bp, **end;
-
-    if (addr == 0) return NULL;
-
-    for (bp = blobs.list, end = blobs.list+blobs.used; bp < end; bp++) {
-        b = *bp;
-        if (b->address == addr) return b;
-    }
-
-    b = malloc_zone_calloc(objc_debug_zone(), sizeof(blob), 1);
-    b->address = addr;
-    b->depth = -1;
-    b->refcount = auto_zone_size_no_lock(auto_zone(), (void *)addr) ? auto_zone_retain_count_no_lock(auto_zone(), (void *)addr) : 1;
-    enqueue_blob(&blobs, b);
-    return b;
-}
-
-static int blob_exists(vm_address_t addr)
-{
-    blob *b, **bp, **end;
-    for (bp = blobs.list, end = blobs.list+blobs.used; bp < end; bp++) {
-        b = *bp;
-        if (b->address == addr) return 1;
-    }
-    return 0;
-}
-
-
-// Destroy the blobs table and all blob data in it
-static void free_blobs(void)
-{
-    blob *b, **bp, **end;
-    for (bp = blobs.list, end = blobs.list+blobs.used; bp < end; bp++) {
-        b = *bp;
-        malloc_zone_free(objc_debug_zone(), b);
-    }
-    if (blobs.list) malloc_zone_free(objc_debug_zone(), blobs.list);
-}
-
-static void print_chain(auto_zone_t *zone, blob *root)
-{
-    blob *b;
-    for (b = root; b != NULL; b = blob_for_address(b->back.referent)) {
-        char *name;
-        if (b->back.referent) {
-            name = name_for_address(zone, b->address, b->back.referrer_offset, true);
-            objc_debug_printf("[%p%+d]  :  %s  ->\n", b->address, b->back.referrer_offset, name);
-        } else {
-            name = name_for_address(zone, b->address, 0, true);
-            objc_debug_printf("[%p]    :   %s\n", b->address, name);
-        }
-        malloc_zone_free(objc_debug_zone(), name);
-    }
-}
-
-
-static void objc_blob_recorder(auto_zone_t *zone, void *ctx, 
-                               auto_reference_t ref)
-{
-    blob *b = (blob *)ctx;
-
-    spin();
-
-    if (b->referrers_used == b->referrers_allocated) {
-        b->referrers_allocated = b->referrers_allocated * 2 + 1;
-        b->referrers = malloc_zone_realloc(objc_debug_zone(), b->referrers,
-                                             b->referrers_allocated * 
-                                             sizeof(auto_reference_t));
-    }
-
-    b->referrers[b->referrers_used++] = ref;
-    if (!blob_exists(ref.referrer_base)) {
-        enqueue_blob(&untraced_blobs, blob_for_address(ref.referrer_base));
-    }
-}
-
-
-#define INSTANCE_ROOTS 1
-#define HEAP_ROOTS 2
-#define ALL_REFS 3
-static void objc_print_recursive_refs(vm_address_t target, int which, void *stack_bottom, int lock);
-static void grafflize(blob_queue *blobs, int everything);
-
-__private_extern__ void objc_print_instance_roots(vm_address_t target, void *stack_bottom, int lock)
-{
-    objc_print_recursive_refs(target, INSTANCE_ROOTS, stack_bottom, lock);
-}
-
-__private_extern__ void objc_print_heap_roots(vm_address_t target, void *stack_bottom, int lock)
-{
-    objc_print_recursive_refs(target, HEAP_ROOTS, stack_bottom, lock);
-}
-
-__private_extern__ void objc_print_all_refs(vm_address_t target, void *stack_bottom, int lock)
-{
-    objc_print_recursive_refs(target, ALL_REFS, stack_bottom, lock);
-}
-
-static void sort_blobs_by_refcount(blob_queue *blobs)
-{
-    int i, j;
-
-    // simple bubble sort
-    for (i = 0; i < blobs->used; i++) {
-        for (j = i+1; j < blobs->used; j++) {
-            if (blobs->list[i]->refcount < blobs->list[j]->refcount) {
-                blob *temp = blobs->list[i];
-                blobs->list[i] = blobs->list[j];
-                blobs->list[j] = temp;
-            }
-        }
-    }
-}
-
-
-static void sort_blobs_by_depth(blob_queue *blobs)
-{
-    int i, j;
-
-    // simple bubble sort
-    for (i = 0; i < blobs->used; i++) {
-        for (j = i+1; j < blobs->used; j++) {
-            if (blobs->list[i]->depth > blobs->list[j]->depth) {
-                blob *temp = blobs->list[i];
-                blobs->list[i] = blobs->list[j];
-                blobs->list[j] = temp;
-            }
-        }
-    }
-}
-
-
-static void objc_print_recursive_refs(vm_address_t target, int which, void *stack_bottom, int lock)
-{
-    objc_debug_printf("\n   ");  // make spinner draw in a pretty place
-
-    // Construct pointed-to graph (of things eventually pointing to target)
-    
-    enqueue_blob(&untraced_blobs, blob_for_address(target));
-    
-    while (untraced_blobs.used > 0) {
-        blob *b = dequeue_blob(&untraced_blobs);
-        spin();
-        if (lock) {
-            auto_enumerate_references(auto_zone(), (void *)b->address, 
-                                      objc_blob_recorder, stack_bottom, b);
-        } else {
-            auto_enumerate_references_no_lock(auto_zone(), (void *)b->address, 
-                                              objc_blob_recorder, stack_bottom, b);
-        }
-    }
-
-    // Walk pointed-to graph to find shortest paths from roots to target.
-    // This is BREADTH-FIRST order.
-
-    blob_for_address(target)->depth = 0;
-    enqueue_blob(&untraced_blobs, blob_for_address(target));
-    
-    while (untraced_blobs.used > 0) {
-        blob *b = dequeue_blob(&untraced_blobs);
-        blob *other;
-        auto_reference_t *r, *end;
-        int stop = NO;
-
-        spin();
-
-        if (which == ALL_REFS) {
-            // Never stop at roots.
-            stop = NO;
-        } else if (which == HEAP_ROOTS) {
-            // Stop at any root (a block with positive retain count)
-            stop = (b->refcount > 0);
-        } else if (which == INSTANCE_ROOTS) {
-            // Only stop at roots that are instances
-	    auto_memory_type_t type = auto_zone_get_layout_type_no_lock(auto_zone(), (void *)b->address);
-            stop = (b->refcount > 0  &&  (type == AUTO_OBJECT_SCANNED || type == AUTO_OBJECT_UNSCANNED)); // GREG XXX ???
-        }
-
-        // If this object is a root, save it and don't walk its referrers.
-        if (stop) {
-            enqueue_blob(&root_blobs, b);
-            continue;
-        }
-
-        // For any "other object" that points to "this object"
-        // and does not yet have a depth:
-        // (1) other object is one level deeper than this object
-        // (2) (one of) the shortest path(s) from other object to the 
-        //     target goes through this object
-
-        for (r = b->referrers, end = b->referrers + b->referrers_used; 
-             r < end;
-             r++)
-        {
-            other = blob_for_address(r->referrer_base);
-            if (other->depth == -1) {
-                other->depth = b->depth + 1;
-                other->back = *r;
-                enqueue_blob(&untraced_blobs, other);
-            }
-        }
-    }
-
-    {
-        char *name = name_for_address(auto_zone(), target, 0, true);
-        objc_debug_printf("\n\n%d %s %p (%s)\n\n",
-                          (which==ALL_REFS) ? blobs.used : root_blobs.used, 
-                          (which==ALL_REFS) ? "INDIRECT REFS TO" : "ROOTS OF", 
-                          target, name);
-        malloc_zone_free(objc_debug_zone(), name);
-    }
-
-    if (which == ALL_REFS) {
-        // Print all reference objects, biggest refcount first
-        int i;
-        sort_blobs_by_refcount(&blobs);
-        for (i = 0; i < blobs.used; i++) {
-            char *name = name_for_address(auto_zone(), blobs.list[i]->address, 0, true);
-            objc_debug_printf("[%p]    :   %s\n", blobs.list[i]->address, name);
-            malloc_zone_free(objc_debug_zone(), name);
-        }
-    }    
-    else {
-        // Walk back chain from every root to the target, printing every step.
-        
-        while (root_blobs.used > 0) {
-            blob *root = dequeue_blob(&root_blobs);
-            print_chain(auto_zone(), root);
-            objc_debug_printf("\n");
-        }
-    }
-
-    grafflize(&blobs, which == ALL_REFS);
-
-    objc_debug_printf("\ndone\n\n");
-
-    // Clean up
-
-    free_blobs();
-    if (untraced_blobs.list) malloc_zone_free(objc_debug_zone(), untraced_blobs.list);
-    if (root_blobs.list) malloc_zone_free(objc_debug_zone(), root_blobs.list);
-
-    memset(&blobs, 0, sizeof(blobs));
-    memset(&root_blobs, 0, sizeof(root_blobs));
-    memset(&untraced_blobs, 0, sizeof(untraced_blobs));
-}
-
-
-
-struct objc_block_recorder_context {
-    malloc_zone_t *zone;
-    int fd;
-    unsigned int count;
-};
-
-
-static void objc_block_recorder(task_t task, void *context, unsigned type_mask,
-                                vm_range_t *ranges, unsigned range_count)
-{
-    char buf[20];
-    struct objc_block_recorder_context *ctx = 
-        (struct objc_block_recorder_context *)context;
-
-    vm_range_t *r;
-    vm_range_t *end;
-    for (r = ranges, end = ranges + range_count; r < end; r++) {
-        char *name = name_for_address(ctx->zone, r->address, 0, true);
-        buf[0] = '\0';
-        strcatx(buf, r->address);
-
-        write(ctx->fd, "0x", 2);
-        write(ctx->fd, buf, strlen(buf));
-        write(ctx->fd, " ", 1);
-        write(ctx->fd, name, strlen(name));
-        write(ctx->fd, "\n", 1);
-
-        malloc_zone_free(objc_debug_zone(), name);
-        ctx->count++;
-    }
-}
-
-
-__private_extern__ void objc_dump_block_list(const char* path)
-{
-    struct objc_block_recorder_context ctx;
-    char filename[] = "/tmp/blocks-XXXXX.txt";
-
-    ctx.zone = auto_zone();
-    ctx.count = 0;
-    ctx.fd = (path ? open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666) : mkstemps(filename, (int)strlen(strrchr(filename, '.'))));
-
-    objc_debug_printf("\n\nALL AUTO-ALLOCATED BLOCKS\n\n");
-    (*ctx.zone->introspect->enumerator)(mach_task_self(), &ctx, MALLOC_PTR_IN_USE_RANGE_TYPE, (vm_address_t)ctx.zone, NULL, objc_block_recorder);
-    objc_debug_printf("%d blocks written to file\n", ctx.count);
-    objc_debug_printf("open %s\n", (path ? path : filename));
-
-    close(ctx.fd);
-}
-
-
-
-
-static void grafflize_id(int gfile, int ID)
-{
-    char buf[20] = "";
-    char *c;
-
-    strcati(buf, ID);
-    c = "<key>ID</key><integer>";
-    write(gfile, c, strlen(c));
-    write(gfile, buf, strlen(buf));
-    c = "</integer>";
-    write(gfile, c, strlen(c));
-}
-
-
-// head = REFERENT end = arrow
-// tail = REFERRER end = no arrow
-static void grafflize_reference(int gfile, auto_reference_t reference,  
-                                int ID, int important)
-{
-    blob *referrer = blob_for_address(reference.referrer_base);
-    blob *referent = blob_for_address(reference.referent);
-    char *c;
-
-    // line
-    c = "<dict><key>Class</key><string>LineGraphic</string>";
-    write(gfile, c, strlen(c));
-
-    // id
-    grafflize_id(gfile, ID);
-
-    // head = REFERENT
-    c = "<key>Head</key><dict>";
-    write(gfile, c, strlen(c));
-    grafflize_id(gfile, referent->ID);
-    c = "</dict>";
-    write(gfile, c, strlen(c));
-
-    // tail = REFERRER
-    c = "<key>Tail</key><dict>";
-    write(gfile, c, strlen(c));
-    grafflize_id(gfile, referrer->ID);
-    c = "</dict>";
-    write(gfile, c, strlen(c));
-
-    // style - head arrow, thick line if important
-    c = "<key>Style</key><dict><key>stroke</key><dict>"
-        "<key>HeadArrow</key><string>FilledArrow</string>"
-        "<key>LineType</key><integer>1</integer>";
-    write(gfile, c, strlen(c));
-    if (important) {
-        c = "<key>Width</key><real>3</real>";
-        write(gfile, c, strlen(c));
-    }
-    c = "</dict></dict>";
-    write(gfile, c, strlen(c));
-    
-    // end line
-    c = "</dict>";
-    write(gfile, c, strlen(c));
-}
-
-
-static void grafflize_blob(int gfile, blob *b) 
-{
-    // fixme include ivar names too
-    char *name = name_for_address(auto_zone(), b->address, 0, false);
-    int width = 30 + (int)strlen(name)*6;
-    int height = 40;
-    char buf[40] = "";
-    char *c;
-    
-    // rectangle
-    c = "<dict>"
-        "<key>Class</key><string>ShapedGraphic</string>"
-        "<key>Shape</key><string>Rectangle</string>";
-    write(gfile, c, strlen(c));
-    
-    // id
-    grafflize_id(gfile, b->ID);
-    
-    // bounds
-    // order vertically by depth
-    c = "<key>Bounds</key><string>{{0,";
-    write(gfile, c, strlen(c));
-    buf[0] = '\0';
-    strcati(buf, b->depth*60);
-    write(gfile, buf, strlen(buf));
-    c = "},{";
-    write(gfile, c, strlen(c));
-    buf[0] = '\0';
-    strcati(buf, width);
-    strcat(buf, ",");
-    strcati(buf, height);
-    write(gfile, buf, strlen(buf));
-    c = "}}</string>";
-    write(gfile, c, strlen(c));
-    
-    // label
-    c = "<key>Text</key><dict><key>Text</key>"
-        "<string>{\\rtf1\\mac\\ansicpg10000\\cocoartf102\n"
-        "{\\fonttbl\\f0\\fswiss\\fcharset77 Helvetica;\\fonttbl\\f1\\fswiss\\fcharset77 Helvetica-Bold;}\n"
-        "{\\colortbl;\\red255\\green255\\blue255;}\n"
-        "\\pard\\tx560\\tx1120\\tx1680\\tx2240\\tx3360\\tx3920\\tx4480\\tx5040\\tx5600\\tx6160\\tx6720\\qc\n"
-        "\\f0\\fs20 \\cf0 ";
-    write(gfile, c, strlen(c));
-    write(gfile, name, strlen(name));
-    strcpy(buf, "\\\n0x");
-    strcatx(buf, b->address);
-    write(gfile, buf, strlen(buf));
-    c = "}</string></dict>";
-    write(gfile, c, strlen(c));
-
-    // styles
-    c = "<key>Style</key><dict>";
-    write(gfile, c, strlen(c));
-
-    // no shadow
-    c = "<key>shadow</key><dict><key>Draws</key><string>NO</string></dict>";
-    write(gfile, c, strlen(c));
-
-    // fat border if refcount > 0
-    if (b->refcount > 0) {
-        c = "<key>stroke</key><dict><key>Width</key><real>4</real></dict>";
-        write(gfile, c, strlen(c));
-    }
-
-    // end styles
-    c = "</dict>";
-    write(gfile, c, strlen(c));
-
-    // done
-    c = "</dict>\n";
-    write(gfile, c, strlen(c));
-    
-    malloc_zone_free(objc_debug_zone(), name);
-}
-
-
-#define gheader "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE plist PUBLIC \"-//Apple Computer//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\"><plist version=\"1.0\"><dict><key>GraphDocumentVersion</key><integer>3</integer><key>ReadOnly</key><string>NO</string><key>GraphicsList</key><array>\n"
-
-#define gfooter "</array></dict></plist>\n"
-
-
-static void grafflize(blob_queue *blobs, int everything)
-{
-    // Don't require linking to Foundation!
-    int i;
-    int gfile;
-    int nextid = 1;
-    char filename[] = "/tmp/gc-XXXXX.graffle";
-
-    // Open file
-    gfile = mkstemps(filename, (int)strlen(strrchr(filename, '.')));
-    if (gfile < 0) {
-        objc_debug_printf("couldn't create a graffle file in /tmp/ (errno %d)\n", errno);
-        return;
-    }
-
-    // Write header
-    write(gfile, gheader, strlen(gheader));
-
-    // Write a rectangle for each blob
-    sort_blobs_by_depth(blobs);
-    for (i = 0; i < blobs->used; i++) {
-        blob *b = blobs->list[i];
-        b->ID = nextid++;
-        if (everything  ||  b->depth >= 0) {
-            grafflize_blob(gfile, b);
-        }
-    }
-
-    for (i = 0; i < blobs->used; i++) {
-        int j;
-        blob *b = blobs->list[i];
-
-        if (everything) {
-            // Write an arrow for each reference
-            // Use big arrows for backreferences
-            for (j = 0; j < b->referrers_used; j++) {
-                int is_back_ref = (b->referrers[i].referent == b->back.referent  &&  b->referrers[i].referrer_offset == b->back.referrer_offset  &&  b->referrers[i].referrer_base == b->back.referrer_base);
-                     
-                grafflize_reference(gfile, b->referrers[j], nextid++, 
-                                    is_back_ref);
-            }
-        }
-        else {
-            // Write an arrow for each backreference
-            if (b->depth > 0) {
-                grafflize_reference(gfile, b->back, nextid++, false);
-            }
-        }
-    }
-
-    // Write footer and close
-    write(gfile, gfooter, strlen(gfooter));
-    close(gfile);
-    objc_debug_printf("wrote object graph (%d objects)\nopen %s\n", 
-                      blobs->used, filename);
-}
+#endif

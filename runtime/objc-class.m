@@ -156,24 +156,8 @@
 * Imports.
 **********************************************************************/
 
-#include <mach/mach.h>
-#include <mach/thread_status.h>
-#include <mach-o/ldsyms.h>
-#include <mach-o/dyld.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/uio.h>
-#include <sys/fcntl.h>
-#include <sys/mman.h>
-
-#import "objc.h"
-#import "Object.h"
-#import "objc-private.h"
-#import "hashtable2.h"
-#import "maptable.h"
-#import "objc-initialize.h"
-#import "objc-auto.h"
+#include "objc-private.h"
+#include <objc/message.h>
 
 
 /* overriding the default object allocation and error handling routines */
@@ -191,9 +175,6 @@ OBJC_EXPORT id	(*_zoneCopy)(id, size_t, void *);
 * Function prototypes internal to this module.
 **********************************************************************/
 
-static void		_freedHandler			(id self, SEL sel);
-static void		_nonexistentHandler		(id self, SEL sel);
-static int		LogObjCMessageSend		(BOOL isClassMethod, const char * objectsClass, const char * implementingClass, SEL selector);
 static IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel);
 static Method look_up_method(Class cls, SEL sel, BOOL withCache, BOOL withResolver);
 
@@ -202,12 +183,19 @@ static Method look_up_method(Class cls, SEL sel, BOOL withCache, BOOL withResolv
 * Static data internal to this module.
 **********************************************************************/
 
+#if !TARGET_OS_WIN32  &&  !defined(__arm__)
+#   define MESSAGE_LOGGING
+#endif
+
+#if defined(MESSAGE_LOGGING)
 // Method call logging
+static int		LogObjCMessageSend		(BOOL isClassMethod, const char * objectsClass, const char * implementingClass, SEL selector);
 typedef int	(*ObjCLogProc)(BOOL, const char *, const char *, SEL);
 
 static int			objcMsgLogFD		= (-1);
 static ObjCLogProc	objcMsgLogProc		= &LogObjCMessageSend;
 static int			objcMsgLogEnabled	= 0;
+#endif
 
 /***********************************************************************
 * Information about multi-thread support:
@@ -236,10 +224,11 @@ Class object_getClass(id obj)
 **********************************************************************/
 Class object_setClass(id obj, Class cls)
 {
-    // fixme could check obj's block size vs. cls's instance size
     if (obj) {
-        Class old = obj->isa;
-        obj->isa = cls;
+        Class old;
+        do {
+            old = obj->isa;
+        } while (! OSAtomicCompareAndSwapPtrBarrier(old, cls, (void*)&obj->isa));
         return old;
     }
     else return Nil;
@@ -331,8 +320,8 @@ static void object_cxxDestructFromClass(id obj, Class cls)
     for ( ; cls != NULL; cls = _class_getSuperclass(cls)) {
         if (!_class_hasCxxStructorsNoSuper(cls)) continue; 
         dtor = (void(*)(id))
-            lookupMethodInClassAndLoadCache(cls, cxx_destruct_sel);
-        if (dtor != (void(*)(id))&_objc_msgForward) {
+            lookupMethodInClassAndLoadCache(cls, SEL_cxx_destruct);
+        if (dtor != (void(*)(id))&_objc_msgForward_internal) {
             if (PrintCxxCtors) {
                 _objc_inform("CXX: calling C++ destructors for class %s", 
                              _class_getName(cls));
@@ -382,8 +371,8 @@ static BOOL object_cxxConstructFromClass(id obj, Class cls)
 
     // Find this class's ctor, if any.
     if (!_class_hasCxxStructorsNoSuper(cls)) return YES;  // no ctor - ok
-    ctor = (id(*)(id))lookupMethodInClassAndLoadCache(cls, cxx_construct_sel);
-    if (ctor == (id(*)(id))&_objc_msgForward) return YES;  // no ctor - ok
+    ctor = (id(*)(id))lookupMethodInClassAndLoadCache(cls, SEL_cxx_construct);
+    if (ctor == (id(*)(id))&_objc_msgForward_internal) return YES;  // no ctor - ok
     
     // Call this class's ctor.
     if (PrintCxxCtors) {
@@ -413,11 +402,6 @@ __private_extern__ BOOL object_cxxConstruct(id obj)
 }
 
 
-@interface objc_resolver
-+(BOOL)resolveClassMethod:(SEL)sel;
-+(BOOL)resolveInstanceMethod:(SEL)sel;
-@end
-
 /***********************************************************************
 * _class_resolveClassMethod
 * Call +resolveClassMethod and return the method added or NULL.
@@ -430,7 +414,7 @@ static Method _class_resolveClassMethod(Class cls, SEL sel)
     Method meth = NULL;
     Class clsInstance;
 
-    if (!look_up_method(cls, @selector(resolveClassMethod:), 
+    if (!look_up_method(cls, SEL_resolveClassMethod, 
                         YES /*cache*/, NO /*resolver*/))
     {
         return NULL;
@@ -440,13 +424,13 @@ static Method _class_resolveClassMethod(Class cls, SEL sel)
     if (strncmp(_class_getName(cls), "_%", 2) == 0) {
         // Posee's meta's name is smashed and isn't in the class_hash, 
         // so objc_getClass doesn't work.
-        char *baseName = strchr(_class_getName(cls), '%'); // get posee's real name
-        clsInstance = objc_getClass(baseName);
+        const char *baseName = strchr(_class_getName(cls), '%'); // get posee's real name
+        clsInstance = (Class)objc_getClass(baseName);
     } else {
-        clsInstance = objc_getClass(_class_getName(cls));
+        clsInstance = (Class)objc_getClass(_class_getName(cls));
     }
     
-    resolved = [clsInstance resolveClassMethod:sel];
+    resolved = ((BOOL(*)(id, SEL, SEL))objc_msgSend)((id)clsInstance, SEL_resolveClassMethod, sel);
 
     if (resolved) {
         // +resolveClassMethod adds to self->isa
@@ -479,13 +463,13 @@ static Method _class_resolveInstanceMethod(Class cls, SEL sel)
     BOOL resolved;
     Method meth = NULL;
 
-    if (!look_up_method(((id)cls)->isa, @selector(resolveInstanceMethod:), 
+    if (!look_up_method(((id)cls)->isa, SEL_resolveInstanceMethod, 
                         YES /*cache*/, NO /*resolver*/))
     {
         return NULL;
     }
 
-    resolved = [cls resolveInstanceMethod:sel];
+    resolved = ((BOOL(*)(id, SEL, SEL))objc_msgSend)((id)cls, SEL_resolveInstanceMethod, sel);
 
     if (resolved) {
         // +resolveClassMethod adds to self
@@ -514,7 +498,7 @@ static Method _class_resolveInstanceMethod(Class cls, SEL sel)
 * the method added or NULL. 
 * Assumes the method doesn't exist already.
 **********************************************************************/
-static Method _class_resolveMethod(Class cls, SEL sel)
+__private_extern__ Method _class_resolveMethod(Class cls, SEL sel)
 {
     Method meth = NULL;
 
@@ -550,8 +534,8 @@ static Method look_up_method(Class cls, SEL sel,
     Method meth = NULL;
 
     if (withCache) {
-        meth = _cache_getMethod(cls, sel, &_objc_msgForward);
-        if (!meth  &&  (IMP)_objc_msgForward == _cache_getImp(cls, sel)) {
+        meth = _cache_getMethod(cls, sel, &_objc_msgForward_internal);
+        if (meth == (Method)1) {
             // Cache contains forward:: . Stop searching.
             return NULL;
         }
@@ -573,8 +557,7 @@ Method class_getInstanceMethod(Class cls, SEL sel)
 {
     if (!cls  ||  !sel) return NULL;
 
-    /* Cache is not used because historically it wasn't. */
-    return look_up_method(cls, sel, NO/*cache*/, YES/*resolver*/);
+    return look_up_method(cls, sel, YES/*cache*/, YES/*resolver*/);
 }
 
 /***********************************************************************
@@ -660,6 +643,21 @@ const char *property_getAttributes(Property prop)
 
 
 /***********************************************************************
+* gdb_objc_class_changed
+* Tell gdb that a class changed. Currently used for OBJC2 ivar layouts only
+**********************************************************************/
+void gdb_objc_class_changed(Class cls, unsigned long changes, const char *classname)
+{
+    // do nothing; gdb sets a breakpoint here to listen
+#if TARGET_OS_WIN32
+    __asm { }
+#else
+    asm("");
+#endif
+}
+
+
+/***********************************************************************
 * _objc_flush_caches.  Flush the caches of the specified class and any
 * of its subclasses.  If cls is a meta-class, only meta-class (i.e.
 * class method) caches are flushed.  If cls is an instance-class, both
@@ -668,25 +666,6 @@ const char *property_getAttributes(Property prop)
 void _objc_flush_caches(Class cls)
 {
     flush_caches (cls, YES);
-}
-
-
-/***********************************************************************
-* _freedHandler.
-**********************************************************************/
-static void _freedHandler(id obj, SEL sel)
-{
-    __objc_error (obj, "message %s sent to freed object=%p", 
-                  sel_getName(sel), obj);
-}
-
-/***********************************************************************
-* _nonexistentHandler.
-**********************************************************************/
-static void _nonexistentHandler(id obj, SEL sel)
-{
-    __objc_error (obj, "message %s sent to non-existent object=%p", 
-                  sel_getName(sel), obj);
 }
 
 
@@ -703,19 +682,14 @@ BOOL class_respondsToMethod(Class cls, SEL sel)
 
 BOOL class_respondsToSelector(Class cls, SEL sel)
 {
-    Method meth;
+    IMP imp;
 
     if (!sel  ||  !cls) return NO;
 
-    meth = look_up_method(cls, sel, YES/*cache*/, YES/*resolver*/);
-    if (meth) {
-        _cache_fill(cls, meth, sel);
-        return YES;
-    } else {
-        // Cache negative result
-        _cache_addForwardEntry(cls, sel);
-        return NO;
-    }
+    // Avoids +initialize because it historically did so.
+    // We're not returning a callable IMP anyway.
+    imp = lookUpMethod(cls, sel, NO/*initialize*/, YES/*cache*/);
+    return (imp != (IMP)_objc_msgForward_internal) ? YES : NO;
 }
 
 
@@ -730,7 +704,7 @@ IMP class_lookupMethod(Class cls, SEL sel)
 
     // No one responds to zero!
     if (!sel) {
-        __objc_error(cls, "invalid selector (null)");
+        __objc_error((id)cls, "invalid selector (null)");
     }
 
     return class_getMethodImplementation(cls, sel);
@@ -742,14 +716,13 @@ IMP class_getMethodImplementation(Class cls, SEL sel)
 
     if (!cls  ||  !sel) return NULL;
 
-    // fixme _objc_msgForward does not conform to ABI and cannot be 
-    // called externally
+    imp = lookUpMethod(cls, sel, YES/*initialize*/, YES/*cache*/);
 
-    imp = _cache_getImp(cls, sel);
-    if (!imp) {
-        // Handle cache miss
-        imp = _class_lookupMethodAndLoadCache (cls, sel);
+    // Translate forwarding function to C-callable external version
+    if (imp == (IMP)&_objc_msgForward_internal) {
+        return (IMP)&_objc_msgForward;
     }
+
     return imp;
 }
 
@@ -757,7 +730,11 @@ IMP class_getMethodImplementation(Class cls, SEL sel)
 IMP class_getMethodImplementation_stret(Class cls, SEL sel)
 {
     IMP imp = class_getMethodImplementation(cls, sel);
-    // fixme check for forwarding and use stret forwarder instead
+
+    // Translate forwarding function to struct-returning version
+    if (imp == (IMP)&_objc_msgForward /* not _internal! */) {
+        return (IMP)&_objc_msgForward_stret;
+    }
     return imp;
 }
 
@@ -769,6 +746,7 @@ __private_extern__ id _objc_ignored_method(id self, SEL _cmd) { return self; }
 /***********************************************************************
 * instrumentObjcMessageSends/logObjcMessageSends.
 **********************************************************************/
+#if defined(MESSAGE_LOGGING)
 static int	LogObjCMessageSend (BOOL			isClassMethod,
                                const char *	objectsClass,
                                const char *	implementingClass,
@@ -796,7 +774,10 @@ static int	LogObjCMessageSend (BOOL			isClassMethod,
             implementingClass,
             (char *) selector);
 
+    static OSSpinLock lock = OS_SPINLOCK_INIT;
+    OSSpinLockLock(&lock);
     write (objcMsgLogFD, buf, strlen(buf));
+    OSSpinLockUnlock(&lock);
 
     // Tell caller to not cache the method
     return 0;
@@ -837,7 +818,7 @@ __private_extern__ void	logObjcMessageSends      (ObjCLogProc	logProc)
     if (objcMsgLogFD != (-1))
         fsync (objcMsgLogFD);
 }
-
+#endif
 
 /***********************************************************************
 * log_and_fill_cache
@@ -845,9 +826,10 @@ __private_extern__ void	logObjcMessageSends      (ObjCLogProc	logProc)
 * cls is the method whose cache should be filled. 
 * implementer is the class that owns the implementation in question.
 **********************************************************************/
-static void
+__private_extern__ void
 log_and_fill_cache(Class cls, Class implementer, Method meth, SEL sel)
 {
+#if defined(MESSAGE_LOGGING)
     BOOL cacheIt = YES;
 
     if (objcMsgLogEnabled) {
@@ -856,90 +838,125 @@ log_and_fill_cache(Class cls, Class implementer, Method meth, SEL sel)
                                   _class_getName(implementer), 
                                   sel);
     }
-    if (cacheIt) {
+    if (cacheIt)
+#endif
         _cache_fill (cls, meth, sel);
-    }    
 }
 
 
 /***********************************************************************
 * _class_lookupMethodAndLoadCache.
-*
-* Called only from objc_msgSend, objc_msgSendSuper and class_lookupMethod.
+* Method lookup for dispatchers ONLY. OTHER CODE SHOULD USE lookUpMethod().
+* This lookup avoids optimistic cache scan because the dispatcher 
+* already tried that.
 **********************************************************************/
 __private_extern__ IMP _class_lookupMethodAndLoadCache(Class cls, SEL sel)
 {
+    return lookUpMethod(cls, sel, YES/*initialize*/, NO/*cache*/);
+}
+
+
+/***********************************************************************
+* lookUpMethod.
+* The standard method lookup. 
+* initialize==NO tries to avoid +initialize (but sometimes fails)
+* cache==NO skips optimistic unlocked lookup (but uses cache elsewhere)
+* Most callers should use initialize==YES and cache==YES.
+* May return _objc_msgForward_internal. IMPs destined for external use 
+*   must be converted to _objc_msgForward or _objc_msgForward_stret.
+**********************************************************************/
+__private_extern__ IMP lookUpMethod(Class cls, SEL sel, 
+                                    BOOL initialize, BOOL cache)
+{
     Class curClass;
     IMP methodPC = NULL;
+    Method meth;
+    BOOL triedResolver = NO;
 
-    // Check for freed class
-    if (cls == _class_getFreedObjectClass())
-        return (IMP) _freedHandler;
-
-    // Check for nonexistent class
-    if (cls == _class_getNonexistentObjectClass())
-        return (IMP) _nonexistentHandler;
-
-#if __OBJC2__
-    // fixme hack
-    _class_realize(cls);
-#endif
-
-    if (!_class_isInitialized(cls)) {
-        _class_initialize (cls);
-        // If sel == initialize, _class_initialize will send +initialize and 
-        // then the messenger will send +initialize again after this 
-        // procedure finishes. Of course, if this is not being called 
-        // from the messenger then it won't happen. 2778172
+    // Optimistic cache lookup
+    if (cache) {
+        methodPC = _cache_getImp(cls, sel);
+        if (methodPC) return methodPC;    
     }
 
-    // Outer loop - search the caches and method lists of the
-    // class and its super-classes
-    for (curClass = cls; curClass; curClass = _class_getSuperclass(curClass))
-    {
-        // Beware of thread-unsafety and double-freeing of forward:: 
-        // entries here! See note in "Method cache locking" above.
-        // The upshot is that _cache_getMethod() will return NULL 
-        // instead of returning a forward:: entry.
-        Method meth = _cache_getMethod(curClass, sel, &_objc_msgForward);
-        if (meth) {
-            // Found the method in this class or a superclass.
-            // Cache the method in this class, unless we just found it in 
-            // this class's cache.
-            if (curClass != cls) {
-                _cache_fill (cls, meth, sel);
-            }
+    // realize, +initialize, and any special early exit
+    methodPC = prepareForMethodLookup(cls, sel, initialize);
+    if (methodPC) return methodPC;
 
-            methodPC = method_getImplementation(meth);
-            break;
+
+    // The lock is held to make method-lookup + cache-fill atomic 
+    // with respect to method addition. Otherwise, a category could 
+    // be added but ignored indefinitely because the cache was re-filled 
+    // with the old value after the cache flush on behalf of the category.
+ retry:
+    lockForMethodLookup();
+
+    // Try this class's cache.
+
+    methodPC = _cache_getImp(cls, sel);
+    if (methodPC) goto done;
+
+    // Try this class's method lists.
+
+    meth = _class_getMethodNoSuper_nolock(cls, sel);
+    if (meth) {
+        log_and_fill_cache(cls, cls, meth, sel);
+        methodPC = method_getImplementation(meth);
+        goto done;
+    }
+
+    // Try superclass caches and method lists.
+
+    curClass = cls;
+    while ((curClass = _class_getSuperclass(curClass))) {
+        // Superclass cache.
+        meth = _cache_getMethod(curClass, sel, &_objc_msgForward_internal);
+        if (meth) {
+            if (meth != (Method)1) {
+                // Found the method in a superclass. Cache it in this class.
+                log_and_fill_cache(cls, curClass, meth, sel);
+                methodPC = method_getImplementation(meth);
+                goto done;
+            }
+            else {
+                // Found a forward:: entry in a superclass.
+                // Stop searching, but don't cache yet; call method 
+                // resolver for this class first.
+                break;
+            }
         }
 
-        // Cache scan failed. Search method list.
-
-        meth = _class_getMethodNoSuper(curClass, sel);
+        // Superclass method list.
+        meth = _class_getMethodNoSuper_nolock(curClass, sel);
         if (meth) {
             log_and_fill_cache(cls, curClass, meth, sel);
             methodPC = method_getImplementation(meth);
-            break;
+            goto done;
         }
     }
 
-    if (methodPC == NULL) {
-        // Class and superclasses do not respond -- try resolve handler
-        Method meth = _class_resolveMethod(cls, sel);
-        if (meth) {
-            // GrP fixme this isn't quite right
-            log_and_fill_cache(cls, cls, meth, sel);
-            methodPC = method_getImplementation(meth);
-        }        
+    // No implementation found. Try method resolver once.
+
+    if (!triedResolver) {
+        unlockForMethodLookup();
+        _class_resolveMethod(cls, sel);
+        // Don't cache the result; we don't hold the lock so it may have 
+        // changed already. Re-do the search from scratch instead.
+        triedResolver = YES;
+        goto retry;
     }
 
-    if (methodPC == NULL) {
-        // Class and superclasses do not respond and
-        // resolve handler didn't help -- use forwarding
-        _cache_addForwardEntry(cls, sel);
-        methodPC = &_objc_msgForward;
-    }
+    // No implementation found, and method resolver didn't help. 
+    // Use forwarding.
+
+    _cache_addForwardEntry(cls, sel);
+    methodPC = &_objc_msgForward_internal;
+
+ done:
+    unlockForMethodLookup();
+
+    // paranoia: look for ignored selectors with non-ignored implementations
+    assert(!(sel == (SEL)kIgnore  &&  methodPC != (IMP)&_objc_ignored_method));
 
     return methodPC;
 }
@@ -954,6 +971,11 @@ static IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel)
 {
     Method meth;
     IMP imp;
+
+    // fixme this still has the method list vs method cache race 
+    // because it doesn't hold a lock across lookup+cache_fill, 
+    // but it's only used for .cxx_construct/destruct and we assume 
+    // categories don't change them.
 
     // Search cache first.
     imp = _cache_getImp(cls, sel);
@@ -970,7 +992,7 @@ static IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel)
     } else {
         // Miss in method list. Cache objc_msgForward.
         _cache_addForwardEntry(cls, sel);
-        return &_objc_msgForward;
+        return &_objc_msgForward_internal;
     }
 }
 
@@ -979,30 +1001,9 @@ static IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel)
 * _objc_create_zone.
 **********************************************************************/
 
-void *		_objc_create_zone		   (void)
+void *_objc_create_zone(void)
 {
     return malloc_default_zone();
-}
-
-
-/***********************************************************************
-* _objc_internal_zone.
-* Malloc zone for internal runtime data.
-* By default this is the default malloc zone, but a dedicated zone is 
-* used if environment variable OBJC_USE_INTERNAL_ZONE is set.
-**********************************************************************/
-__private_extern__ malloc_zone_t *_objc_internal_zone(void)
-{
-    static malloc_zone_t *z = (malloc_zone_t *)-1;
-    if (z == (malloc_zone_t *)-1) {
-        if (UseInternalZone) {
-            z = malloc_create_zone(vm_page_size, 0);
-            malloc_set_zone_name(z, "ObjC");
-        } else {
-            z = malloc_default_zone();
-        }
-    }
-    return z;
 }
 
 
@@ -1033,9 +1034,11 @@ __private_extern__ void *_realloc_internal(void *ptr, size_t size)
 
 __private_extern__ char *_strdup_internal(const char *str)
 {
+    size_t len;
+    char *dup;
     if (!str) return NULL;
-    size_t len = strlen(str);
-    char *dup = malloc_zone_malloc(_objc_internal_zone(), len + 1);
+    len = strlen(str);
+    dup = malloc_zone_malloc(_objc_internal_zone(), len + 1);
     memcpy(dup, str, len + 1);
     return dup;
 }
@@ -1064,6 +1067,15 @@ __private_extern__ void _free_internal(void *ptr)
 }
 
 
+__private_extern__ Class _calloc_class(size_t size)
+{
+#if !defined(NO_GC)
+    if (UseGC) return (Class) malloc_zone_calloc(gc_zone, 1, size);
+#endif
+    return (Class) _calloc_internal(1, size);
+}
+
+
 const char *class_getName(Class cls)
 {
     return _class_getName(cls);
@@ -1083,15 +1095,6 @@ BOOL class_isMetaClass(Class cls)
 size_t class_getInstanceSize(Class cls)
 {
     return _class_getInstanceSize(cls);
-}
-
-void method_exchangeImplementations(Method m1, Method m2)
-{
-    // fixme thread safe
-    IMP m1_imp;
-    if (!m1  ||  !m2) return;
-    m1_imp = method_getImplementation(m1);
-    method_setImplementation(m1, method_setImplementation(m2, m1_imp));
 }
 
 
@@ -1125,7 +1128,7 @@ unsigned int method_getArgumentInfo(Method m, int arg,
 
 void method_getReturnType(Method m, char *dst, size_t dst_len)
 {
-    return encoding_getReturnType(method_getTypeEncoding(m), dst, dst_len);
+    encoding_getReturnType(method_getTypeEncoding(m), dst, dst_len);
 }
 
 
@@ -1138,14 +1141,64 @@ char * method_copyReturnType(Method m)
 void method_getArgumentType(Method m, unsigned int index, 
                             char *dst, size_t dst_len)
 {
-    return encoding_getArgumentType(method_getTypeEncoding(m),
-                                    index, dst, dst_len);
+    encoding_getArgumentType(method_getTypeEncoding(m),
+                             index, dst, dst_len);
 }
 
 
 char * method_copyArgumentType(Method m, unsigned int index)
 {
     return encoding_copyArgumentType(method_getTypeEncoding(m), index);
+}
+
+
+/***********************************************************************
+* objc_constructInstance
+* Creates an instance of `cls` at the location pointed to by `bytes`. 
+* `bytes` must point to at least class_getInstanceSize(cls) bytes of 
+*   well-aligned zero-filled memory.
+* The new object's isa is set. Any C++ constructors are called.
+* Returns `bytes` if successful. Returns nil if `cls` or `bytes` is 
+*   NULL, or if C++ constructors fail.
+**********************************************************************/
+id objc_constructInstance(Class cls, void *bytes) 
+{
+    id obj;
+
+    if (!cls  ||  !bytes) return nil;
+    obj = (id)bytes;
+
+    // Set the isa pointer
+    obj->isa = cls;
+
+    // Call C++ constructors, if any.
+    if (!object_cxxConstruct(obj)) {
+        // Some C++ constructor threw an exception. 
+        return nil;
+    }
+
+    return obj;
+}
+
+
+/***********************************************************************
+* objc_destructInstance
+* Destroys an instance without freeing memory. 
+* Any C++ destructors are called. Any associative references are removed.
+* Returns `obj`. Does nothing if `obj` is nil.
+**********************************************************************/
+void *objc_destructInstance(id obj) 
+{
+    if (obj) {
+        object_cxxDestruct(obj);
+
+        // don't call this if the class has never had associative references.
+        if (_class_instancesHaveAssociatedObjects(obj->isa)) {
+            _object_remove_assocations(obj);
+        }
+    }
+
+    return obj;
 }
 
 
@@ -1159,6 +1212,7 @@ __private_extern__ id
 _internal_class_createInstanceFromZone(Class cls, size_t extraBytes,
                                        void *zone)
 {
+    void *bytes;
     id obj;
     size_t size;
 
@@ -1167,26 +1221,31 @@ _internal_class_createInstanceFromZone(Class cls, size_t extraBytes,
 
     // Allocate and initialize
     size = _class_getInstanceSize(cls) + extraBytes;
+
+    // CF requires all objects be at least 16 bytes.
+    if (size < 16) size = 16;
+
+#if !defined(NO_GC)
     if (UseGC) {
-        obj = (id) auto_zone_allocate_object(gc_zone, size, 
-                                             AUTO_OBJECT_SCANNED, false, true);
-    } else if (zone) {
-        obj = (id) malloc_zone_calloc (zone, 1, size);
+        bytes = auto_zone_allocate_object(gc_zone, size,
+                                          AUTO_OBJECT_SCANNED, 0, 1);
+    } else 
+#endif
+    if (zone) {
+        bytes = malloc_zone_calloc (zone, 1, size);
     } else {
-        obj = (id) calloc(1, size);
+        bytes = calloc(1, size);
     }
-    if (!obj) return nil;
+    if (!bytes) return nil;
 
-    // Set the isa pointer
-    obj->isa = cls;
-
-    // Call C++ constructors, if any.
-    if (!object_cxxConstruct(obj)) {
-        // Some C++ constructor threw an exception. 
+    obj = objc_constructInstance(cls, bytes);
+    if (!obj) {
+#if !defined(NO_GC)
         if (UseGC) {
-            auto_zone_retain(gc_zone, obj);  // gc free expects retain count==1
+            auto_zone_retain(gc_zone, bytes);  // gc free expects rc==1
         }
-        free(obj);
+#endif
+        free(bytes);
         return nil;
     }
 
@@ -1198,14 +1257,42 @@ __private_extern__ id
 _internal_object_dispose(id anObject) 
 {
     if (anObject==nil) return nil;
-    object_cxxDestruct(anObject);
+
+    objc_destructInstance(anObject);
+    
+#if !defined(NO_GC)
     if (UseGC) {
-        auto_zone_retain(gc_zone, anObject); // gc free expects retain count==1
-    } else {
+        auto_zone_retain(gc_zone, anObject); // gc free expects rc==1
+    } else 
+#endif
+    {
+#if !__OBJC2__
         // only clobber isa for non-gc
         anObject->isa = _objc_getFreedObjectClass (); 
+#endif
     }
     free(anObject);
     return nil;
 }
 
+
+/***********************************************************************
+* inform_duplicate. Complain about duplicate class implementations.
+**********************************************************************/
+__private_extern__ void 
+inform_duplicate(const char *name, Class oldCls, Class cls)
+{
+#if TARGET_OS_WIN32
+    _objc_inform ("Class %s is implemented in two different images.", name);
+#else
+    const header_info *oldHeader = _headerForClass(oldCls);
+    const header_info *newHeader = _headerForClass(cls);
+    const char *oldName = oldHeader ? _nameForHeader(oldHeader->mhdr) : "??";
+    const char *newName = newHeader ? _nameForHeader(newHeader->mhdr) : "??";
+        
+    _objc_inform ("Class %s is implemented in both %s and %s. "
+                  "One of the two will be used. "
+                  "Which one is undefined.",
+                  name, oldName, newName);
+#endif
+}

@@ -25,13 +25,50 @@
  * 	Copyright 1988-2001, NeXT Software, Inc., Apple Computer, Inc.
  */
 
+#include "objc-private.h"
 
-#include <stdarg.h>
-#include <unistd.h>
-#include <syslog.h>
-#include <sys/fcntl.h>
+#if TARGET_OS_WIN32
 
-#import "objc-private.h"
+#include <conio.h>
+
+__private_extern__ void _objc_inform_on_crash(const char *fmt, ...)
+{
+}
+
+__private_extern__ void _objc_inform(const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    _vcprintf(fmt, args);
+    va_end(args);
+    _cprintf("\n");
+}
+
+__private_extern__ void _objc_fatal(const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    _vcprintf(fmt, args);
+    va_end(args);
+    _cprintf("\n");
+
+    abort();
+}
+
+__private_extern__ void __objc_error(id rcv, const char *fmt, ...) 
+{
+    va_list args;
+    va_start(args, fmt);
+    _vcprintf(fmt, args);
+    va_end(args);
+}
+
+__private_extern__ void _objc_error(id rcv, const char *fmt, va_list args) 
+{
+    _vcprintf(fmt, args);
+}
+
+#else
 
 __private_extern__ char *__crashreporter_info__ = NULL;
 
@@ -43,6 +80,18 @@ static void _objc_trap(void) __attribute__((noreturn));
 static void _objc_crashlog(const char *message)
 {
     char *newmsg;
+
+#if 0
+    {
+        // for debugging at BOOT time.
+        extern char **_NSGetProgname(void);
+        FILE *crashlog = fopen("/_objc_crash.log", "a");
+        setbuf(crashlog, NULL);
+        fprintf(crashlog, "[%s] %s\n", *_NSGetProgname(), message);
+        fclose(crashlog);
+        sync();
+    }
+#endif
 
     if (!__crashreporter_info__) {
         newmsg = strdup(message);
@@ -210,13 +259,16 @@ static void _objc_trap2(void)
     __builtin_trap();
 }
 
-__private_extern__ void _objc_warn_deprecated(const char *old, const char *new)
+#endif
+
+
+__private_extern__ void _objc_warn_deprecated(const char *oldf, const char *newf)
 {
     if (PrintDeprecation) {
-        if (new) {
-            _objc_inform("The function %s is obsolete. Use %s instead. Set a breakpoint on _objc_warn_deprecated to find the culprit.", old, new);
+        if (newf) {
+            _objc_inform("The function %s is obsolete. Use %s instead. Set a breakpoint on _objc_warn_deprecated to find the culprit.", oldf, newf);
         } else {
-            _objc_inform("The function %s is obsolete. Do not use it. Set a breakpoint on _objc_warn_deprecated to find the culprit.", old);
+            _objc_inform("The function %s is obsolete. Do not use it. Set a breakpoint on _objc_warn_deprecated to find the culprit.", oldf);
         }
     }
 }

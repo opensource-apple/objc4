@@ -32,9 +32,9 @@
 #ifndef _OBJC_LIST_H_
 #define _OBJC_LIST_H_
 
-#if defined(__LP64__)
+#if defined(__OBJC2__)
 
-#warning class List unavailable in 64-bit Objective-C
+#warning class List unavailable
 
 #else
 

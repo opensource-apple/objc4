@@ -35,17 +35,9 @@ OBJC_EXPORT  int objc_sync_enter(id obj);
 // Returns OBJC_SYNC_SUCCESS or OBJC_SYNC_NOT_OWNING_THREAD_ERROR
 OBJC_EXPORT  int objc_sync_exit(id obj);
 
-// Temporarily release lock on 'obj' and wait for another thread to notify on 'obj'
-// Return OBJC_SYNC_SUCCESS, OBJC_SYNC_NOT_OWNING_THREAD_ERROR, OBJC_SYNC_TIMED_OUT
-OBJC_EXPORT  int objc_sync_wait(id obj, long long milliSecondsMaxWait);
-
-// Wake up another thread waiting on 'obj'
-// Return OBJC_SYNC_SUCCESS, OBJC_SYNC_NOT_OWNING_THREAD_ERROR
-OBJC_EXPORT  int objc_sync_notify(id obj);
-
-// Wake up all threads waiting on 'obj'
-// Return OBJC_SYNC_SUCCESS, OBJC_SYNC_NOT_OWNING_THREAD_ERROR
-OBJC_EXPORT  int objc_sync_notifyAll(id obj);
+OBJC_EXPORT  int objc_sync_wait(id obj, long long milliSecondsMaxWait) DEPRECATED_ATTRIBUTE;
+OBJC_EXPORT  int objc_sync_notify(id obj) DEPRECATED_ATTRIBUTE;
+OBJC_EXPORT  int objc_sync_notifyAll(id obj) DEPRECATED_ATTRIBUTE;
 
 enum {
 	OBJC_SYNC_SUCCESS                 = 0,

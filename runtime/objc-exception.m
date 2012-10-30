@@ -21,17 +21,17 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-// ZEROCOST_SWITCH
-#if !__LP64__  ||  !OBJC_ZEROCOST_EXCEPTIONS
+#if !__OBJC2__
 
 /***********************************************************************
 * 32-bit implementation
 **********************************************************************/
 
+#include "objc-private.h"
 #include <stdlib.h>
+#include <setjmp.h>
 
-#import "objc-exception.h"
-#import "objc-private.h"
+#include "objc-exception.h"
 
 static objc_exception_functions_t xtab;
 
@@ -66,6 +66,8 @@ void objc_exception_throw(id exception) {
     if (!xtab.throw_exc) {
         set_default_handlers();
     }
+
+    OBJC_RUNTIME_OBJC_EXCEPTION_THROW(exception);  // dtrace probe to log throw activity.
     xtab.throw_exc(exception);
     _objc_fatal("objc_exception_throw failed");
 }
@@ -108,17 +110,13 @@ int objc_exception_match(Class exceptionClass, id exception) {
 // Perhaps the default implementation should just complain loudly and quit
 
 
-
-#import <pthread.h>
-#import <setjmp.h>
-
 extern void _objc_inform(const char *fmt, ...);
 
 typedef struct { jmp_buf buf; void *pointers[4]; } LocalData_t;
 
 typedef struct _threadChain {
     LocalData_t *topHandler;
-    void *perThreadID;
+    objc_thread_t perThreadID;
     struct _threadChain *next;
 }
     ThreadChainLink_t;
@@ -127,9 +125,9 @@ static ThreadChainLink_t ThreadChainLink;
 
 static ThreadChainLink_t *getChainLink() {
     // follow links until thread_self() found (someday) XXX
-    pthread_t self = pthread_self();
+    objc_thread_t self = thread_self();
     ThreadChainLink_t *walker = &ThreadChainLink;
-    while (walker->perThreadID != (void *)self) {
+    while (walker->perThreadID != self) {
         if (walker->next != NULL) {
             walker = walker->next;
             continue;
@@ -147,14 +145,16 @@ static ThreadChainLink_t *getChainLink() {
 }
 
 static void default_try_enter(void *localExceptionData) {
+    LocalData_t *data = (LocalData_t *)localExceptionData;
     ThreadChainLink_t *chainLink = getChainLink();
-    ((LocalData_t *)localExceptionData)->pointers[1] = chainLink->topHandler;
-    chainLink->topHandler = localExceptionData;
+    data->pointers[1] = chainLink->topHandler;
+    chainLink->topHandler = data;
     if (PrintExceptions) _objc_inform("EXCEPTIONS: entered try block %p\n", chainLink->topHandler);
 }
 
 static void default_throw(id value) {
     ThreadChainLink_t *chainLink = getChainLink();
+    LocalData_t *led;
     if (value == nil) {
         if (PrintExceptions) _objc_inform("EXCEPTIONS: objc_exception_throw with nil value\n");
         return;
@@ -164,10 +164,15 @@ static void default_throw(id value) {
         return;
     }
     if (PrintExceptions) _objc_inform("EXCEPTIONS: exception thrown, going to handler block %p\n", chainLink->topHandler);
-    LocalData_t *led = chainLink->topHandler;
-    chainLink->topHandler = led->pointers[1];	// pop top handler
+    led = chainLink->topHandler;
+    chainLink->topHandler = (LocalData_t *)
+        led->pointers[1];	// pop top handler
     led->pointers[0] = value;			// store exception that is thrown
+#if TARGET_OS_WIN32
+    longjmp(led->buf, 1);
+#else
     _longjmp(led->buf, 1);
+#endif
 }
     
 static void default_try_exit(void *led) {
@@ -177,7 +182,8 @@ static void default_try_exit(void *led) {
         return;
     }
     if (PrintExceptions) _objc_inform("EXCEPTIONS: removing try block handler %p\n", chainLink->topHandler);
-    chainLink->topHandler = chainLink->topHandler->pointers[1];	// pop top handler
+    chainLink->topHandler = (LocalData_t *)
+        chainLink->topHandler->pointers[1];	// pop top handler
 }
 
 static id default_extract(void *localExceptionData) {
@@ -189,7 +195,7 @@ static int default_match(Class exceptionClass, id exception) {
     //return [exception isKindOfClass:exceptionClass];
     Class cls;
     for (cls = exception->isa; nil != cls; cls = _class_getSuperclass(cls)) 
-	if (cls == exceptionClass) return 1;
+        if (cls == exceptionClass) return 1;
     return 0;
 }
 
@@ -214,16 +220,16 @@ __private_extern__ void _destroyAltHandlerList(struct alt_handler_list *list)
 }
 
 
-// !__LP64__
+// !__OBJC2__
 #else
-// __LP64__
+// __OBJC2__
 
 /***********************************************************************
 * 64-bit implementation.
 **********************************************************************/
 
-#include <objc/objc-exception.h>
 #include "objc-private.h"
+#include <objc/objc-exception.h>
 
 
 // unwind library types and functions
@@ -251,9 +257,6 @@ typedef enum {
     _URC_CONTINUE_UNWIND = 8
 } _Unwind_Reason_Code;
 
-
-typedef _Unwind_Reason_Code (*_Unwind_Trace_Fn)(struct _Unwind_Context *, void *);
-
 struct dwarf_eh_bases
 {
     uintptr_t tbase;
@@ -264,8 +267,6 @@ struct dwarf_eh_bases
 extern uintptr_t _Unwind_GetIP (struct _Unwind_Context *);
 extern uintptr_t _Unwind_GetCFA (struct _Unwind_Context *);
 extern uintptr_t _Unwind_GetLanguageSpecificData(struct _Unwind_Context *);
-extern const void * _Unwind_Find_FDE (void *, struct dwarf_eh_bases *);
-extern _Unwind_Reason_Code _Unwind_Backtrace (_Unwind_Trace_Fn, void *);
 
 
 // C++ runtime types and functions
@@ -283,12 +284,21 @@ extern void __cxa_end_catch(void);
 extern void __cxa_rethrow(void);
 extern void *__cxa_current_exception_type(void);
 
+#ifdef NO_ZEROCOST_EXCEPTIONS
+/* fixme _sj0 for objc too? */
+#define CXX_PERSONALITY __gxx_personality_sj0
+#define OBJC_PERSONALITY __objc_personality_v0
+#else
+#define CXX_PERSONALITY __gxx_personality_v0
+#define OBJC_PERSONALITY __objc_personality_v0
+#endif
+
 extern _Unwind_Reason_Code 
-__gxx_personality_v0(int version,
-                     _Unwind_Action actions,
-                     uint64_t exceptionClass,
-                     struct _Unwind_Exception *exceptionObject,
-                     struct _Unwind_Context *context);
+CXX_PERSONALITY(int version,
+                _Unwind_Action actions,
+                uint64_t exceptionClass,
+                struct _Unwind_Exception *exceptionObject,
+                struct _Unwind_Context *context);
 
 
 // objc's internal exception types and data
@@ -297,7 +307,7 @@ extern const void *objc_ehtype_vtable[];
 
 struct objc_typeinfo {
     // Position of vtable and name fields must match C++ typeinfo object
-    const void **vtable;  // always objc_ehtype_vtable
+    const void **vtable;  // always objc_ehtype_vtable+2
     const char *name;     // c++ typeinfo string
 
     Class cls;
@@ -429,11 +439,11 @@ objc_setUncaughtExceptionHandler(objc_uncaught_exception_handler fn)
 static void call_alt_handlers(struct _Unwind_Context *ctx);
 
 _Unwind_Reason_Code 
-__objc_personality_v0(int version,
-                      _Unwind_Action actions,
-                      uint64_t exceptionClass,
-                      struct _Unwind_Exception *exceptionObject,
-                      struct _Unwind_Context *context)
+OBJC_PERSONALITY(int version,
+                 _Unwind_Action actions,
+                 uint64_t exceptionClass,
+                 struct _Unwind_Exception *exceptionObject,
+                 struct _Unwind_Context *context)
 {
     BOOL unwinding = ((actions & _UA_CLEANUP_PHASE)  ||  
                       (actions & _UA_FORCE_UNWIND));
@@ -452,8 +462,8 @@ __objc_personality_v0(int version,
     }
 
     // Let C++ handle the unwind itself.
-    return __gxx_personality_v0(version, actions, exceptionClass, 
-                                exceptionObject, context);
+    return CXX_PERSONALITY(version, actions, exceptionClass, 
+                           exceptionObject, context);
 }
 
 
@@ -481,7 +491,7 @@ void objc_exception_throw(id obj)
         auto_zone_retain(gc_zone, obj);
     }
 
-    exc->tinfo.vtable = objc_ehtype_vtable;
+    exc->tinfo.vtable = objc_ehtype_vtable+2;
     exc->tinfo.name = object_getClassName(obj);
     exc->tinfo.cls = obj ? obj->isa : Nil;
 
@@ -489,8 +499,10 @@ void objc_exception_throw(id obj)
         _objc_inform("EXCEPTIONS: throwing %p (object %p, a %s)", 
                      exc, obj, object_getClassName(obj));
     }
-
+    
+    OBJC_RUNTIME_OBJC_EXCEPTION_THROW(obj);  // dtrace probe to log throw activity
     __cxa_throw(exc, &exc->tinfo, &_objc_exception_destructor);
+    __builtin_trap();
 }
 
 
@@ -500,7 +512,10 @@ void objc_exception_rethrow(void)
     if (PrintExceptions) {
         _objc_inform("EXCEPTIONS: rethrowing current exception");
     }
+    
+    OBJC_RUNTIME_OBJC_EXCEPTION_RETHROW(); // dtrace probe to log throw activity.
     __cxa_rethrow();
+    __builtin_trap();
 }
 
 
@@ -531,8 +546,9 @@ static char _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo,
 {
     id exception;
 
-    if (throw_tinfo->vtable != objc_ehtype_vtable) {
+    if (throw_tinfo->vtable != objc_ehtype_vtable+2) {
         // Only objc types can be caught here.
+        if (PrintExceptions) _objc_inform("EXCEPTIONS: skipping catch(?)");
         return 0;
     }
 
@@ -549,6 +565,9 @@ static char _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo,
                                           class_getName(catch_tinfo->cls));
         return 1;
     }
+
+    if (PrintExceptions) _objc_inform("EXCEPTIONS: skipping catch(%s)", 
+                                      class_getName(catch_tinfo->cls));
 
     return 0;
 }
@@ -592,9 +611,23 @@ static void _objc_terminate(void)
 
 
 /***********************************************************************
-* alt handler support
+* alt handler support - zerocost implementation only
 **********************************************************************/
 
+#ifdef NO_ZEROCOST_EXCEPTIONS
+
+__private_extern__ void _destroyAltHandlerList(struct alt_handler_list *list)
+{
+}
+
+static void call_alt_handlers(struct _Unwind_Context *ctx)
+{
+    // unsupported in sjlj environments
+}
+
+#else
+
+#include <libunwind.h>
 
 // Dwarf eh data encodings
 #define DW_EH_PE_omit      0xff  // no data follows
@@ -662,26 +695,6 @@ static intptr_t read_sleb(uintptr_t *pp)
 
 
 /***********************************************************************
-* get_cie
-* Returns the address of the CIE for the given FDE.
-**********************************************************************/
-static uintptr_t get_cie(uintptr_t fde) {
-    uintptr_t deltap = fde + sizeof(int32_t);
-    int32_t delta = *(int32_t *)deltap;
-    return deltap - delta;
-}
-
-
-/***********************************************************************
-* get_cie_augmentation
-* Returns the augmentation string for the given CIE.
-**********************************************************************/
-static const char *get_cie_augmentation(uintptr_t cie) {
-    return (const char *)(cie + 2*sizeof(int32_t) + 1);
-}
-
-
-/***********************************************************************
 * read_address
 * Reads an encoded address from the address stored in *pp.
 * Increments *pp past the bytes read.
@@ -689,7 +702,7 @@ static const char *get_cie_augmentation(uintptr_t cie) {
 * and base addresses.
 **********************************************************************/
 static uintptr_t read_address(uintptr_t *pp, 
-                              struct dwarf_eh_bases *bases, 
+                              const struct dwarf_eh_bases *bases, 
                               unsigned char encoding)
 {
     uintptr_t result = 0;
@@ -776,76 +789,14 @@ static uintptr_t read_address(uintptr_t *pp,
 }
 
 
-/***********************************************************************
-* frame_finder
-* Determines whether the frame represented by ctx is 
-* (1) an Objective-C or Objective-C++ frame, and 
-* (2) has any catch handlers.
-**********************************************************************/
-struct frame_range {
-    uintptr_t ip_start;
-    uintptr_t ip_end;
-    uintptr_t cfa;
-};
-
-static _Unwind_Reason_Code frame_finder(struct _Unwind_Context *ctx, void *arg)
+static bool isObjCExceptionCatcher(uintptr_t lsda, uintptr_t ip, 
+                                   const struct dwarf_eh_bases* bases,
+                                   uintptr_t* try_start, uintptr_t* try_end)
 {
-    uintptr_t ip_start;
-    uintptr_t ip_end;
+    unsigned char LPStart_enc = *(const unsigned char *)lsda++;    
 
-    uintptr_t lsda = _Unwind_GetLanguageSpecificData(ctx);
-    if (!lsda) return _URC_NO_REASON; 
-
-    uintptr_t ip = _Unwind_GetIP(ctx) - 1;
-
-    struct dwarf_eh_bases bases;
-    uintptr_t fde = (uintptr_t)_Unwind_Find_FDE((void *)ip, &bases);
-    if (!fde) return _URC_NO_REASON;
-
-    uintptr_t cie = get_cie(fde);
-    const char *aug = get_cie_augmentation(cie);
-    uintptr_t augdata = (uintptr_t)(aug + strlen(aug) + 1);
-    read_uleb(&augdata); // code alignment factor
-    read_sleb(&augdata); // data alignment factor
-    augdata++; // RA register
-
-    // 'z' must be first, if present
-    if (*aug == 'z') {
-        aug++;
-        read_uleb(&augdata);  // augmentation length
-    }
-
-    uintptr_t personality = 0;
-    char ch;
-    while ((ch = *aug++)) {
-        if (ch == 'L') {
-            // LSDA encoding
-            augdata++;  
-        } else if (ch == 'R') {
-            // pointer encoding
-            augdata++;
-        } else if (ch == 'P') {
-            // personality function
-            unsigned char enc = *(const unsigned char *)augdata++;
-            personality = read_address(&augdata, &bases, enc);
-        } else {
-            // unknown augmentation - ignore the rest
-            break;
-        }
-    }
-                                                
-    // No personality means no handlers in this frame
-    if (!personality) return _URC_NO_REASON;
-
-    // Only the objc personality will honor our attached handlers.
-    if (personality != (uintptr_t)__objc_personality_v0) return _URC_NO_REASON;
-
-    // We have the LSDA and the right personality. 
-    // Scan the LSDA for handlers matching this IP
-
-    unsigned char LPStart_enc = *(const unsigned char *)lsda++;
     if (LPStart_enc != DW_EH_PE_omit) {
-        read_address(&lsda, &bases, LPStart_enc); // LPStart
+        read_address(&lsda, bases, LPStart_enc); // LPStart
     }
 
     unsigned char TType_enc = *(const unsigned char *)lsda++;
@@ -863,31 +814,31 @@ static _Unwind_Reason_Code frame_finder(struct _Unwind_Context *ctx, void *arg)
     uintptr_t p = call_site_table;
 
     while (p < call_site_table_end) {
-        uintptr_t start = read_address(&p, &bases, call_site_enc);
-        uintptr_t len = read_address(&p, &bases, call_site_enc);
-        uintptr_t pad = read_address(&p, &bases, call_site_enc);
+        uintptr_t start = read_address(&p, bases, call_site_enc);
+        uintptr_t len = read_address(&p, bases, call_site_enc);
+        uintptr_t pad = read_address(&p, bases, call_site_enc);
         uintptr_t action = read_uleb(&p);
 
-        if (ip < bases.func + start) {
+        if (ip < bases->func + start) {
             // no more source ranges
-            return _URC_NO_REASON;
+            return false;
         } 
-        else if (ip < bases.func + start + len) {
+        else if (ip < bases->func + start + len) {
             // found the range
-            if (!pad) return _URC_NO_REASON;  // ...but it has no landing pad
+            if (!pad) return false;  // ...but it has no landing pad
             // found the landing pad
-            ip_start = bases.func + start;
-            ip_end = bases.func + start + len;
             action_record = action ? action_record_table + action - 1 : 0;
+            *try_start = bases->func + start;
+            *try_end = bases->func + start + len;
             break;
         }        
     }
     
-    if (!action_record) return _URC_NO_REASON;  // no catch handlers
+    if (!action_record) return false;  // no catch handlers
 
     // has handlers, destructors, and/or throws specifications
     // Use this frame if it has any handlers
-    int has_handler = 0;
+    bool has_handler = false;
     p = action_record;
     intptr_t offset;
     do {
@@ -902,19 +853,53 @@ static _Unwind_Reason_Code frame_finder(struct _Unwind_Context *ctx, void *arg)
             // destructor - ignore
         } else /* filter >= 0 */ {
             // catch handler - use this frame
-            has_handler = 1;
+            has_handler = true;
             break;
         }
     } while (offset);
     
-    if (!has_handler) return _URC_NO_REASON;  // no catch handlers - ignore
+    return has_handler;
+}
 
-    struct frame_range *result = (struct frame_range *)arg;
-    result->ip_start = ip_start;
-    result->ip_end = ip_end;
-    result->cfa = _Unwind_GetCFA(ctx);
 
-    return _URC_HANDLER_FOUND;
+struct frame_range {
+    uintptr_t ip_start;
+    uintptr_t ip_end;
+    uintptr_t cfa;
+};
+
+static struct frame_range findHandler(void)
+{
+    // walk stack looking for frame with objc catch handler
+    unw_context_t    uc;
+    unw_cursor_t    cursor; 
+    unw_proc_info_t    info;
+    unw_getcontext(&uc);
+    unw_init_local(&cursor, &uc);
+    while ( (unw_step(&cursor) > 0) && (unw_get_proc_info(&cursor, &info) == UNW_ESUCCESS) ) {
+        // must use objc personality handler
+        if ( info.handler != (uintptr_t)__objc_personality_v0 )
+            continue;
+        // must have landing pad
+        if ( info.lsda == 0 )
+            continue;
+        // must have landing pad that catches objc exceptions
+        struct dwarf_eh_bases bases;
+        bases.tbase = 0;  // from unwind-dw2-fde-darwin.c:examine_objects()
+        bases.dbase = 0;  // from unwind-dw2-fde-darwin.c:examine_objects()
+        bases.func = info.start_ip;
+        unw_word_t ip;
+        unw_get_reg(&cursor, UNW_REG_IP, &ip);
+        uintptr_t try_start;
+        uintptr_t try_end;
+        if ( isObjCExceptionCatcher(info.lsda, ip, &bases, &try_start, &try_end) ) {
+            unw_word_t cfa;
+            unw_get_reg(&cursor, UNW_REG_SP, &cfa);
+            return (struct frame_range){try_start, try_end, cfa};
+        }
+    }
+
+    return (struct frame_range){0, 0, 0};
 }
 
 
@@ -965,10 +950,8 @@ __private_extern__ void _destroyAltHandlerList(struct alt_handler_list *list)
 
 uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
 { 
-    struct frame_range target_frame = {0, 0, 0};
-
     // Find the closest enclosing frame with objc catch handlers
-    _Unwind_Backtrace(&frame_finder, &target_frame);
+    struct frame_range target_frame = findHandler();
     if (!target_frame.ip_start) {
         // No suitable enclosing handler found.
         return 0;
@@ -1017,7 +1000,7 @@ uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
     if (list->used > 1000) {
         static int warned = 0;
         if (!warned) {
-            _objc_inform("ALT_HANDLERS: *** over 1000 alt handlers installed; "
+            _objc_inform("ALT HANDLERS: *** over 1000 alt handlers installed; "
                          "this is probably a bug");
             warned = 1;
         }
@@ -1096,6 +1079,9 @@ static void call_alt_handlers(struct _Unwind_Context *ctx)
     }
 }
 
+// ! NO_ZEROCOST_EXCEPTIONS
+#endif
+
 
 /***********************************************************************
 * exception_init
@@ -1109,5 +1095,5 @@ __private_extern__ void exception_init(void)
 }
 
 
-// __LP64__
+// __OBJC2__
 #endif

@@ -25,28 +25,60 @@
  *	Copyright 1988-1996, NeXT Software, Inc.
  */
 
-#if !defined(_OBJC_PRIVATE_H_)
+#ifndef _OBJC_PRIVATE_H_
 #define _OBJC_PRIVATE_H_
 
-#import <pthread.h>
-#import <errno.h>
-#import <limits.h>
-#import <unistd.h>
-#import <sys/time.h>
-#import <stdlib.h>
-#import <stdarg.h>
-#import <stdio.h>
-#import <string.h>
-#import <ctype.h>
-#import <mach-o/loader.h>
-#import <malloc/malloc.h>
-#import <libkern/OSAtomic.h>
-#import <dlfcn.h>
+#include "objc-os.h"
 
-#import "objc.h"
-#import "runtime.h"
-#import "maptable.h"
-#import "auto_zone.h"
+#include "objc.h"
+#include "runtime.h"
+#include "maptable.h"
+#include "hashtable2.h"
+#include "objc-api.h"
+#include "objc-config.h"
+#include "objc-rtp.h"
+#include "objc-references.h"
+#include "objc-initialize.h"
+#include "objc-loadmethod.h"
+#include "objc-internal.h"
+
+#include "objc-auto.h"
+
+#define __APPLE_API_PRIVATE
+#include "objc-gdb.h"
+#undef __APPLE_API_PRIVATE
+
+/* Do not include message.h here. */
+/* #include "message.h" */
+
+
+__BEGIN_DECLS
+
+#if defined(OBJC_NO_GC) != defined(NO_GC) 
+#   error OBJC_NO_GC and NO_GC inconsistent
+#endif
+
+#ifndef NO_GC
+#   include <auto_zone.h>
+    extern BOOL UseGC;  // equivalent to calling objc_collecting_enabled()
+    extern auto_zone_t *gc_zone;  // the GC zone, or NULL if no GC
+    extern void objc_addRegisteredClass(Class c);
+    extern void objc_removeRegisteredClass(Class c);
+#else
+#   define UseGC NO
+#   define gc_zone NULL
+#   define objc_assign_ivar_internal objc_assign_ivar
+#   define objc_addRegisteredClass(c) do {} while(0)
+#   define objc_removeRegisteredClass(c) do {} while(0)
+    /* Uses of the following must be protected with UseGC. */
+    extern id gc_unsupported_dont_call();
+#   define auto_zone_allocate_object gc_unsupported_dont_call
+#   define auto_zone_retain gc_unsupported_dont_call
+#   define auto_zone_release gc_unsupported_dont_call
+#   define auto_zone_is_valid_pointer gc_unsupported_dont_call
+#   define auto_zone_write_barrier_memmove gc_unsupported_dont_call
+#   define AUTO_OBJECT_SCANNED 0
+#endif
 
 struct old_category;
 struct old_method_list;
@@ -122,9 +154,6 @@ struct old_method {
     IMP method_imp;
 };
 
-// Fixed-up method lists get mlist->obsolete = _OBJC_FIXED_UP.
-#define _OBJC_FIXED_UP ((void *)1771)
-
 struct old_method_list {
     struct old_method_list *obsolete;
 
@@ -172,37 +201,6 @@ struct objc_property_list {
     struct objc_property first;
 };
 
-
-#import "objc-api.h"
-#import "objc-config.h"
-#import "hashtable2.h"
-
-#import "Object.h"
-
-#define	mutex_alloc()	(pthread_mutex_t*)calloc(1, sizeof(pthread_mutex_t))
-#define	mutex_init(m)	pthread_mutex_init(m, NULL)
-#define	mutex_lock(m)	pthread_mutex_lock(m)
-#define	mutex_try_lock(m) (! pthread_mutex_trylock(m))
-#define	mutex_unlock(m)	pthread_mutex_unlock(m)
-#define	mutex_clear(m)
-#define	mutex_t		pthread_mutex_t*
-#define mutex		MUTEX_DEFINE_ERROR
-
-
-/* Opaque cookie used in _getObjc... routines.  File format independant.
- * This is used in place of the mach_header.  In fact, when compiling
- * for NEXTSTEP, this is really a (struct mach_header *).
- *
- * had been: typedef void *objc_header;
- */
-#ifndef __LP64__
-typedef struct mach_header headerType;
-typedef struct segment_command segmentType;
-#else
-typedef struct mach_header_64 headerType;
-typedef struct segment_command_64 segmentType;
-#endif
-
 typedef struct {
     uint32_t version; // currently 0
     uint32_t flags;
@@ -212,6 +210,7 @@ typedef struct {
 #define OBJC_IMAGE_IS_REPLACEMENT (1<<0)
 #define OBJC_IMAGE_SUPPORTS_GC (1<<1)
 #define OBJC_IMAGE_REQUIRES_GC (1<<2)
+#define OBJC_IMAGE_OPTIMIZED_BY_DYLD (1<<3)
 
 
 #define _objcHeaderIsReplacement(h)  ((h)->info  &&  ((h)->info->flags & OBJC_IMAGE_IS_REPLACEMENT))
@@ -239,31 +238,42 @@ typedef struct {
     if executable image compiled this way, then all subsequent libraries etc. must also be this way
 */
 
+#define _objcHeaderOptimizedByDyld(h)  ((h)->info  &&  ((h)->info->flags & OBJC_IMAGE_OPTIMIZED_BY_DYLD))
 
-typedef struct _header_info
-{
+/* OBJC_IMAGE_OPTIMIZED_BY_DYLD:
+   Assorted metadata precooked in the dyld shared cache.
+   Never set for images outside the shared cache file itself.
+*/
+   
+
+typedef struct _header_info {
     struct _header_info *next;
     const headerType *  mhdr;
-    ptrdiff_t           image_slide;
-    const segmentType * objcSegmentHeader;
-    const segmentType * dataSegmentHeader;
     struct objc_module *mod_ptr;
     size_t              mod_count;
     const objc_image_info *info;
-    Dl_info             dl_info;
     BOOL                allClassesRealized;
+    os_header_info      os;
 } header_info;
 
+extern header_info *FirstHeader;
+extern header_info *LastHeader;
+extern int HeaderCount;
+
+extern void _objc_appendHeader(header_info *hi);
+extern void _objc_removeHeader(header_info *hi);
+extern const char *_nameForHeader(const headerType*);
 
 extern objc_image_info *_getObjcImageInfo(const headerType *head, ptrdiff_t slide, size_t *size);
-extern const segmentType *getsegbynamefromheader(const headerType *head, const char *segname);
 extern const char *_getObjcHeaderName(const headerType *head);
 extern ptrdiff_t _getImageSlide(const headerType *header);
 
-extern Module _getObjcModules(const headerType *head, ptrdiff_t slide, size_t *count);
+
+extern Module _getObjcModules(const header_info *hi, size_t *count);
 extern SEL *_getObjcSelectorRefs(const header_info *hi, size_t *count);
+extern BOOL _hasObjcContents(const header_info *hi);
 #if !__OBJC2__
-extern struct old_protocol *_getObjcProtocols(const header_info *head, size_t *count);
+extern struct old_protocol **_getObjcProtocols(const header_info *head, size_t *count);
 extern struct old_class **_getObjcClassRefs(const header_info *hi, size_t *count);
 extern const char *_getObjcClassNames(const header_info *hi, size_t *size);
 #endif
@@ -282,59 +292,80 @@ extern struct protocol_t **_getObjc2ProtocolRefs(const header_info *head, size_t
 
 #define END_OF_METHODS_LIST ((struct old_method_list*)-1)
 
-OBJC_EXPORT header_info *_objc_headerStart ();
 
-OBJC_EXPORT const char *_nameForHeader(const headerType*);
+/* selectors */
+extern void sel_init(BOOL gc);
+extern SEL sel_registerNameNoLock(const char *str, BOOL copy);
+extern void sel_lock(void);
+extern void sel_unlock(void);
+extern BOOL sel_preoptimizationValid(const header_info *hi);
+extern void disableSelectorPreoptimization(void);
 
-OBJC_EXPORT SEL sel_registerNameNoLock(const char *str, BOOL copy);
-OBJC_EXPORT void sel_lock(void);
-OBJC_EXPORT void sel_unlock(void);
+extern SEL SEL_load;
+extern SEL SEL_initialize;
+extern SEL SEL_resolveClassMethod;
+extern SEL SEL_resolveInstanceMethod;
+extern SEL SEL_cxx_construct;
+extern SEL SEL_cxx_destruct;
+extern SEL SEL_retain;
+extern SEL SEL_release;
+extern SEL SEL_autorelease;
+extern SEL SEL_copy;
+extern SEL SEL_finalize;
+
 
 /* optional malloc zone for runtime data */
-OBJC_EXPORT malloc_zone_t *_objc_internal_zone(void);
-OBJC_EXPORT void *_malloc_internal(size_t size);
-OBJC_EXPORT void *_calloc_internal(size_t count, size_t size);
-OBJC_EXPORT void *_realloc_internal(void *ptr, size_t size);
-OBJC_EXPORT char *_strdup_internal(const char *str);
-OBJC_EXPORT char *_strdupcat_internal(const char *s1, const char *s2);
-OBJC_EXPORT void *_memdup_internal(const void *mem, size_t size);
-OBJC_EXPORT void _free_internal(void *ptr);
+extern malloc_zone_t *_objc_internal_zone(void);
+extern void *_malloc_internal(size_t size);
+extern void *_calloc_internal(size_t count, size_t size);
+extern void *_realloc_internal(void *ptr, size_t size);
+extern char *_strdup_internal(const char *str);
+extern char *_strdupcat_internal(const char *s1, const char *s2);
+extern void *_memdup_internal(const void *mem, size_t size);
+extern void _free_internal(void *ptr);
+
+extern Class _calloc_class(size_t size);
 
 #if !__OBJC2__
-OBJC_EXPORT Class objc_getOrigClass (const char *name);
-OBJC_EXPORT IMP lookupNamedMethodInMethodList(struct old_method_list *mlist, const char *meth_name);
-OBJC_EXPORT void _objc_insertMethods(struct old_class *cls, struct old_method_list *mlist, struct old_category *cat);
-OBJC_EXPORT void _objc_removeMethods(struct old_class *cls, struct old_method_list *mlist);
-OBJC_EXPORT void _objc_flush_caches (Class cls);
+extern Class objc_getOrigClass (const char *name);
+extern IMP lookupNamedMethodInMethodList(struct old_method_list *mlist, const char *meth_name);
+extern void _objc_insertMethods(struct old_class *cls, struct old_method_list *mlist, struct old_category *cat);
+extern void _objc_removeMethods(struct old_class *cls, struct old_method_list *mlist);
+extern void _objc_flush_caches (Class cls);
 extern void _class_addProperties(struct old_class *cls, struct objc_property_list *additions);
 extern void change_class_references(struct old_class *imposter, struct old_class *original, struct old_class *copy, BOOL changeSuperRefs);
 extern void flush_marked_caches(void);
 extern void set_superclass(struct old_class *cls, struct old_class *supercls);
 #endif
 
-OBJC_EXPORT IMP _cache_getImp(Class cls, SEL sel);
-OBJC_EXPORT Method _cache_getMethod(Class cls, SEL sel, IMP objc_msgForward_imp);
+extern IMP lookUpMethod(Class, SEL, BOOL initialize, BOOL cache);
+extern void lockForMethodLookup(void);
+extern void unlockForMethodLookup(void);
+extern IMP prepareForMethodLookup(Class cls, SEL sel, BOOL initialize);
+
+extern IMP _cache_getImp(Class cls, SEL sel);
+extern Method _cache_getMethod(Class cls, SEL sel, IMP objc_msgForward_internal_imp);
 
 /* message dispatcher */
-OBJC_EXPORT IMP _class_lookupMethodAndLoadCache(Class, SEL);
-OBJC_EXPORT id _objc_msgForward (id self, SEL sel, ...);
+extern IMP _class_lookupMethodAndLoadCache(Class, SEL);
+extern id _objc_msgForward_internal(id self, SEL sel, ...);
 extern id _objc_ignored_method(id self, SEL _cmd);
 
 /* errors */
-OBJC_EXPORT void _objc_fatal(const char *fmt, ...) __attribute__((noreturn, format (printf, 1, 2)));
-OBJC_EXPORT void __objc_error(id, const char *, ...) __attribute__((format (printf, 2, 3)));
-OBJC_EXPORT void _objc_inform(const char *fmt, ...) __attribute__((format (printf, 1, 2)));
-OBJC_EXPORT void _objc_inform_on_crash(const char *fmt, ...) __attribute__((format (printf, 1, 2)));
-OBJC_EXPORT void _objc_inform_now_and_on_crash(const char *fmt, ...) __attribute__((format (printf, 1, 2)));
-OBJC_EXPORT void _objc_warn_deprecated(const char *old, const char *new) __attribute__((noinline));
-OBJC_EXPORT void _objc_error(id, const char *, va_list);
+extern void __objc_error(id, const char *, ...) __attribute__((format (printf, 2, 3)));
+extern void _objc_inform(const char *fmt, ...) __attribute__((format (printf, 1, 2)));
+extern void _objc_inform_on_crash(const char *fmt, ...) __attribute__((format (printf, 1, 2)));
+extern void _objc_inform_now_and_on_crash(const char *fmt, ...) __attribute__((format (printf, 1, 2)));
+extern void _objc_warn_deprecated(const char *oldname, const char *newname) __attribute__((noinline));
+extern void _objc_error(id, const char *, va_list);
+extern void inform_duplicate(const char *name, Class oldCls, Class cls);
 
 /* magic */
-OBJC_EXPORT Class _objc_getFreedObjectClass (void);
+extern Class _objc_getFreedObjectClass (void);
 #ifndef OBJC_INSTRUMENTED
-OBJC_EXPORT const struct objc_cache _objc_empty_cache;
+extern const struct objc_cache _objc_empty_cache;
 #else
-OBJC_EXPORT struct objc_cache _objc_empty_cache;
+extern struct objc_cache _objc_empty_cache;
 #endif
 #if __OBJC2__
 extern IMP _objc_empty_vtable[128];
@@ -345,55 +376,177 @@ extern void *NXMapKeyCopyingInsert(NXMapTable *table, const void *key, const voi
 extern void *NXMapKeyFreeingRemove(NXMapTable *table, const void *key);
 
 /* locking */
-#define OBJC_DECLARE_LOCK(MTX) pthread_mutex_t MTX = PTHREAD_MUTEX_INITIALIZER
-#ifdef NDEBUG
-#define OBJC_LOCK(MUTEX)            mutex_lock (MUTEX)
-#define OBJC_UNLOCK(MUTEX)          mutex_unlock (MUTEX)
-#define OBJC_CHECK_LOCKED(MUTEX)    do { } while (0)
-#define OBJC_CHECK_UNLOCKED(MUTEX)  do { } while (0)
+/* Every lock used anywhere must be declared here. 
+ * Locks not declared here may cause gdb deadlocks. */
+extern void lock_init(void);
+extern rwlock_t selLock;
+extern mutex_t cacheUpdateLock;
+extern recursive_mutex_t loadMethodLock;
+#if __OBJC2__
+extern rwlock_t runtimeLock;
 #else
-#define OBJC_LOCK(MUTEX)            _lock_debug (MUTEX, #MUTEX)
-#define OBJC_UNLOCK(MUTEX)          _unlock_debug (MUTEX, #MUTEX)
-#define OBJC_CHECK_LOCKED(MUTEX)    _checklock_debug (MUTEX, #MUTEX)
-#define OBJC_CHECK_UNLOCKED(MUTEX)  _checkunlock_debug (MUTEX, #MUTEX)
+extern mutex_t classLock;
+extern mutex_t methodListLock;
 #endif
 
-OBJC_EXPORT pthread_mutex_t classLock;
-OBJC_EXPORT pthread_mutex_t methodListLock;
+/* Debugger mode for gdb */
+#define DEBUGGER_OFF 0
+#define DEBUGGER_PARTIAL 1
+#define DEBUGGER_FULL 2
+extern int startDebuggerMode(void);
+extern void endDebuggerMode(void);
 
-OBJC_EXPORT NXHashTable *class_hash;
+#if defined(NDEBUG)  ||  TARGET_OS_WIN32
 
+#define _destroyLockList(x)           do { } while (0)
+
+#define mutex_lock(m)             _mutex_lock_nodebug(m)
+#define mutex_try_lock(m)         _mutex_try_lock_nodebug(m)
+#define mutex_unlock(m)           _mutex_unlock_nodebug(m)
+#define mutex_assert_locked(m)    do { } while (0)
+#define mutex_assert_unlocked(m)  do { } while (0)
+
+#define recursive_mutex_lock(m)             _recursive_mutex_lock_nodebug(m)
+#define recursive_mutex_try_lock(m)         _recursive_mutex_try_lock_nodebug(m)
+#define recursive_mutex_unlock(m)           _recursive_mutex_unlock_nodebug(m)
+#define recursive_mutex_assert_locked(m)    do { } while (0)
+#define recursive_mutex_assert_unlocked(m)  do { } while (0)
+
+#define monitor_enter(m)            _monitor_enter_nodebug(m)
+#define monitor_exit(m)             _monitor_exit_nodebug(m)
+#define monitor_wait(m)             _monitor_wait_nodebug(m)
+#define monitor_assert_locked(m)    do { } while (0)
+#define monitor_assert_unlocked(m)  do { } while (0)
+
+#define rwlock_read(m)              _rwlock_read_nodebug(m)
+#define rwlock_write(m)             _rwlock_write_nodebug(m)
+#define rwlock_try_read(m)          _rwlock_try_read_nodebug(m)
+#define rwlock_try_write(m)         _rwlock_try_write_nodebug(m)
+#define rwlock_unlock_read(m)       _rwlock_unlock_read_nodebug(m)
+#define rwlock_unlock_write(m)      _rwlock_unlock_write_nodebug(m)
+#define rwlock_assert_reading(m)    do { } while (0)
+#define rwlock_assert_writing(m)    do { } while (0)
+#define rwlock_assert_locked(m)     do { } while (0)
+#define rwlock_assert_unlocked(m)   do { } while (0)
+
+#else
+
+struct _objc_lock_list;
+extern void _destroyLockList(struct _objc_lock_list *locks);
+
+extern int _mutex_lock_debug(mutex_t *lock, const char *name);
+extern int _mutex_try_lock_debug(mutex_t *lock, const char *name);
+extern int _mutex_unlock_debug(mutex_t *lock, const char *name);
+extern void _mutex_assert_locked_debug(mutex_t *lock, const char *name);
+extern void _mutex_assert_unlocked_debug(mutex_t *lock, const char *name);
+
+extern int _recursive_mutex_lock_debug(recursive_mutex_t *lock, const char *name);
+extern int _recursive_mutex_try_lock_debug(recursive_mutex_t *lock, const char *name);
+extern int _recursive_mutex_unlock_debug(recursive_mutex_t *lock, const char *name);
+extern void _recursive_mutex_assert_locked_debug(recursive_mutex_t *lock, const char *name);
+extern void _recursive_mutex_assert_unlocked_debug(recursive_mutex_t *lock, const char *name);
+
+extern int _monitor_enter_debug(monitor_t *lock, const char *name);
+extern int _monitor_exit_debug(monitor_t *lock, const char *name);
+extern int _monitor_wait_debug(monitor_t *lock, const char *name);
+extern void _monitor_assert_locked_debug(monitor_t *lock, const char *name);
+extern void _monitor_assert_unlocked_debug(monitor_t *lock, const char *name);
+
+extern void _rwlock_read_debug(rwlock_t *l, const char *name);
+extern void _rwlock_write_debug(rwlock_t *l, const char *name);
+extern int  _rwlock_try_read_debug(rwlock_t *l, const char *name);
+extern int  _rwlock_try_write_debug(rwlock_t *l, const char *name);
+extern void _rwlock_unlock_read_debug(rwlock_t *l, const char *name);
+extern void _rwlock_unlock_write_debug(rwlock_t *l, const char *name);
+extern void _rwlock_assert_reading_debug(rwlock_t *l, const char *name);
+extern void _rwlock_assert_writing_debug(rwlock_t *l, const char *name);
+extern void _rwlock_assert_locked_debug(rwlock_t *l, const char *name);
+extern void _rwlock_assert_unlocked_debug(rwlock_t *l, const char *name);
+
+#define mutex_lock(m)             _mutex_lock_debug (m, #m)
+#define mutex_try_lock(m)         _mutex_try_lock_debug (m, #m)
+#define mutex_unlock(m)           _mutex_unlock_debug (m, #m)
+#define mutex_assert_locked(m)    _mutex_assert_locked_debug (m, #m)
+#define mutex_assert_unlocked(m)  _mutex_assert_unlocked_debug (m, #m)
+
+#define recursive_mutex_lock(m)             _recursive_mutex_lock_debug (m, #m)
+#define recursive_mutex_try_lock(m)         _recursive_mutex_try_lock_debug (m, #m)
+#define recursive_mutex_unlock(m)           _recursive_mutex_unlock_debug (m, #m)
+#define recursive_mutex_assert_locked(m)    _recursive_mutex_assert_locked_debug (m, #m)
+#define recursive_mutex_assert_unlocked(m)  _recursive_mutex_assert_unlocked_debug (m, #m)
+
+#define monitor_enter(m)            _monitor_enter_debug(m, #m)
+#define monitor_exit(m)             _monitor_exit_debug(m, #m)
+#define monitor_wait(m)             _monitor_wait_debug(m, #m)
+#define monitor_assert_locked(m)    _monitor_assert_locked_debug(m, #m)
+#define monitor_assert_unlocked(m)  _monitor_assert_unlocked_debug(m, #m)
+
+#define rwlock_read(m)              _rwlock_read_debug(m, #m)
+#define rwlock_write(m)             _rwlock_write_debug(m, #m)
+#define rwlock_try_read(m)          _rwlock_try_read_debug(m, #m)
+#define rwlock_try_write(m)         _rwlock_try_write_debug(m, #m)
+#define rwlock_unlock_read(m)       _rwlock_unlock_read_debug(m, #m)
+#define rwlock_unlock_write(m)      _rwlock_unlock_write_debug(m, #m)
+#define rwlock_assert_reading(m)    _rwlock_assert_reading_debug(m, #m)
+#define rwlock_assert_writing(m)    _rwlock_assert_writing_debug(m, #m)
+#define rwlock_assert_locked(m)     _rwlock_assert_locked_debug(m, #m)
+#define rwlock_assert_unlocked(m)   _rwlock_assert_unlocked_debug(m, #m)
+
+#endif
+
+#define rwlock_unlock(m, s)                           \
+    do {                                              \
+        if ((s) == RDONLY) rwlock_unlock_read(m);     \
+        else if ((s) == RDWR) rwlock_unlock_write(m); \
+    } while (0)
+
+
+extern NXHashTable *class_hash;
+
+#if !TARGET_OS_WIN32
 /* nil handler object */
-OBJC_EXPORT id _objc_nilReceiver;
-OBJC_EXPORT id _objc_setNilReceiver(id newNilReceiver);
-OBJC_EXPORT id _objc_getNilReceiver(void);
+extern id _objc_nilReceiver;
+extern id _objc_setNilReceiver(id newNilReceiver);
+extern id _objc_getNilReceiver(void);
+#endif
 
 /* forward handler functions */
-OBJC_EXPORT void *_objc_forward_handler;
-OBJC_EXPORT void *_objc_forward_stret_handler;
-
-/* C++ interoperability */
-OBJC_EXPORT SEL cxx_construct_sel;
-OBJC_EXPORT SEL cxx_destruct_sel;
-OBJC_EXPORT const char *cxx_construct_name;
-OBJC_EXPORT const char *cxx_destruct_name;
+extern void *_objc_forward_handler;
+extern void *_objc_forward_stret_handler;
 
 /* GC and RTP startup */
-OBJC_EXPORT void gc_init(BOOL on);
-OBJC_EXPORT void rtp_init(void);
+extern void gc_init(BOOL on);
+extern void rtp_init(void);
 
 /* Exceptions */
 struct alt_handler_list;
-OBJC_EXPORT void exception_init(void);
-OBJC_EXPORT void _destroyAltHandlerList(struct alt_handler_list *list);
+extern void exception_init(void);
+extern void _destroyAltHandlerList(struct alt_handler_list *list);
+
+/* Class change notifications (gdb only for now) */
+#define OBJC_CLASS_ADDED (1<<0)
+#define OBJC_CLASS_REMOVED (1<<1)
+#define OBJC_CLASS_IVARS_CHANGED (1<<2)
+#define OBJC_CLASS_METHODS_CHANGED (1<<3)
+extern void gdb_objc_class_changed(Class cls, unsigned long changes, const char *classname)
+    __attribute__((noinline));
 
 /* Write barrier implementations */
-OBJC_EXPORT id objc_assign_strongCast_gc(id val, id *dest);
-OBJC_EXPORT id objc_assign_global_gc(id val, id *dest);
-OBJC_EXPORT id objc_assign_ivar_gc(id value, id dest, ptrdiff_t offset);
-OBJC_EXPORT id objc_assign_strongCast_non_gc(id value, id *dest);
-OBJC_EXPORT id objc_assign_global_non_gc(id value, id *dest);
-OBJC_EXPORT id objc_assign_ivar_non_gc(id value, id dest, ptrdiff_t offset);
+extern id objc_assign_strongCast_non_gc(id value, id *dest);
+extern id objc_assign_global_non_gc(id value, id *dest);
+extern id objc_assign_ivar_non_gc(id value, id dest, ptrdiff_t offset);
+extern id objc_assign_strongCast_gc(id val, id *dest);
+extern id objc_assign_global_gc(id val, id *dest);
+extern id objc_assign_ivar_gc(id value, id dest, ptrdiff_t offset);
+
+#ifndef NO_GC
+
+/* GC weak reference fixup. */
+extern void gc_fixup_weakreferences(id newObject, id oldObject);
+
+/* GC datasegment registration. */
+extern void gc_register_datasegment(uintptr_t base, size_t size);
+extern void gc_unregister_datasegment(uintptr_t base, size_t size);
 
 /*
     objc_assign_ivar, objc_assign_global, and objc_assign_strongCast MUST NOT be called directly
@@ -405,11 +558,13 @@ OBJC_EXPORT id objc_assign_ivar_non_gc(id value, id dest, ptrdiff_t offset);
 
 extern id (*objc_assign_ivar_internal)(id, id, ptrdiff_t);
 
+#endif
+
 /* Code modification */
-OBJC_EXPORT size_t objc_branch_size(void *entry, void *target);
-OBJC_EXPORT size_t objc_write_branch(void *entry, void *target);
-OBJC_EXPORT size_t objc_cond_branch_size(void *entry, void *target, unsigned cond);
-OBJC_EXPORT size_t objc_write_cond_branch(void *entry, void *target, unsigned cond);
+extern size_t objc_branch_size(void *entry, void *target);
+extern size_t objc_write_branch(void *entry, void *target);
+extern size_t objc_cond_branch_size(void *entry, void *target, unsigned cond);
+extern size_t objc_write_cond_branch(void *entry, void *target, unsigned cond);
 #if defined(__ppc__)  ||  defined(__ppc64__)
 #define COND_ALWAYS 0x02800000  /* BO=10100, BI=00000 */
 #define COND_NE     0x00820000  /* BO=00100, BI=00010 */
@@ -421,56 +576,60 @@ OBJC_EXPORT size_t objc_write_cond_branch(void *entry, void *target, unsigned co
 
 /* Thread-safe info field */
 #if !__OBJC2__
-OBJC_EXPORT void _class_setInfo(Class cls, long set);
-OBJC_EXPORT void _class_clearInfo(Class cls, long clear);
-OBJC_EXPORT void _class_changeInfo(Class cls, long set, long clear);
+extern void _class_setInfo(Class cls, long set);
+extern void _class_clearInfo(Class cls, long clear);
+extern void _class_changeInfo(Class cls, long set, long clear);
 #endif
-
-/* Secure /tmp usage */
-OBJC_EXPORT int secure_open(const char *filename, int flags, uid_t euid);
 
 
 #if !defined(SEG_OBJC)
 #define SEG_OBJC        "__OBJC"        /* objective-C runtime segment */
 #endif
-#if !defined(SEG_OBJC2)
-#define SEG_OBJC2 "__OBJC2"
-#endif
 
 
 // Settings from environment variables
-OBJC_EXPORT int PrintImages;     // env OBJC_PRINT_IMAGES
-OBJC_EXPORT int PrintLoading;    // env OBJC_PRINT_LOAD_METHODS
-OBJC_EXPORT int PrintInitializing; // env OBJC_PRINT_INITIALIZE_METHODS
-OBJC_EXPORT int PrintResolving;  // env OBJC_PRINT_RESOLVED_METHODS
-OBJC_EXPORT int PrintConnecting; // env OBJC_PRINT_CLASS_SETUP
-OBJC_EXPORT int PrintProtocols;  // env OBJC_PRINT_PROTOCOL_SETUP
-OBJC_EXPORT int PrintIvars;      // env OBJC_PRINT_IVAR_SETUP
-OBJC_EXPORT int PrintFuture;     // env OBJC_PRINT_FUTURE_CLASSES
-OBJC_EXPORT int PrintRTP;        // env OBJC_PRINT_RTP
-OBJC_EXPORT int PrintGC;         // env OBJC_PRINT_GC
-OBJC_EXPORT int PrintSharing;    // env OBJC_PRINT_SHARING
-OBJC_EXPORT int PrintCxxCtors;   // env OBJC_PRINT_CXX_CTORS
-OBJC_EXPORT int PrintExceptions; // env OBJC_PRINT_EXCEPTIONS
-OBJC_EXPORT int PrintAltHandlers; // env OBJC_PRINT_ALT_HANDLERS
-OBJC_EXPORT int PrintDeprecation;// env OBJC_PRINT_DEPRECATION_WARNINGS
-OBJC_EXPORT int PrintReplacedMethods; // env OBJC_PRINT_REPLACED_METHODS
-OBJC_EXPORT int PrintCacheCollection; // env OBJC_PRINT_CACHE_COLLECTION
-OBJC_EXPORT int UseInternalZone; // env OBJC_USE_INTERNAL_ZONE
-OBJC_EXPORT int AllowInterposing;// env OBJC_ALLOW_INTERPOSING
+#if NO_ENVIRON
+#   define ENV(x) enum { x = 0 }
+#else
+#   define ENV(x) extern int x
+#endif
+ENV(PrintImages);               // env OBJC_PRINT_IMAGES
+ENV(PrintLoading);              // env OBJC_PRINT_LOAD_METHODS
+ENV(PrintInitializing);         // env OBJC_PRINT_INITIALIZE_METHODS
+ENV(PrintResolving);            // env OBJC_PRINT_RESOLVED_METHODS
+ENV(PrintConnecting);           // env OBJC_PRINT_CLASS_SETUP
+ENV(PrintProtocols);            // env OBJC_PRINT_PROTOCOL_SETUP
+ENV(PrintIvars);                // env OBJC_PRINT_IVAR_SETUP
+ENV(PrintVtables);              // env OBJC_PRINT_VTABLE_SETUP
+ENV(PrintVtableImages);         // env OBJC_PRINT_VTABLE_IMAGES
+ENV(PrintFuture);               // env OBJC_PRINT_FUTURE_CLASSES
+ENV(PrintRTP);                  // env OBJC_PRINT_RTP
+ENV(PrintGC);                   // env OBJC_PRINT_GC
+ENV(PrintPreopt);               // env OBJC_PRINT_PREOPTIMIZATION
+ENV(PrintCxxCtors);             // env OBJC_PRINT_CXX_CTORS
+ENV(PrintExceptions);           // env OBJC_PRINT_EXCEPTIONS
+ENV(PrintAltHandlers);          // env OBJC_PRINT_ALT_HANDLERS
+ENV(PrintDeprecation);          // env OBJC_PRINT_DEPRECATION_WARNINGS
+ENV(PrintReplacedMethods);      // env OBJC_PRINT_REPLACED_METHODS
+ENV(PrintCaches);               // env OBJC_PRINT_CACHE_SETUP
+ENV(UseInternalZone);           // env OBJC_USE_INTERNAL_ZONE
 
-OBJC_EXPORT int DebugUnload;     // env OBJC_DEBUG_UNLOAD
-OBJC_EXPORT int DebugFragileSuperclasses; // env OBJC_DEBUG_FRAGILE_SUPERCLASSES
-OBJC_EXPORT int DebugFinalizers; // env OBJC_DEBUG_FINALIZERS
-OBJC_EXPORT int DebugNilSync;    // env OBJC_DEBUG_NIL_SYNC
+ENV(DebugUnload);               // env OBJC_DEBUG_UNLOAD
+ENV(DebugFragileSuperclasses);  // env OBJC_DEBUG_FRAGILE_SUPERCLASSES
+ENV(DebugFinalizers);           // env OBJC_DEBUG_FINALIZERS
+ENV(DebugNilSync);              // env OBJC_DEBUG_NIL_SYNC
 
-OBJC_EXPORT int DisableGC;       // env OBJC_DISABLE_GC
+ENV(DisableGC);                 // env OBJC_DISABLE_GC
+ENV(DisableVtables);            // env OBJC_DISABLE_VTABLES
+ENV(DisablePreopt);             // env OBJC_DISABLE_PREOPTIMIZATION
+#undef ENV
 
-/* GC state */
-OBJC_EXPORT BOOL UseGC;          // equivalent to calling objc_collecting_enabled()
-OBJC_EXPORT auto_zone_t *gc_zone;  // the GC zone, or NULL if no GC
+extern void environ_init(void);
 
-static __inline__ int _objc_strcmp(const char *s1, const char *s2) {
+extern void logReplacedMethod(const char *className, SEL s, BOOL isMeta, const char *catName, IMP oldImp, IMP newImp);
+
+
+static __inline int _objc_strcmp(const char *s1, const char *s2) {
     char c1, c2;
     for ( ; (c1 = *s1) == (c2 = *s2); s1++, s2++)
         if (c1 == '\0')
@@ -478,8 +637,8 @@ static __inline__ int _objc_strcmp(const char *s1, const char *s2) {
     return (c1 - c2);
 }       
 
-static __inline__ uintptr_t _objc_strhash(const char *s) {
-    uintptr_t hash = 0;
+static __inline uint32_t _objc_strhash(const char *s) {
+    uint32_t hash = 0;
     for (;;) {
 	int a = *s++;
 	if (0 == a) break;
@@ -501,7 +660,8 @@ typedef struct {
 
 } _objc_pthread_data;
 
-OBJC_EXPORT _objc_pthread_data *_objc_fetch_pthread_data(BOOL create);
+extern _objc_pthread_data *_objc_fetch_pthread_data(BOOL create);
+extern void tls_init(void);
 
 
 // Class state
@@ -520,15 +680,22 @@ OBJC_EXPORT _objc_pthread_data *_objc_fetch_pthread_data(BOOL create);
 #define NOBSS __attribute__((section("__DATA,__data")))
 
 // cache.h
+#if TARGET_OS_WIN32
+
+#else
+static inline int isPowerOf2(unsigned long l) { return 1 == __builtin_popcountl(l); }
+#endif
 extern void flush_caches(Class cls, BOOL flush_meta);
 extern void flush_cache(Class cls);
 extern BOOL _cache_fill(Class cls, Method smt, SEL sel);
 extern void _cache_addForwardEntry(Class cls, SEL sel);
 extern void _cache_free(Cache cache);
+
+extern mutex_t cacheUpdateLock;
+
 #if !__OBJC2__
 // used by flush_caches outside objc-cache.m
 extern void _cache_flush(Class cls);
-extern pthread_mutex_t cacheUpdateLock;
 #ifdef OBJC_INSTRUMENTED
 extern unsigned int LinearFlushCachesCount;
 extern unsigned int LinearFlushCachesVisitedCount;
@@ -542,6 +709,11 @@ extern unsigned int MaxIdealFlushCachesCount;
 #endif
 #endif
 
+// objc-gdb.h
+#if !TARGET_OS_WIN32
+BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename);
+#endif
+
 // encoding.h
 extern unsigned int encoding_getNumberOfArguments(const char *typedesc);
 extern unsigned int encoding_getSizeOfArguments(const char *typedesc);
@@ -550,13 +722,6 @@ extern void encoding_getReturnType(const char *t, char *dst, size_t dst_len);
 extern char * encoding_copyReturnType(const char *t);
 extern void encoding_getArgumentType(const char *t, unsigned int index, char *dst, size_t dst_len);
 extern char *encoding_copyArgumentType(const char *t, unsigned int index);
-
-// lock.h
-extern void _lock_debug(mutex_t lock, const char *name);
-extern void _checklock_debug(mutex_t lock, const char *name);
-extern void _checkunlock_debug(mutex_t lock, const char *name);
-extern void _unlock_debug(mutex_t lock, const char *name);
-extern void _destroyLockList(struct _objc_lock_list *locks);
 
 // sync.h
 extern void _destroySyncCache(struct SyncCache *cache);
@@ -577,10 +742,18 @@ extern void layout_bitmap_slide(layout_bitmap *bits, size_t oldPos, size_t newPo
 extern BOOL layout_bitmap_splat(layout_bitmap dst, layout_bitmap src, 
                                 size_t oldSrcInstanceSize);
 extern BOOL layout_bitmap_or(layout_bitmap dst, layout_bitmap src, const char *msg);
+extern BOOL layout_bitmap_clear(layout_bitmap dst, layout_bitmap src, const char *msg);
+extern void layout_bitmap_print(layout_bitmap bits);
 
 
 // fixme runtime
 extern id look_up_class(const char *aClassName, BOOL includeUnconnected, BOOL includeClassHandler);
+extern const char *map_images(enum dyld_image_states state, uint32_t infoCount, const struct dyld_image_info infoList[]);
+extern const char *map_images_nolock(enum dyld_image_states state, uint32_t infoCount, const struct dyld_image_info infoList[]);
+extern const char * load_images(enum dyld_image_states state, uint32_t infoCount, const struct dyld_image_info infoList[]);
+extern BOOL load_images_nolock(enum dyld_image_states state, uint32_t infoCount, const struct dyld_image_info infoList[]);
+extern void unmap_image(const struct mach_header *mh, intptr_t vmaddr_slide);
+extern void unmap_image_nolock(const struct mach_header *mh, intptr_t vmaddr_slide);
 extern void _read_images(header_info **hList, uint32_t hCount);
 extern void prepare_load_methods(header_info *hi);
 extern void _unload_image(header_info *hi);
@@ -611,23 +784,28 @@ extern BOOL _class_isInitialized(Class cls);
 extern void _class_setInitializing(Class cls);
 extern void _class_setInitialized(Class cls);
 extern Class _class_getNonMetaClass(Class cls);
-extern Method _class_getMethodNoSuper(Class cls, SEL sel);
 extern Method _class_getMethod(Class cls, SEL sel);
+extern Method _class_getMethodNoSuper(Class cls, SEL sel);
+extern Method _class_getMethodNoSuper_nolock(Class cls, SEL sel);
 extern BOOL _class_isLoadable(Class cls);
 extern IMP _class_getLoadMethod(Class cls);
 extern BOOL _class_hasLoadMethod(Class cls);
 extern BOOL _class_hasCxxStructorsNoSuper(Class cls);
 extern BOOL _class_shouldFinalizeOnMainThread(Class cls);
 extern void _class_setFinalizeOnMainThread(Class cls);
+extern BOOL _class_instancesHaveAssociatedObjects(Class cls);
+extern void _class_assertInstancesHaveAssociatedObjects(Class cls);
 extern BOOL _class_shouldGrowCache(Class cls);
 extern void _class_setGrowCache(Class cls, BOOL grow);
 extern Ivar _class_getVariable(Class cls, const char *name);
-extern Class _class_getFreedObjectClass(void);
-extern Class _class_getNonexistentObjectClass(void);
+
 extern id _internal_class_createInstanceFromZone(Class cls, size_t extraBytes,
                                                  void *zone);
 extern id _internal_object_dispose(id anObject);
 
+extern Class gdb_class_getClass(Class cls);
+extern BOOL class_instancesHaveAssociatedObjects(Class cls);
+OBJC_EXPORT BOOL gdb_objc_isRuntimeLocked();
 
 extern const char *_category_getName(Category cat);
 extern const char *_category_getClassName(Category cat);
@@ -646,10 +824,14 @@ static inline struct old_class *_class_asOld(Class cls) { return (struct old_cla
 static inline struct old_category *_category_asOld(Category cat) { return (struct old_category *)cat; }
 
 extern void unload_class(struct old_class *cls);
+Class _class_getNonexistentObjectClass(void);
 #endif
 
 extern BOOL object_cxxConstruct(id obj);
 extern void object_cxxDestruct(id obj);
+
+extern Method _class_resolveMethod(Class cls, SEL sel);
+extern void log_and_fill_cache(Class cls, Class implementer, Method meth, SEL sel);
 
 #if !__OBJC2__
 #define CLS_CLASS		0x1
@@ -689,6 +871,8 @@ extern void object_cxxDestruct(id obj);
 #define CLS_CONSTRUCTED         0x400000
 // class is leaf for cache flushing
 #define CLS_LEAF                0x800000
+// class instances may have associative references
+#define CLS_INSTANCES_HAVE_ASSOCIATED_OBJECTS 0x1000000
 #endif
 
 #define OBJC_WARN_DEPRECATED \
@@ -700,16 +884,7 @@ extern void object_cxxDestruct(id obj);
         } \
     } while (0) \
 
-/* Method prototypes */
-@interface DoesNotExist
-+ class;
-+ initialize;
-- (id)description;
-- (const char *)UTF8String;
-- (unsigned long)hash;
-- (BOOL)isEqual:(id)object;
-- free;
-@end
+__END_DECLS
 
 #endif /* _OBJC_PRIVATE_H_ */
 

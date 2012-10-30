@@ -28,10 +28,10 @@
 #ifndef _OBJC_LOAD_H_
 #define _OBJC_LOAD_H_
 
-#import <objc/objc-class.h>
+#include <objc/objc-class.h>
 
-#import <mach-o/loader.h>
-#import <AvailabilityMacros.h>
+#include <mach-o/loader.h>
+#include <AvailabilityMacros.h>
 
 /* dynamically loading Mach-O object files that contain Objective-C code */
 

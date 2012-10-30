@@ -32,8 +32,8 @@
 #include <mach-o/ldsyms.h>
 
 #define OLD 1
-#import "objc-private.h"
 #import "Protocol.h"
+#import "objc-private.h"
 
 
 /* some forward declarations */

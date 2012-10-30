@@ -21,6 +21,8 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+#ifdef __x86_64__
+
 /*
     This file defines the non-GC variants of objc_assign_* on a dedicated
     page in the (__DATA,__data) section. At load time under GC, each
@@ -76,3 +78,5 @@ LNonGCAssigns$End:
 // Claim the remainder of the page.
 .set    L$set$assignsSize,LNonGCAssigns$End-LNonGCAssigns$Begin
 .space  4096-L$set$assignsSize
+
+#endif

@@ -79,6 +79,8 @@
 #   define kRTPagesLo    OBJC_UINTPTR_T(-24 * 0x1000) // i386 0xfffe8000
 #elif defined(__x86_64__)
 #   define kRTPagesLo    OBJC_UINTPTR_T(-24 * 0x1000) // x86_64 0xfffffffffffe8000
+#elif defined(__arm__)  ||  defined(TARGET_OS_WIN32)
+#   define kRTPagesLo    OBJC_UINTPTR_T(0)
 #else
     #error unknown architecture
 #endif

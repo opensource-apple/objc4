@@ -33,8 +33,9 @@
 #warning The API in this header is obsoleted by NSHashtable.h
 #endif
 
-#import <objc/objc.h>
+#include <objc/objc.h>
 #include <stdint.h>
+#include <TargetConditionals.h>
 
 /*************************************************************************
  *	Hash tables of arbitrary data
@@ -177,6 +178,9 @@ For the following prototypes, free is defined as NXReallyFree.
 OBJC_EXPORT const NXHashTablePrototype NXPtrStructKeyPrototype;
 OBJC_EXPORT const NXHashTablePrototype NXStrStructKeyPrototype;
 
+
+#if !__OBJC2__  &&  !TARGET_OS_WIN32
+
 /*************************************************************************
  *	Unique strings and buffers
  *************************************************************************/
@@ -211,5 +215,7 @@ OBJC_EXPORT char *NXCopyStringBuffer(const char *buffer);
 OBJC_EXPORT char *NXCopyStringBufferFromZone(const char *buffer, void *z);
     /* given a buffer, allocates a new string copy of buffer.  
     Buffer should be \0 terminated; returned string is \0 terminated. */
+
+#endif
 
 #endif /* _OBJC_LITTLE_HASHTABLE_H_ */

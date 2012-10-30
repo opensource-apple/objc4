@@ -1,0 +1,2 @@
+objc\[\d+\]: '.*librequiresgc.dylib' was compiled with -fobjc-gc-only, but the application does not support GC
+objc\[\d+\]: \*\*\* GC capability of application and some libraries did not match

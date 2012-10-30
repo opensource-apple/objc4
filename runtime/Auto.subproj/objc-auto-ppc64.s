@@ -21,4 +21,8 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+#ifdef __ppc64__
+
 #warning ppc64 version needs to be implemented. 
+
+#endif

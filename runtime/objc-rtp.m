@@ -25,43 +25,15 @@
   in high memory that can be reached via an absolute branch.
 */
 
-#import "objc-rtp.h"
 #import "objc-private.h"
-#import "objc-auto.h"
+#import <objc/message.h>
 
-#import <stdint.h>
-#import <mach/mach.h>
-
-
-// Local prototypes
-
-#if defined(__ppc__)  ||  defined(__ppc64__)
-// from Libc, but no prototype yet (#3850825)
-extern void sys_icache_invalidate(const void * newcode, size_t len);
-
-static size_t rtp_copy_code(unsigned* dest, unsigned* source, size_t max_insns);
-#endif
-
-
-#if defined(__ppc64__)
-
-__private_extern__ void rtp_init(void)
-{
-    if (PrintRTP) {
-        _objc_inform("RTP: no rtp implementation for this platform");
-    }
-}
-
-#else
 
 #if defined(__ppc__)
+
+static size_t rtp_copy_code(unsigned* dest, unsigned* source, size_t max_insns);
 static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize);
 static void rtp_set_up_other(uintptr_t address, size_t maxsize, const char *name, void *gc_code, void *non_gc_code);
-#endif
-
-#if defined(__i386__) || defined(__x86_64__)
-static void rtp_swap_imp(unsigned *address, void *code, const char *name);
-#endif
 
 /**********************************************************************
 * rtp_init
@@ -70,8 +42,6 @@ static void rtp_swap_imp(unsigned *address, void *code, const char *name);
 **********************************************************************/
 __private_extern__ void rtp_init(void)
 {
-#if defined(__ppc__)
-
     kern_return_t ret;
     vm_address_t objcRTPages = (vm_address_t)(kRTPagesHi - kRTPagesSize);
 
@@ -94,7 +64,11 @@ __private_extern__ void rtp_init(void)
     
     // initialize code in ObjC runtime pages
     rtp_set_up_objc_msgSend(kRTAddress_objc_msgSend, kRTSize_objc_msgSend);
-    
+#ifdef NO_GC
+    #define objc_assign_ivar_gc objc_assign_ivar_non_gc
+    #define objc_assign_global_gc objc_assign_global_non_gc
+    #define objc_assign_strongCast_gc objc_assign_strongCast_non_gc
+#endif
     rtp_set_up_other(kRTAddress_objc_assign_ivar, kRTSize_objc_assign_ivar,
                     "objc_assign_ivar", objc_assign_ivar_gc, objc_assign_ivar_non_gc);
                     
@@ -106,7 +80,7 @@ __private_extern__ void rtp_init(void)
 
     // initialize data in ObjC runtime pages
     memset((char *)kRTAddress_zero, 0, 16);
-    strcpy((char *)kIgnore, "<ignored selector>");
+    strlcpy((char *)kIgnore, "<ignored selector>", OBJC_SIZE_T(19));
 
     // re-protect the ObjC runtime pages for execution
     ret = vm_protect(mach_task_self(),
@@ -115,33 +89,8 @@ __private_extern__ void rtp_init(void)
     if (ret != KERN_SUCCESS) {
         _objc_inform("RTP: Could not re-protect Objective-C runtime pages!");
     }
-
-#elif defined(__i386__) || defined(__x86_64__)
-
-    // At load time, the page on which the objc_assign_* routines live is not
-    // marked as executable. We fix that here, regardless of the GC choice.
-    if (UseGC)
-    {
-        rtp_swap_imp((unsigned*)objc_assign_ivar,
-            objc_assign_ivar_gc, "objc_assign_ivar");
-        rtp_swap_imp((unsigned*)objc_assign_global,
-            objc_assign_global_gc, "objc_assign_global");
-        rtp_swap_imp((unsigned*)objc_assign_strongCast,
-            objc_assign_strongCast_gc, "objc_assign_strongCast");
-    }
-    else
-    {   // Not GC, just make the page executable.
-        if (vm_protect(mach_task_self(), (vm_address_t)objc_assign_ivar, 1,
-            FALSE, VM_PROT_READ | VM_PROT_EXECUTE) != KERN_SUCCESS)
-            _objc_fatal("Could not reprotect objc_assign_*.");
-    }
-
-#else
-#error undefined architecture
-#endif
 }
 
-#if defined(__ppc__)
 
 /**********************************************************************
 * rtp_set_up_objc_msgSend
@@ -152,7 +101,6 @@ __private_extern__ void rtp_init(void)
 **********************************************************************/
 static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize) 
 {
-#if defined(__ppc__)  ||  defined(__ppc64__)
     // Location in the runtime pages of the new function.
     unsigned *buffer = (unsigned *)address;
 
@@ -172,20 +120,6 @@ static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize)
     }
     return;
 #endif
-
-    // If function interposing is enabled, call the full implementation 
-    // via a dyld-recognizable stub.
-    if (AllowInterposing) {
-        extern void objc_msgSend_stub(void);
-        size_t written = objc_write_branch(buffer, objc_msgSend_stub);
-        sys_icache_invalidate(buffer, written*4);
-        if (PrintRTP) {
-            _objc_inform("RTP: interposing enabled - objc_msgSend "
-                         "in RTP at %p is a %zu instruction branch", 
-                         buffer, written);
-        }
-        return;
-    }
 
     if (PrintRTP) {
         _objc_inform("RTP: writing objc_msgSend at [%p..%p) ...", 
@@ -271,12 +205,6 @@ static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize)
         _objc_inform("RTP: wrote   objc_msgSend at [%p..%p)", 
                      (void *)address, (void *)(address + i*sizeof(unsigned)));
     }
-
-#elif defined(__i386__)
-    #warning needs implementation
-#else
-    #error unknown architecture
-#endif   
 }
 
 
@@ -291,7 +219,6 @@ static void rtp_set_up_objc_msgSend(uintptr_t address, size_t maxsize)
 * non_gc_code is the code to use if collecting is not enabled (assumed to be small enough to copy.)
 **********************************************************************/
 static void rtp_set_up_other(uintptr_t address, size_t maxsize, const char *name, void *gc_code, void *non_gc_code) {
-#if defined(__ppc__)  ||  defined(__ppc64__)
     // location in the runtime pages of this function
     unsigned *buffer = (unsigned *)address;
     
@@ -335,12 +262,6 @@ static void rtp_set_up_other(uintptr_t address, size_t maxsize, const char *name
                      name, (void *)address, 
                      (void *)(address + i * sizeof(unsigned)));
     }
-
-#elif defined(__i386__)
-    #warning needs implementation
-#else // defined(architecture)
-    #error unknown architecture
-#endif // defined(architecture)
 }
 
 
@@ -369,10 +290,9 @@ static size_t rtp_copy_code(unsigned* dest, unsigned* source, size_t max_insns)
     return i + 1;
 }
 
-// defined(__ppc__)  ||  defined(__ppc64__)
-#endif
 
-#if defined(__i386__) || defined(__x86_64__)
+#elif defined(__i386__)
+
 
 /**********************************************************************
 * rtp_swap_imp
@@ -396,8 +316,41 @@ static void rtp_swap_imp(unsigned *address, void *code, const char *name)
     }
 }
 
-// defined(__i386__) || defined(__x86_64__)
+
+__private_extern__ void rtp_init(void)
+{
+    // At load time, the page on which the objc_assign_* routines live is not
+    // marked as executable. We fix that here, regardless of the GC choice.
+#ifndef NO_GC
+    if (UseGC)
+    {
+        rtp_swap_imp((unsigned*)objc_assign_ivar,
+            objc_assign_ivar_gc, "objc_assign_ivar");
+        rtp_swap_imp((unsigned*)objc_assign_global,
+            objc_assign_global_gc, "objc_assign_global");
+        rtp_swap_imp((unsigned*)objc_assign_strongCast,
+            objc_assign_strongCast_gc, "objc_assign_strongCast");
+    }
+    else
+#endif
+    {   // Not GC, just make the page executable.
+        if (vm_protect(mach_task_self(), (vm_address_t)objc_assign_ivar, 1,
+            FALSE, VM_PROT_READ | VM_PROT_EXECUTE) != KERN_SUCCESS)
+            _objc_fatal("Could not reprotect objc_assign_*.");
+    }
+}
+
+
+#else
+
+
+__private_extern__ void rtp_init(void)
+{
+    if (PrintRTP) {
+        _objc_inform("RTP: no rtp implementation for this platform");
+    }
+}
+
+
 #endif
 
-// !defined(__ppc64__)
-#endif

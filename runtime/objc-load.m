@@ -28,14 +28,9 @@
  *
  */
 
-#if !__OBJC2__
+#include "objc-private.h"
 
-#import "objc-private.h"
-#import <objc/objc-runtime.h>
-#import <objc/hashtable2.h>
-#import <objc/Object.h>
-#include <mach-o/dyld.h>
-
+#if !__OBJC2__  &&  !TARGET_OS_WIN32
 
 extern void (*callbackFunction)( Class, const char * );
 

@@ -1,0 +1,22 @@
+objc4 test suite README
+
+To run the tests:
+  `make` in this directory, or `make test` in the top-level directory
+
+Correct test output consists of 'PASS: testname' for each test. 
+No other output should be seen.
+
+Other options: 
+  `make` tests the installed libobjc
+  `make buildit` tests the libobjc in /tmp/objc4-roots/objc4~sym/
+  `make local` tests the libobjc in ..
+
+  `make GC=YES` runs with garbage collection on
+  `make ARCHS=cpu` tests with the specified architecture (only one allowed)
+  `make VALGRIND=YES` runs with valgrind on (memcheck and leak detection)
+  `make GUARDMALLOC=YES` runs with GuardMalloc on
+
+  `make OBJC_LIB=/path/to/libobjc.A.dylib` tests a specific objc4 build
+  `make OTHER_CFLAGS=x` tests with specified flags
+
+  `make VERBOSE=` logs progress of some tests

@@ -27,7 +27,6 @@
 **********************************************************************/
 
 #include "objc-private.h"
-#include <sys/param.h>
 
 /***********************************************************************
 * SubtypeUntil.
@@ -209,7 +208,7 @@ encoding_getArgumentInfo(const char *typedesc, int arg,
                          const char **type, int *offset)
 {
     unsigned nargs = 0;
-    unsigned self_offset = 0;
+    int self_offset = 0;
     BOOL offset_is_negative = NO;
 
     // First, skip the return type
@@ -264,7 +263,7 @@ encoding_getArgumentInfo(const char *typedesc, int arg,
 
     if (*typedesc)
     {
-        unsigned arg_offset = 0;
+        int arg_offset = 0;
 
         *type	 = typedesc;
         typedesc = SkipFirstType (typedesc);

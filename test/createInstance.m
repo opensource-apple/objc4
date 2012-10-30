@@ -1,0 +1,57 @@
+#import <objc/runtime.h>
+#import <objc/objc-auto.h>
+#ifndef OBJC_NO_GC
+#include <auto_zone.h>
+#endif
+#include "test.h"
+
+@interface Super { @public id isa; } @end
+@implementation Super 
++(void) initialize { } 
++(Class) class { return self; }
+@end
+
+@interface Sub : Super { int array[128]; } @end
+@implementation Sub @end
+
+int main()
+{
+    Super *s;
+
+    s = class_createInstance([Super class], 0);
+    testassert(s);
+    testassert(s->isa == [Super class]);
+    testassert(malloc_size(s) >= class_getInstanceSize([Super class]));
+    if (objc_collecting_enabled()) testassert(auto_zone_is_valid_pointer(auto_zone(), s));
+
+    object_dispose(s);
+
+    s = class_createInstance([Sub class], 0);
+    testassert(s);
+    testassert(s->isa == [Sub class]);
+    testassert(malloc_size(s) >= class_getInstanceSize([Sub class]));
+    if (objc_collecting_enabled()) testassert(auto_zone_is_valid_pointer(auto_zone(), s));
+
+    object_dispose(s);
+
+    s = class_createInstance([Super class], 100);
+    testassert(s);
+    testassert(s->isa == [Super class]);
+    testassert(malloc_size(s) >= class_getInstanceSize([Super class]) + 100);
+    if (objc_collecting_enabled()) testassert(auto_zone_is_valid_pointer(auto_zone(), s));
+
+    object_dispose(s);
+
+    s = class_createInstance([Sub class], 100);
+    testassert(s);
+    testassert(s->isa == [Sub class]);
+    testassert(malloc_size(s) >= class_getInstanceSize([Sub class]) + 100);
+    if (objc_collecting_enabled()) testassert(auto_zone_is_valid_pointer(auto_zone(), s));
+
+    object_dispose(s);
+
+    s = class_createInstance(Nil, 0);
+    testassert(!s);
+
+    succeed(__FILE__);
+}

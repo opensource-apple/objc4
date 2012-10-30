@@ -21,10 +21,15 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#import <objc/objc.h>
-#import <objc/runtime.h>
+#ifndef _OBJC_MESSAGE_H
+#define _OBJC_MESSAGE_H
+
+#include <objc/objc.h>
+#include <objc/runtime.h>
 
 
+#ifndef OBJC_SUPER
+#define OBJC_SUPER
 struct objc_super {
     id receiver;
 #if !defined(__cplusplus)  &&  !__OBJC2__
@@ -34,6 +39,7 @@ struct objc_super {
 #endif
     /* super_class is the first class to search */
 };
+#endif
 
 
 /* Basic Messaging Primitives
@@ -111,6 +117,27 @@ OBJC_EXPORT void method_invoke_stret(id receiver, Method m, ...)
      AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
 
 
+/* Message Forwarding Primitives
+ * Use these functions to forward a message as if the receiver did not 
+ * respond to it. 
+ *
+ * The receiver must not be nil.
+ * 
+ * class_getMethodImplementation() may return (IMP)_objc_msgForward.
+ * class_getMethodImplementation_stret() may return (IMP)_objc_msgForward_stret
+ * 
+ * These functions must be cast to an appropriate function pointer type 
+ * before being called. 
+ *
+ * Before Mac OS X 10.6, _objc_msgForward must not be called directly 
+ * but may be compared to other IMP values.
+ */
+OBJC_EXPORT id _objc_msgForward(id receiver, SEL sel, ...) 
+     AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+OBJC_EXPORT void _objc_msgForward_stret(id receiver, SEL sel, ...) 
+     AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER;
+
+
 /* Variable-argument Messaging Primitives
  *
  * Use these functions to call methods with a list of arguments, such 
@@ -169,5 +196,7 @@ OBJC_EXPORT double objc_msgSendv_fpret(id self, SEL op, unsigned arg_size, marg_
 
 #define marg_setValue(margs, offset, type, value) \
 	( marg_getValue(margs, offset, type) = (value) )
+
+#endif
 
 #endif

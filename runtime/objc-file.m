@@ -22,15 +22,54 @@
  */
 // Copyright 1988-1996 NeXT Software, Inc.
 
-#include <mach-o/ldsyms.h>
-#include <mach-o/dyld.h>
-#include <mach-o/getsect.h>
-#include <string.h>
-#include <stdlib.h>
-#include <crt_externs.h>
-
 #define OLD 1
-#import "objc-private.h"
+#include "objc-private.h"
+
+#if TARGET_OS_WIN32
+
+__private_extern__ const char *_getObjcHeaderName(const headerType *head)
+{
+    return "??";
+}
+
+/*
+__private_extern__ Module 
+_getObjcModules(const header_info *hi, size_t *nmodules)
+{
+    if (nmodules) *nmodules = hi->os.moduleCount;
+    return hi->os.modules;
+}
+*/
+__private_extern__ SEL *
+_getObjcSelectorRefs(const header_info *hi, size_t *nmess)
+{
+    if (nmess) *nmess = hi->os.selrefCount;
+    return hi->os.selrefs;
+}
+
+__private_extern__ struct old_protocol **
+_getObjcProtocols(const header_info *hi, size_t *nprotos)
+{
+    if (nprotos) *nprotos = hi->os.protocolCount;
+    return hi->os.protocols;
+}
+
+__private_extern__ struct old_class **
+_getObjcClassRefs(const header_info *hi, size_t *nclasses)
+{
+    if (nclasses) *nclasses = hi->os.clsrefCount;
+    return (struct old_class **)hi->os.clsrefs;
+}
+
+// __OBJC,__class_names section only emitted by CodeWarrior  rdar://4951638
+__private_extern__ const char *
+_getObjcClassNames(const header_info *hi, size_t *size)
+{
+    if (size) *size = 0;
+    return NULL;
+}
+
+#else
 
 #ifndef __LP64__
 #define SEGMENT_CMD LC_SEGMENT
@@ -58,15 +97,15 @@ _getObjcImageInfo(const headerType *head, ptrdiff_t slide, size_t *sizep)
 
 // fixme !objc2 only (used for new-abi paranoia)
 __private_extern__ Module 
-_getObjcModules(const headerType *head, ptrdiff_t slide, size_t *nmodules)
+_getObjcModules(const header_info *hi, size_t *nmodules)
 {
   size_t size;
   void *mods = 
-      GETSECTDATAFROMHEADER(head, SEG_OBJC, SECT_OBJC_MODULES, &size);
+      GETSECTDATAFROMHEADER(hi->mhdr, SEG_OBJC, SECT_OBJC_MODULES, &size);
 #if !__OBJC2__
   *nmodules = size / sizeof(struct objc_module);
 #endif
-  if (mods) mods = (void *)((uintptr_t)mods + slide);
+  if (mods) mods = (void *)((uintptr_t)mods + hi->os.image_slide);
   return (Module)mods;
 }
 
@@ -77,22 +116,49 @@ _getObjcSelectorRefs(const header_info *hi, size_t *nmess)
   size_t size;
   void *refs = 
       GETSECTDATAFROMHEADER (hi->mhdr, SEG_OBJC, "__message_refs", &size);
-  if (refs) refs = (void *)((uintptr_t)refs + hi->image_slide);
+  if (refs) refs = (void *)((uintptr_t)refs + hi->os.image_slide);
   *nmess = size / sizeof(SEL);
   return (SEL *)refs;
 }
 
 #if !__OBJC2__
 
-__private_extern__ struct old_protocol *
+__private_extern__ BOOL
+_hasObjcContents(const header_info *hi)
+{
+    // Look for an __OBJC,* section other than __OBJC,__image_info
+    const segmentType *seg = hi->os.objcSegmentHeader;
+    const sectionType *sect;
+    uint32_t i;
+    for (i = 0; i < seg->nsects; i++) {
+        sect = ((const sectionType *)(seg+1))+i;
+        if (0 != strncmp(sect->sectname, "__image_info", 12)) {
+            return YES;
+        }
+    }
+
+    return NO;
+}
+
+__private_extern__ struct old_protocol **
 _getObjcProtocols(const header_info *hi, size_t *nprotos)
 {
-  size_t size;
-  void *protos = 
-      GETSECTDATAFROMHEADER (hi->mhdr, SEG_OBJC, "__protocol", &size);
-  *nprotos = size / sizeof(struct old_protocol);
-  if (protos) protos = (struct old_protocol *)((uintptr_t)protos+hi->image_slide);
-  return (struct old_protocol *)protos;
+    size_t size;
+    struct old_protocol *protos = (struct old_protocol *)
+        GETSECTDATAFROMHEADER (hi->mhdr, SEG_OBJC, "__protocol", &size);
+    *nprotos = size / sizeof(struct old_protocol);
+    if (protos) protos = (struct old_protocol *)((uintptr_t)protos+hi->os.image_slide);
+    
+    if (!hi->os.proto_refs  &&  *nprotos) {
+        size_t i;
+        header_info *whi = (header_info *)hi;
+        whi->os.proto_refs = malloc(*nprotos * sizeof(*hi->os.proto_refs));
+        for (i = 0; i < *nprotos; i++) {
+            hi->os.proto_refs[i] = protos+i;
+        }
+    }
+    
+    return hi->os.proto_refs;
 }
 
 __private_extern__ struct old_class **
@@ -102,7 +168,7 @@ _getObjcClassRefs(const header_info *hi, size_t *nclasses)
   void *classes = 
       GETSECTDATAFROMHEADER(hi->mhdr, SEG_OBJC, "__cls_refs", &size);
   *nclasses = size / sizeof(struct old_class *);
-  if (classes) classes = (void *)((uintptr_t)classes + hi->image_slide);
+  if (classes) classes = (void *)((uintptr_t)classes + hi->os.image_slide);
   return (struct old_class **)classes;
 }
 
@@ -112,7 +178,7 @@ _getObjcClassNames(const header_info *hi, size_t *size)
 {
   void *names = 
       GETSECTDATAFROMHEADER(hi->mhdr, SEG_OBJC, "__class_names", size);
-  if (names) names = (void *)((uintptr_t)names + hi->image_slide);
+  if (names) names = (void *)((uintptr_t)names + hi->os.image_slide);
   return (const char *)names;
 }
 
@@ -120,15 +186,32 @@ _getObjcClassNames(const header_info *hi, size_t *size)
 
 #if __OBJC2__
 
+__private_extern__ BOOL
+_hasObjcContents(const header_info *hi)
+{
+    // Look for a __DATA,__objc* section other than __DATA,__objc_imageinfo
+    const segmentType *seg = hi->os.dataSegmentHeader;
+    const sectionType *sect;
+    uint32_t i;
+    for (i = 0; i < seg->nsects; i++) {
+        sect = ((const sectionType *)(seg+1))+i;
+        if (0 == strncmp(sect->sectname, "__objc_", 7)  &&  
+            0 != strncmp(sect->sectname, "__objc_imageinfo", 16)) 
+        {
+            return YES;
+        }
+    }
+
+    return NO;
+}
+
 __private_extern__ SEL *
 _getObjc2SelectorRefs(const header_info *hi, size_t *nmess)
 {
   size_t size;
   void *refs = 
       GETSECTDATAFROMHEADER (hi->mhdr, SEG_DATA, "__objc_selrefs", &size);
-  if (!refs) refs =
-      GETSECTDATAFROMHEADER (hi->mhdr, SEG_OBJC2, "__selector_refs", &size);
-  if (refs) refs = (void *)((uintptr_t)refs + hi->image_slide);
+  if (refs) refs = (void *)((uintptr_t)refs + hi->os.image_slide);
   *nmess = size / sizeof(SEL);
   return (SEL *)refs;
 }
@@ -139,9 +222,7 @@ _getObjc2MessageRefs(const header_info *hi, size_t *nmess)
   size_t size;
   void *refs = 
       GETSECTDATAFROMHEADER (hi->mhdr, SEG_DATA, "__objc_msgrefs", &size);
-  if (!refs) refs =
-      GETSECTDATAFROMHEADER (hi->mhdr, SEG_OBJC2, "__message_refs", &size);
-  if (refs) refs = (void *)((uintptr_t)refs + hi->image_slide);
+  if (refs) refs = (void *)((uintptr_t)refs + hi->os.image_slide);
   *nmess = size / sizeof(message_ref);
   return (message_ref *)refs;
 }
@@ -152,10 +233,8 @@ _getObjc2ClassRefs(const header_info *hi, size_t *nclasses)
   size_t size;
   void *classes = 
       GETSECTDATAFROMHEADER(hi->mhdr, SEG_DATA, "__objc_classrefs", &size);
-  if (!classes) classes =
-      GETSECTDATAFROMHEADER(hi->mhdr, SEG_OBJC2, "__class_refs", &size);
   *nclasses = size / sizeof(struct class_t *);
-  if (classes) classes = (void *)((uintptr_t)classes + hi->image_slide);
+  if (classes) classes = (void *)((uintptr_t)classes + hi->os.image_slide);
   return (struct class_t **)classes;
 }
 
@@ -165,10 +244,8 @@ _getObjc2SuperRefs(const header_info *hi, size_t *nclasses)
   size_t size;
   void *classes = 
       GETSECTDATAFROMHEADER(hi->mhdr, SEG_DATA, "__objc_superrefs", &size);
-  if (!classes) classes =
-      GETSECTDATAFROMHEADER(hi->mhdr, SEG_OBJC2, "__super_refs", &size);
   *nclasses = size / sizeof(struct class_t *);
-  if (classes) classes = (void *)((uintptr_t)classes + hi->image_slide);
+  if (classes) classes = (void *)((uintptr_t)classes + hi->os.image_slide);
   return (struct class_t **)classes;
 }
 
@@ -178,10 +255,8 @@ _getObjc2ClassList(const header_info *hi, size_t *nclasses)
   size_t size;
   void *classes = 
       GETSECTDATAFROMHEADER(hi->mhdr, SEG_DATA, "__objc_classlist", &size);
-  if (!classes) classes =
-      GETSECTDATAFROMHEADER(hi->mhdr, SEG_OBJC2, "__class_list", &size);
   *nclasses = size / sizeof(struct class_t *);
-  if (classes) classes = (void *)((uintptr_t)classes + hi->image_slide);
+  if (classes) classes = (void *)((uintptr_t)classes + hi->os.image_slide);
   return (struct class_t **)classes;
 }
 
@@ -191,10 +266,8 @@ _getObjc2NonlazyClassList(const header_info *hi, size_t *nclasses)
   size_t size;
   void *classes = 
       GETSECTDATAFROMHEADER(hi->mhdr, SEG_DATA, "__objc_nlclslist", &size);
-  if (!classes) classes =
-      GETSECTDATAFROMHEADER(hi->mhdr, SEG_OBJC2, "__nonlazy_class", &size);
   *nclasses = size / sizeof(struct class_t *);
-  if (classes) classes = (void *)((uintptr_t)classes + hi->image_slide);
+  if (classes) classes = (void *)((uintptr_t)classes + hi->os.image_slide);
   return (struct class_t **)classes;
 }
 
@@ -204,10 +277,8 @@ _getObjc2CategoryList(const header_info *hi, size_t *ncats)
   size_t size;
   void *cats = 
       GETSECTDATAFROMHEADER(hi->mhdr, SEG_DATA, "__objc_catlist", &size);
-  if (!cats) cats = 
-      GETSECTDATAFROMHEADER(hi->mhdr, SEG_OBJC2, "__category_list", &size);
   *ncats = size / sizeof(struct category_t *);
-  if (cats) cats = (void *)((uintptr_t)cats + hi->image_slide);
+  if (cats) cats = (void *)((uintptr_t)cats + hi->os.image_slide);
   return (struct category_t **)cats;
 }
 
@@ -217,10 +288,8 @@ _getObjc2NonlazyCategoryList(const header_info *hi, size_t *ncats)
   size_t size;
   void *cats = 
       GETSECTDATAFROMHEADER(hi->mhdr, SEG_DATA, "__objc_nlcatlist", &size);
-  if (!cats) cats = 
-      GETSECTDATAFROMHEADER(hi->mhdr, SEG_OBJC2, "__nonlazy_catgry", &size);
   *ncats = size / sizeof(struct category_t *);
-  if (cats) cats = (void *)((uintptr_t)cats + hi->image_slide);
+  if (cats) cats = (void *)((uintptr_t)cats + hi->os.image_slide);
   return (struct category_t **)cats;
 }
 
@@ -230,10 +299,8 @@ _getObjc2ProtocolList(const header_info *hi, size_t *nprotos)
   size_t size;
   void *protos = 
       GETSECTDATAFROMHEADER (hi->mhdr, SEG_DATA, "__objc_protolist", &size);
-  if (!protos) protos =
-      GETSECTDATAFROMHEADER (hi->mhdr, SEG_OBJC2, "__protocol_list", &size);
   *nprotos = size / sizeof(struct protocol_t *);
-  if (protos) protos = (struct protocol_t **)((uintptr_t)protos+hi->image_slide);
+  if (protos) protos = (struct protocol_t **)((uintptr_t)protos+hi->os.image_slide);
   return (struct protocol_t **)protos;
 }
 
@@ -243,32 +310,12 @@ _getObjc2ProtocolRefs(const header_info *hi, size_t *nprotos)
   size_t size;
   void *protos = 
       GETSECTDATAFROMHEADER (hi->mhdr, SEG_DATA, "__objc_protorefs", &size);
-  if (!protos) protos =
-      GETSECTDATAFROMHEADER (hi->mhdr, SEG_OBJC2, "__protocol_refs", &size);
   *nprotos = size / sizeof(struct protocol_t *);
-  if (protos) protos = (struct protocol_t **)((uintptr_t)protos+hi->image_slide);
+  if (protos) protos = (struct protocol_t **)((uintptr_t)protos+hi->os.image_slide);
   return (struct protocol_t **)protos;
 }
 
 #endif
-
-__private_extern__ const segmentType *
-getsegbynamefromheader(const headerType *head, const char *segname)
-{
-    const segmentType *sgp;
-    unsigned long i;
-    
-    sgp = (const segmentType *) (head + 1);
-    for (i = 0; i < head->ncmds; i++){
-        if (sgp->cmd == SEGMENT_CMD) {
-            if (strncmp(sgp->segname, segname, sizeof(sgp->segname)) == 0) {
-                return sgp;
-            }
-        }
-        sgp = (const segmentType *)((char *)sgp + sgp->cmdsize);
-    }
-    return NULL;
-}
 
 __private_extern__ const char *
 _getObjcHeaderName(const headerType *header)
@@ -307,3 +354,6 @@ _getImageSlide(const headerType *header)
                 _getObjcHeaderName(header));
     return 0;  // not reached
 }
+
+
+#endif

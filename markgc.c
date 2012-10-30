@@ -323,12 +323,12 @@ void doofile(void *start, uint32_t size, struct gcinfo *gcip) {
         mh->flags = OSSwapInt32(mh->flags);
         isFlipped = true;
     }
-    if (rrOnly && mh->filetype != 6) return; // ignore executables
+    if (rrOnly && mh->filetype != MH_DYLIB) return; // ignore executables
     NXArchInfo *info = (NXArchInfo *)NXGetArchInfoFromCpuType(mh->cputype, mh->cpusubtype);
     //printf("%s:", info->description);
     gcip->arch = (char *)info->description;
     //if (debug) printf("...description is %s\n", info->description);
-    bool is32 = (mh->cputype == 18 || mh->cputype == 7);
+    bool is32 = !(mh->cputype & CPU_ARCH_ABI64);
     if (debug) printf("is 32? %d\n", is32);
     if (debug) printf("filetype -> %d\n", mh->filetype);
     if (debug) printf("ncmds -> %d\n", mh->ncmds);
@@ -386,6 +386,7 @@ void dofat(void *start) {
     int narchs;
     struct fat_arch *arch_ptr = (struct fat_arch *)(fh + 1);
     for (narchs = 0; narchs < fh->nfat_arch; ++narchs) {
+        if (debug) printf("doing arch %d\n", narchs);
         if (needsFlip) {
             arch_ptr->offset = OSSwapInt32(arch_ptr->offset);
             arch_ptr->size = OSSwapInt32(arch_ptr->size);
@@ -433,7 +434,7 @@ void closeFile() {
 
 void dumpinfo(char *filename) {
     initGCInfo();
-    openFile(filename);
+    if (!openFile(filename)) exit(1);
     struct fat_header *fh = (struct fat_header *)FileBase;
     if (fh->magic == FAT_MAGIC || fh->magic == FAT_CIGAM) {
         dofat((void *)FileBase);

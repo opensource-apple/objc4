@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2004 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2004,2008 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -31,22 +31,48 @@
 // to 32-bit integers (like, the count), but SEL can be any size.
 
 #include <stdint.h>
-#import "objc-private.h"
-#import "objc-sel-set.h"
+#include "objc-private.h"
+#include "objc-sel-set.h"
 
-static const uint32_t __objc_sel_set_capacities[43] = {
+#ifdef NO_MOD
+// mod-free power of 2 version
+
+#define CONSTRAIN(val, range) ((val) & ((range)-1))
+#define SIZE 27
+
+static const uint32_t __objc_sel_set_capacities[SIZE+1] = {
+    3, 6, 12, 24, 48, 96, 192, 384, 768, 1536, 3072, 6144, 12288, 24576, 49152,
+    98304, 196608, 393216, 786432, 1572864, 3145728, 6291456, 12582912, 25165824,
+    50331648, 100663296, 201326592, UINT32_MAX
+};
+
+static const uint32_t __objc_sel_set_buckets[SIZE] = {    // powers of 2
+    4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536,
+    131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432,
+    67108864, 134217728, 268435456
+};
+
+#else
+// prime version
+
+#define CONSTRAIN(val, range) ((val) % (range))
+#define SIZE 42
+
+static const uint32_t __objc_sel_set_capacities[SIZE+1] = {
     4, 8, 17, 29, 47, 76, 123, 199, 322, 521, 843, 1364, 2207, 3571, 5778, 9349,
     15127, 24476, 39603, 64079, 103682, 167761, 271443, 439204, 710647, 1149851, 1860498,
     3010349, 4870847, 7881196, 12752043, 20633239, 33385282, 54018521, 87403803, 141422324,
     228826127, 370248451, 599074578, 969323029, 1568397607, 2537720636U, UINT32_MAX
 };
 
-static const uint32_t __objc_sel_set_buckets[42] = {    // primes
+static const uint32_t __objc_sel_set_buckets[SIZE] = {    // primes
    5, 11, 23, 41, 67, 113, 199, 317, 521, 839, 1361, 2207, 3571, 5779, 9349, 15121,
    24473, 39607, 64081, 103681, 167759, 271429, 439199, 710641, 1149857, 1860503, 3010349,
    4870843, 7881193, 12752029, 20633237, 33385273, 54018521, 87403763, 141422317, 228826121,
    370248451, 599074561, 969323023, 1568397599, 2537720629U, 4106118251U
 };
+
+#endif
 
 struct __objc_sel_set {
     uint32_t _count;            /* number of slots used */
@@ -63,7 +89,7 @@ struct __objc_sel_set_finds {
 // candidate may not be 0; match is 0 if not present
 static struct __objc_sel_set_finds __objc_sel_set_findBuckets(struct __objc_sel_set *sset, SEL candidate) {
     struct __objc_sel_set_finds ret = {0, 0xffffffff};
-    uint32_t probe = (uint32_t)_objc_strhash((const char *)candidate) % sset->_bucketsNum;
+    uint32_t probe = CONSTRAIN((uint32_t)_objc_strhash((const char *)candidate), sset->_bucketsNum);
     for (;;) {
         SEL currentSel = sset->_buckets[probe];
         if (!currentSel) {
@@ -81,12 +107,14 @@ static struct __objc_sel_set_finds __objc_sel_set_findBuckets(struct __objc_sel_
 
 // create a set with given starting capacity, will resize as needed
 __private_extern__ struct __objc_sel_set *__objc_sel_set_create(uint32_t capacity) {
+    uint32_t idx;
+
     struct __objc_sel_set *sset = _malloc_internal(sizeof(struct __objc_sel_set));
     if (!sset) _objc_fatal("objc_sel_set failure");
     sset->_count = 0;
-    uint32_t idx;
+
     for (idx = 0; __objc_sel_set_capacities[idx] < capacity; idx++);
-    if (42 <= idx) _objc_fatal("objc_sel_set failure");
+    if (SIZE <= idx) _objc_fatal("objc_sel_set failure");
     sset->_capacity = __objc_sel_set_capacities[idx];
     sset->_bucketsNum = __objc_sel_set_buckets[idx];
     sset->_buckets = _calloc_internal(sset->_bucketsNum, sizeof(SEL));
@@ -106,7 +134,7 @@ __private_extern__ void __objc_sel_set_add(struct __objc_sel_set *sset, SEL valu
         uint32_t oldnbuckets = sset->_bucketsNum;
         uint32_t idx, capacity = sset->_count + 1;
         for (idx = 0; __objc_sel_set_capacities[idx] < capacity; idx++);
-        if (42 <= idx) _objc_fatal("objc_sel_set failure");
+        if (SIZE <= idx) _objc_fatal("objc_sel_set failure");
         sset->_capacity = __objc_sel_set_capacities[idx];
         sset->_bucketsNum = __objc_sel_set_buckets[idx];
         sset->_buckets = _calloc_internal(sset->_bucketsNum, sizeof(SEL));
@@ -120,7 +148,9 @@ __private_extern__ void __objc_sel_set_add(struct __objc_sel_set *sset, SEL valu
         }
         _free_internal(oldbuckets);
     }
-    uint32_t nomatch = __objc_sel_set_findBuckets(sset, value).nomatch;
-    sset->_buckets[nomatch] = value;
-    sset->_count++;
+    {
+        uint32_t nomatch = __objc_sel_set_findBuckets(sset, value).nomatch;
+        sset->_buckets[nomatch] = value;
+        sset->_count++;
+    }
 }

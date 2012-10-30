@@ -20,7 +20,8 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
- 
+
+#ifdef __ppc__
  
  ;
  ; This section includes declarations of routines that will be used to populate
@@ -64,4 +65,5 @@ _$0_non_gc:                    ; non_gc entry point
     wb_routine  objc_assign_ivar,0xfffefec0
     stwx        r3,r4,r5        ; store value at (dest+offset)
     blr                         ; return
-    
+
+#endif

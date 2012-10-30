@@ -24,13 +24,16 @@
 #ifndef _OBJC_RUNTIME_H
 #define _OBJC_RUNTIME_H
 
-#import <objc/objc.h>
+#include <objc/objc.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <AvailabilityMacros.h>
+#include <TargetConditionals.h>
 
-#import <sys/types.h>
-#import <stdarg.h>
-#import <stdint.h>
-#import <stddef.h>
-#import <AvailabilityMacros.h>
+#if TARGET_OS_MAC
+#include <sys/types.h>
+#endif
 
 
 /* Types */
@@ -67,16 +70,6 @@ typedef struct objc_object Protocol;
 struct objc_method_description {
 	SEL name;
 	char *types;
-};
-struct objc_method_description_list {
-        int count;
-        struct objc_method_description list[1];
-};
-
-struct objc_protocol_list {
-    struct objc_protocol_list *next;
-    long count;
-    Protocol *list[1];
 };
 
 
@@ -123,7 +116,7 @@ OBJC_EXPORT BOOL class_isMetaClass(Class cls)
 OBJC_EXPORT Class class_getSuperclass(Class cls) 
      AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
 OBJC_EXPORT Class class_setSuperclass(Class cls, Class newSuper) 
-     AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER OBJC2_UNAVAILABLE;
+     AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER_BUT_DEPRECATED;
 
 OBJC_EXPORT int class_getVersion(Class cls);
 OBJC_EXPORT void class_setVersion(Class cls, int version);
@@ -269,6 +262,27 @@ OBJC_EXPORT void objc_setEnumerationMutationHandler(void (*handler)(id))
 OBJC_EXPORT void objc_setForwardHandler(void *fwd, void *fwd_stret) 
      AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
 
+
+/* Associated Object support. */
+
+/* objc_setAssociatedObject() options */
+enum {
+    OBJC_ASSOCIATION_ASSIGN = 0,
+    OBJC_ASSOCIATION_RETAIN_NONATOMIC = 1,
+    OBJC_ASSOCIATION_COPY_NONATOMIC = 3,
+    OBJC_ASSOCIATION_RETAIN = 01401,
+    OBJC_ASSOCIATION_COPY = 01403
+};
+typedef uintptr_t objc_AssociationPolicy;
+
+OBJC_EXPORT void objc_setAssociatedObject(id object, void *key, id value, objc_AssociationPolicy policy)
+     AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER;
+OBJC_EXPORT id objc_getAssociatedObject(id object, void *key)
+     AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER;
+OBJC_EXPORT void objc_removeAssociatedObjects(id object)
+     AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER;
+
+
 #define _C_ID       '@'
 #define _C_CLASS    '#'
 #define _C_SEL      ':'
@@ -343,6 +357,19 @@ OBJC_EXPORT void objc_setForwardHandler(void *fwd, void *fwd_stret)
 #define CLS_CONSTRUCTING        0x10000
 // class compiled with bigger class structure
 #define CLS_EXT                 0x20000
+
+
+struct objc_method_description_list {
+        int count;
+        struct objc_method_description list[1];
+};
+
+
+struct objc_protocol_list {
+    struct objc_protocol_list *next;
+    long count;
+    Protocol *list[1];
+};
 
 
 struct objc_category {
@@ -439,7 +466,7 @@ struct objc_method_list;
 
 OBJC_EXPORT BOOL sel_isMapped(SEL sel)                       OBJC2_UNAVAILABLE;
 
-OBJC_EXPORT id object_copyFromZone(id anObject, size_t nBytes, void *z) OBJC2_UNAVAILABLE;
+OBJC_EXPORT id object_copyFromZone(id anObject, size_t nBytes, void *z) DEPRECATED_IN_MAC_OS_X_VERSION_10_5_AND_LATER;
 OBJC_EXPORT id object_realloc(id anObject, size_t nBytes)    OBJC2_UNAVAILABLE;
 OBJC_EXPORT id object_reallocFromZone(id anObject, size_t nBytes, void *z) OBJC2_UNAVAILABLE;
 
@@ -449,7 +476,7 @@ OBJC_EXPORT void objc_addClass(Class myClass)                OBJC2_UNAVAILABLE;
 OBJC_EXPORT void objc_setClassHandler(int (*)(const char *)) OBJC2_UNAVAILABLE;
 OBJC_EXPORT void objc_setMultithreaded (BOOL flag)           OBJC2_UNAVAILABLE;
 
-OBJC_EXPORT id class_createInstanceFromZone(Class, size_t idxIvars, void *z) OBJC2_UNAVAILABLE;
+OBJC_EXPORT id class_createInstanceFromZone(Class, size_t idxIvars, void *z) DEPRECATED_IN_MAC_OS_X_VERSION_10_5_AND_LATER;
 
 OBJC_EXPORT void class_addMethods(Class, struct objc_method_list *) OBJC2_UNAVAILABLE;
 OBJC_EXPORT void class_removeMethods(Class, struct objc_method_list *) OBJC2_UNAVAILABLE;

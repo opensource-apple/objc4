@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2002, 2005-2006 Apple Inc.  All Rights Reserved.
+ * Copyright (c) 1999-2002, 2005-2008 Apple Inc.  All Rights Reserved.
  * 
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -20,14 +20,66 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
-// Copyright 1988-1996 NeXT Software, Inc.
-// objc-config.h created by kthorup on Fri 24-Mar-1995
+
+#include <TargetConditionals.h>
+
+// Define NO_GC to disable garbage collection.
+// Be sure to edit OBJC_NO_GC in objc-auto.h as well.
+#if TARGET_OS_EMBEDDED  ||  TARGET_OS_WIN32
+#   define NO_GC 1
+#endif
+
+// Define NO_ENVIRON to disable getenv().
+#if TARGET_OS_EMBEDDED
+#   define NO_ENVIRON 1
+#endif
+
+// Define NO_ZONES to disable malloc zone support in NXHashTable.
+#if TARGET_OS_EMBEDDED
+#   define NO_ZONES 1
+#endif
+
+// Define NO_MOD to avoid the mod operator in NXHashTable and objc-sel-set.
+#if defined(__arm__)
+#   define NO_MOD 1
+#endif
+
+// Define NO_BUILTINS to disable the builtin selector table from dyld
+#if TARGET_OS_WIN32
+#   define NO_BUILTINS 1
+#endif
+
+// Define NO_DEBUGGER_MODE to disable lock-avoiding execution for debuggers
+#if TARGET_OS_WIN32
+#   define NO_DEBUGGER_MODE 1
+#endif
+
+#if __OBJC2__
+
+// Define NO_FIXUP to use non-fixup messaging for OBJC2.
+#if defined(__arm__)
+#   define NO_FIXUP 1
+#endif
+
+// Define NO_VTABLE to disable vtable dispatch for OBJC2.
+#if defined(NO_FIXUP)  ||  defined(__ppc64__)
+#   define NO_VTABLE 1
+#endif
+
+// Define NO_ZEROCOST_EXCEPTIONS to use sjlj exceptions for OBJC2.
+// Be sure to edit objc-exception.h as well (objc_add/removeExceptionHandler)
+#if defined(__arm__)
+#   define NO_ZEROCOST_EXCEPTIONS 1
+#endif
+
+#endif
+
 
 // OBJC_INSTRUMENTED controls whether message dispatching is dynamically
 // monitored.  Monitoring introduces substantial overhead.
 // NOTE: To define this condition, do so in the build command, NOT by
 // uncommenting the line here.  This is because objc-class.h heeds this
-// condition, but objc-class.h can not #import this file (objc-config.h)
+// condition, but objc-class.h can not #include this file (objc-config.h)
 // because objc-class.h is public and objc-config.h is not.
 //#define OBJC_INSTRUMENTED
 
@@ -35,13 +87,7 @@
 // Not available on all architectures.  Not needed
 // (by us) on some configurations.
 #if defined (__i386__) || defined (i386)
-    #import <architecture/i386/asm_help.h>
+#   include <architecture/i386/asm_help.h>
 #elif defined (__ppc__) || defined(ppc)
-    #import <architecture/ppc/asm_help.h>
-#elif defined (__ppc64__)
-    // no asm_help for ppc64
-#elif defined (__x86_64__)
-    // no asm_help for x86-64
-#else
-    #error We need asm_help.h for this architecture
+#   include <architecture/ppc/asm_help.h>
 #endif

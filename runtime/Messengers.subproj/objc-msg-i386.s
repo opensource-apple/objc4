@@ -20,6 +20,9 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+
+#ifdef __i386__
+
 /********************************************************************
  ********************************************************************
  **
@@ -123,21 +126,6 @@ LAZY_PIC_FUNCTION_STUB(___objc_error) /* No stub needed */
 // mcount
 LAZY_PIC_FUNCTION_STUB(mcount)
 #endif /* PROFILE */
-
-/********************************************************************
- *
- * Constants.
- *
- ********************************************************************/
-
-// In case the implementation is _objc_msgForward, indicate to it
-// whether the method was invoked as a word-return or struct-return.
-// This flag is passed in a register that is caller-saved, and is
-// not part of the parameter passing convention (i.e. it is "out of
-// band").  This works because _objc_msgForward is only entered
-// from here in the messenger.
-	kFwdMsgSend      = 1
-	kFwdMsgSendStret = 0
 
 
 /********************************************************************
@@ -370,17 +358,21 @@ CACHE_GET     = 2	// first argument is class, search that class
 	xorl	%ebx, %ebx		// probeCount = 0
 #endif
 	movl	mask(%edi), %esi		// mask = cache->mask
-	leal	buckets(%edi), %edi	// buckets = &cache->buckets
 	movl	%ecx, %edx		// index = selector
 	shrl	$$2, %edx		// index = selector >> 2
 
 // search the receiver's cache
+// ecx = selector
+// edi = cache
+// esi = mask
+// edx = index
+// eax = method (soon)
 LMsgSendProbeCache_$0_$1_$2:
 #if defined(OBJC_INSTRUMENTED)
 	addl	$$1, %ebx			// probeCount += 1
 #endif
 	andl	%esi, %edx		// index &= mask
-	movl	(%edi, %edx, 4), %eax	// method = buckets[index]
+	movl	buckets(%edi, %edx, 4), %eax	// meth = cache->buckets[index]
 
 	testl	%eax, %eax		// check for end of bucket
 	je	LMsgSendCacheMiss_$0_$1_$2	// go to cache miss code
@@ -568,18 +560,18 @@ LMsgSendHitInstrumentDone_$0_$1_$2:
 
 
 /********************************************************************
- * Method _cache_getMethod(Class cls, SEL sel, IMP objc_msgForward_imp)
+ * Method _cache_getMethod(Class cls, SEL sel, IMP msgForward_internal_imp)
  *
  * If found, returns method triplet pointer.
  * If not found, returns NULL.
  *
  * NOTE: _cache_getMethod never returns any cache entry whose implementation
- * is _objc_msgForward. It returns NULL instead. This prevents thread-
+ * is _objc_msgForward_internal. It returns 1 instead. This prevents thread-
  * safety and memory management bugs in _class_lookupMethodAndLoadCache. 
  * See _class_lookupMethodAndLoadCache for details.
  *
- * _objc_msgForward is passed as a parameter because it's more efficient
- * to do the (PIC) lookup once in the caller than repeatedly here.
+ * _objc_msgForward_internal is passed as a parameter because it's more 
+ * efficient to do the (PIC) lookup once in the caller than repeatedly here.
  ********************************************************************/
         
 	.private_extern __cache_getMethod
@@ -593,10 +585,12 @@ LMsgSendHitInstrumentDone_$0_$1_$2:
 	CacheLookup WORD_RETURN, CACHE_GET, LGetMethodMiss
 
 // cache hit, method triplet in %eax
-	movl    first_arg(%esp), %ecx   // check for _objc_msgForward
-	cmpl    method_imp(%eax), %ecx
-	je      LGetMethodMiss          // if (imp==_objc_msgForward) return nil
+	movl    first_arg(%esp), %ecx   // check for _objc_msgForward_internal
+	cmpl    method_imp(%eax), %ecx  // if (imp==_objc_msgForward_internal)
+	je      1f                      //     return (Method)1
 	ret                             // else return method triplet address
+1:	movl	$1, %eax
+	ret
 
 LGetMethodMiss:
 // cache miss, return nil
@@ -670,13 +664,13 @@ LGetImpExit:
 LMsgSendReceiverOk:
 	movl	isa(%eax), %edx		// class = self->isa
 	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendCacheMiss
-	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
-	jmp	*%eax			// goto *imp
+	xor	%edx, %edx		// set nonstret for msgForward_internal
+	jmp	*%eax
 
 // cache miss: go search the method lists
 LMsgSendCacheMiss:
 	MethodTableLookup WORD_RETURN, MSG_SEND
-	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
+	xor	%edx, %edx		// set nonstret for msgForward_internal
 	jmp	*%eax			// goto *imp
 
 // message sent to nil: redirect to nil receiver, if any
@@ -740,13 +734,13 @@ LMsgSendExit:
 
 // search the cache (class in %edx)
 	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperCacheMiss
-	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
+	xor	%edx, %edx		// set nonstret for msgForward_internal
 	jmp	*%eax			// goto *imp
 
 // cache miss: go search the method lists
 LMsgSendSuperCacheMiss:
 	MethodTableLookup WORD_RETURN, MSG_SENDSUPER
-	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
+	xor	%edx, %edx		// set nonstret for msgForward_internal
 	jmp	*%eax			// goto *imp
 
 // ignored selector: return self
@@ -843,13 +837,13 @@ LMsgSendvArgsOK:
 LMsgSendFpretReceiverOk:
 	movl	isa(%eax), %edx		// class = self->isa
 	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendFpretCacheMiss
-	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
+	xor	%edx, %edx		// set nonstret for msgForward_internal
 	jmp	*%eax			// goto *imp
 
 // cache miss: go search the method lists
 LMsgSendFpretCacheMiss:
 	MethodTableLookup WORD_RETURN, MSG_SEND
-	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
+	xor	%edx, %edx		// set nonstret for msgForward_internal
 	jmp	*%eax			// goto *imp
 
 // message sent to nil: redirect to nil receiver, if any
@@ -958,13 +952,13 @@ LMsgSendvFpretArgsOK:
 LMsgSendStretReceiverOk:
 	movl	isa(%eax), %edx		//   class = self->isa
 	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendStretCacheMiss
-	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
+	movl	$1, %edx		// set stret for objc_msgForward
 	jmp	*%eax			// goto *imp
 
 // cache miss: go search the method lists
 LMsgSendStretCacheMiss:
 	MethodTableLookup STRUCT_RETURN, MSG_SEND
-	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
+	movl	$1, %edx		// set stret for objc_msgForward
 	jmp	*%eax			// goto *imp
 
 // message sent to nil: redirect to nil receiver, if any
@@ -1031,13 +1025,13 @@ LMsgSendStretExit:
 
 // search the cache (class in %edx)
 	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperStretCacheMiss
-	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
+	movl	$1, %edx		// set stret for objc_msgForward
 	jmp	*%eax			// goto *imp
 
 // cache miss: go search the method lists
 LMsgSendSuperStretCacheMiss:
 	MethodTableLookup STRUCT_RETURN, MSG_SENDSUPER
-	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
+	movl	$1, %edx		// set stret for objc_msgForward
 	jmp	*%eax			// goto *imp
 
 LMsgSendSuperStretExit:
@@ -1130,20 +1124,29 @@ __objc_forward_handler:	.long 0
 	.private_extern __objc_forward_stret_handler
 __objc_forward_stret_handler:	.long 0
 
-
-	ENTRY	__objc_msgForward
-
+	ENTRY	__objc_msgForward_internal
+	.private_extern __objc_msgForward_internal
+	// Method cache version
+	
+	// THIS IS NOT A CALLABLE C FUNCTION
+	// Out-of-band register %edx is nonzero for stret, zero otherwise
+	
 	// Check return type (stret or not)
-	cmpl	$kFwdMsgSendStret, %edx
-	je	LMsgForwardStret
+	testl	%edx, %edx
+	jnz	__objc_msgForward_stret
+	jmp	__objc_msgForward
+	
+	END_ENTRY	_objc_msgForward_internal
+
+	
+	ENTRY	__objc_msgForward
+	// Non-struct return version
 
 	// Get PIC base into %edx
 	call	L__objc_msgForward$pic_base
 L__objc_msgForward$pic_base:
 	popl	%edx
 	
-	// Non-struct return
-
 	// Call user handler, if any
 	movl	__objc_forward_handler-L__objc_msgForward$pic_base(%edx),%ecx
 	testl	%ecx, %ecx		// if not NULL
@@ -1185,10 +1188,12 @@ LMsgForwardError:
 	pushl 	%eax
 	pushl   (self+4)(%ebp)
 	CALL_EXTERN(___objc_error)	// never returns
-	
 
-LMsgForwardStret:
-	// Struct return
+	END_ENTRY	__objc_msgForward
+
+
+	ENTRY	__objc_msgForward_stret
+	// Struct return version
 
 	// Get PIC base into %edx
 	call	L__objc_msgForwardStret$pic_base
@@ -1237,7 +1242,7 @@ LMsgForwardStretError:
 	pushl   (self_stret+4)(%ebp)
 	CALL_EXTERN(___objc_error)	// never returns
 
-	END_ENTRY	__objc_msgForward
+	END_ENTRY	__objc_msgForward_stret
 
 
 	ENTRY _method_invoke
@@ -1260,3 +1265,5 @@ LMsgForwardStretError:
 	jmp	*%eax
 	
 	END_ENTRY _method_invoke_stret
+
+#endif

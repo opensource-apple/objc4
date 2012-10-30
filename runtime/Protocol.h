@@ -28,7 +28,7 @@
 #ifndef _OBJC_PROTOCOL_H_
 #define _OBJC_PROTOCOL_H_
 
-#import <objc/Object.h>
+#include <objc/Object.h>
 
 /* Warning: All of these methods will disappear in 64-bit. */
 

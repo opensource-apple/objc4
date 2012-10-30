@@ -30,10 +30,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#import "objc-private.h"
-#import "maptable.h"
-#import "Object.h"
-#import "hashtable2.h"
+#include "objc-private.h"
+#include "maptable.h"
+#include "hashtable2.h"
 
 
 /******		Macros and utilities	****************************/
@@ -438,9 +437,21 @@ const NXMapTablePrototype NXStrValueMapPrototype = {
 };
 
 
-#if !__LP64__
+#if !__OBJC2__  &&  !TARGET_OS_WIN32
 
-/* This only works with class Object, which is unavailable in 64-bit. */
+/* This only works with class Object, which is unavailable. */
+
+/* Method prototypes */
+@interface DoesNotExist
++ class;
++ initialize;
+- (id)description;
+- (const char *)UTF8String;
+- (unsigned long)hash;
+- (BOOL)isEqual:(id)object;
+- free;
+@end
+
 static unsigned _mapObjectHash(NXMapTable *table, const void *key) {
     return [(id)key hash];
 }

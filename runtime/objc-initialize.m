@@ -92,19 +92,14 @@
  *  superclass.
  **********************************************************************/
 
-#include <pthread.h>
-#include <assert.h>
+#include "objc-private.h"
+#include "message.h"
+#include "objc-initialize.h"
 
-#import "objc-private.h"
-#import "objc-initialize.h"
-
-/* classInitLock protects classInitWaitCond and examination and modification 
- * of CLS_INITIALIZED and CLS_INITIALIZING. */
-static OBJC_DECLARE_LOCK(classInitLock);
-
-/* classInitWaitCond is signalled when any class is done initializing. 
+/* classInitLock protects CLS_INITIALIZED and CLS_INITIALIZING, and 
+ * is signalled when any class is done initializing. 
  * Threads that are waiting for a class to finish initializing wait on this. */
-static pthread_cond_t classInitWaitCond = PTHREAD_COND_INITIALIZER;
+static monitor_t classInitLock = MONITOR_INITIALIZER;
 
 
 /***********************************************************************
@@ -260,6 +255,93 @@ static void _setThisThreadIsNotInitializingClass(Class cls)
 }
 
 
+typedef struct PendingInitialize {
+    Class subclass;
+    struct PendingInitialize *next;
+} PendingInitialize;
+
+static NXMapTable *pendingInitializeMap;
+
+/***********************************************************************
+* _finishInitializing
+* cls has completed its +initialize method, and so has its superclass.
+* Mark cls as initialized as well, then mark any of cls's subclasses 
+* that have already finished their own +initialize methods.
+**********************************************************************/
+static void _finishInitializing(Class cls, Class supercls)
+{
+    PendingInitialize *pending;
+
+    monitor_assert_locked(&classInitLock);
+    assert(!supercls  ||  _class_isInitialized(supercls));
+
+    if (PrintInitializing) {
+        _objc_inform("INITIALIZE: %s is fully +initialized",
+                     _class_getName(cls));
+    }
+
+    // propagate finalization affinity.
+    if (UseGC && supercls && _class_shouldFinalizeOnMainThread(supercls)) {
+        _class_setFinalizeOnMainThread(cls);
+    }
+
+    // mark this class as fully +initialized
+    _class_setInitialized(cls);
+    monitor_notifyAll(&classInitLock);
+    _setThisThreadIsNotInitializingClass(cls);
+    
+    // mark any subclasses that were merely waiting for this class
+    if (!pendingInitializeMap) return;
+    pending = NXMapGet(pendingInitializeMap, cls);
+    if (!pending) return;
+
+    NXMapRemove(pendingInitializeMap, cls);
+    
+    // Destroy the pending table if it's now empty, to save memory.
+    if (NXCountMapTable(pendingInitializeMap) == 0) {
+        NXFreeMapTable(pendingInitializeMap);
+        pendingInitializeMap = NULL;
+    }
+
+    while (pending) {
+        PendingInitialize *next = pending->next;
+        if (pending->subclass) _finishInitializing(pending->subclass, cls);
+        _free_internal(pending);
+        pending = next;
+    }
+}
+
+
+/***********************************************************************
+* _finishInitializingAfter
+* cls has completed its +initialize method, but its superclass has not.
+* Wait until supercls finishes before marking cls as initialized.
+**********************************************************************/
+static void _finishInitializingAfter(Class cls, Class supercls)
+{
+    PendingInitialize *pending;
+
+    monitor_assert_locked(&classInitLock);
+
+    if (PrintInitializing) {
+        _objc_inform("INITIALIZE: %s waiting for superclass +[%s initialize]",
+                     _class_getName(cls), _class_getName(supercls));
+    }
+
+    if (!pendingInitializeMap) {
+        pendingInitializeMap = 
+            NXCreateMapTableFromZone(NXPtrValueMapPrototype,
+                                     10, _objc_internal_zone());
+        // fixme pre-size this table for CF/NSObject +initialize
+    }
+
+    pending = _malloc_internal(sizeof(*pending));
+    pending->subclass = cls;
+    pending->next = NXMapGet(pendingInitializeMap, supercls);
+    NXMapInsert(pendingInitializeMap, supercls, pending);
+}
+
+
 /***********************************************************************
 * class_initialize.  Send the '+initialize' message on demand to any
 * uninitialized class. Force initialization of superclasses first.
@@ -283,12 +365,12 @@ __private_extern__ void _class_initialize(Class cls)
     }
     
     // Try to atomically set CLS_INITIALIZING.
-    OBJC_LOCK(&classInitLock);
+    monitor_enter(&classInitLock);
     if (!_class_isInitialized(cls) && !_class_isInitializing(cls)) {
         _class_setInitializing(cls);
         reallyInitialize = YES;
     }
-    OBJC_UNLOCK(&classInitLock);
+    monitor_exit(&classInitLock);
     
     if (reallyInitialize) {
         // We successfully set the CLS_INITIALIZING bit. Initialize the class.
@@ -303,19 +385,27 @@ __private_extern__ void _class_initialize(Class cls)
             _objc_inform("INITIALIZE: calling +[%s initialize]",
                          _class_getName(cls));
         }
-        [(id)cls initialize];
+
+        ((void(*)(Class, SEL))objc_msgSend)(cls, SEL_initialize);
+
+        if (PrintInitializing) {
+            _objc_inform("INITIALIZE: finished +[%s initialize]",
+                         _class_getName(cls));
+        }        
         
-        // propagate finalization affinity.
-        if (UseGC && supercls && _class_shouldFinalizeOnMainThread(supercls)) {
-            _class_setFinalizeOnMainThread(cls);
+        // Done initializing. 
+        // If the superclass is also done initializing, then update 
+        //   the info bits and notify waiting threads.
+        // If not, update them later. (This can happen if this +initialize 
+        //   was itself triggered from inside a superclass +initialize.)
+        
+        monitor_enter(&classInitLock);
+        if (!supercls  ||  _class_isInitialized(supercls)) {
+            _finishInitializing(cls, supercls);
+        } else {
+            _finishInitializingAfter(cls, supercls);
         }
-        
-        // Done initializing. Update the info bits and notify waiting threads.
-        OBJC_LOCK(&classInitLock);
-        _class_setInitialized(cls);
-        pthread_cond_broadcast(&classInitWaitCond);
-        OBJC_UNLOCK(&classInitLock);
-        _setThisThreadIsNotInitializingClass(cls);
+        monitor_exit(&classInitLock);
         return;
     }
     
@@ -329,11 +419,11 @@ __private_extern__ void _class_initialize(Class cls)
         if (_thisThreadIsInitializingClass(cls)) {
             return;
         } else {
-            OBJC_LOCK(&classInitLock);
+            monitor_enter(&classInitLock);
             while (!_class_isInitialized(cls)) {
-                pthread_cond_wait(&classInitWaitCond, &classInitLock);
+                monitor_wait(&classInitLock);
             }
-            OBJC_UNLOCK(&classInitLock);
+            monitor_exit(&classInitLock);
             return;
         }
     }
