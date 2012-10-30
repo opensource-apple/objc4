@@ -65,6 +65,7 @@ _objc_entryPoints:
 	.long	__cache_getImp
 	.long	__cache_getMethod
 	.long	_objc_msgSend
+	.long	_objc_msgSend_fpret
 	.long	_objc_msgSend_stret
 	.long	_objc_msgSendSuper
 	.long	_objc_msgSendSuper_stret
@@ -75,6 +76,7 @@ _objc_exitPoints:
 	.long	LGetImpExit
 	.long	LGetMethodExit
 	.long	LMsgSendExit
+	.long	LMsgSendFpretExit
 	.long	LMsgSendStretExit
 	.long	LMsgSendSuperExit
 	.long	LMsgSendSuperStretExit
@@ -836,6 +838,100 @@ LMsgSendvArgsOK:
 #endif
 	END_ENTRY	_objc_msgSendv
 
+
+/********************************************************************
+ *
+ * double objc_msgSend_fpret(id self, SEL _cmd,...);
+ *
+ ********************************************************************/
+
+	ENTRY	_objc_msgSend_fpret
+
+	movl	self(%esp), %eax
+
+// check whether receiver is nil 
+	testl	%eax, %eax
+	je	LMsgSendFpretNilSelf
+
+// receiver is non-nil: search the cache
+LMsgSendFpretReceiverOk:
+	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendFpretCacheMiss
+	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
+	jmp	*%eax			// goto *imp
+
+// cache miss: go search the method lists
+LMsgSendFpretCacheMiss:
+	MethodTableLookup WORD_RETURN, MSG_SEND
+	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
+	jmp	*%eax			// goto *imp
+
+// message sent to nil: redirect to nil receiver, if any
+LMsgSendFpretNilSelf:
+	call	L_get_pc_thunk.edx	// load new receiver
+1:	movl	__objc_nilReceiver-1b(%edx),%eax
+	testl	%eax, %eax		// return zero if no new receiver
+	je	LMsgSendFpretReturnZero
+	movl	%eax, self(%esp)	// send to new receiver
+	jmp	LMsgSendFpretReceiverOk
+LMsgSendFpretReturnZero:
+	fldz
+LMsgSendFpretDone:
+	ret
+
+LMsgSendFpretExit:
+	END_ENTRY	_objc_msgSend_fpret
+	
+/********************************************************************
+ * double objc_msgSendv_fpret(id self, SEL _cmd, unsigned size, marg_list frame);
+ *
+ * On entry:
+ *		(sp+4)  is the message receiver,
+ *		(sp+8)	is the selector,
+ *		(sp+12) is the size of the marg_list, in bytes,
+ *		(sp+16) is the address of the marg_list
+ *
+ ********************************************************************/
+
+	ENTRY	_objc_msgSendv_fpret
+
+#if defined(KERNEL)
+	trap				// _objc_msgSendv is not for the kernel
+#else
+	pushl	%ebp
+	movl	%esp, %ebp
+	// stack is currently aligned assuming no extra arguments
+	movl	(marg_list+4)(%ebp), %edx
+	addl	$8, %edx			// skip self & selector
+	movl	(marg_size+4)(%ebp), %ecx
+	subl    $8, %ecx			// skip self & selector
+	shrl	$2, %ecx
+	je      LMsgSendvFpretArgsOK
+
+	// %esp = %esp - (16 - ((numVariableArguments & 3) << 2))
+	movl    %ecx, %eax			// 16-byte align stack
+	andl    $3, %eax
+	shll    $2, %eax
+	subl    $16, %esp
+	addl    %eax, %esp
+
+LMsgSendvFpretArgLoop:
+	decl	%ecx
+	movl	0(%edx, %ecx, 4), %eax
+	pushl	%eax
+	jg	LMsgSendvFpretArgLoop
+
+LMsgSendvFpretArgsOK:
+	movl	(selector+4)(%ebp), %ecx
+	pushl	%ecx
+	movl	(self+4)(%ebp),%ecx
+	pushl	%ecx
+	call	_objc_msgSend_fpret
+	movl	%ebp,%esp
+	popl	%ebp
+
+	ret
+#endif
+	END_ENTRY	_objc_msgSendv_fpret
 
 /********************************************************************
  *
