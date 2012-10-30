@@ -30,9 +30,9 @@ default: build
 all: build
 
 .SUFFIXES:
-.PHONY: default all build optimized debug profile installsrc installhdrs install clean prebuild build-optimized build-debug build-profile prebuild-optimized prevuild-debug prebuild-profile compile-optimized compile-debug compile-profile link-optimized link-debug link-profile postbuild
+.PHONY: default all build optimized debug profile installsrc installhdrs install clean prebuild build-optimized build-debug build-profile prebuild-optimized prebuild-debug prebuild-profile compile-optimized compile-debug compile-profile link-optimized link-debug link-profile postbuild
 
-CURRENT_PROJECT_VERSION = 218
+CURRENT_PROJECT_VERSION = 227
 
 VERSION_NAME = A
 
@@ -91,7 +91,7 @@ else
 ifneq "$(RC_ARCHS)" ""
 ARCH_LIST += $(RC_ARCHS)
 else
-ARCH_LIST += ppc
+ARCH_LIST += $(shell /usr/bin/arch)
 endif
 endif
 
@@ -119,6 +119,19 @@ CFLAGS += $(ARCH_FLAGS)
 LDFLAGS += $(ARCH_FLAGS) -dynamiclib -dynamic -compatibility_version 1 -current_version $(CURRENT_PROJECT_VERSION) 
 endif
 
+ifeq "$(PLATFORM)" "Darwin"
+# Determine Mac OS X version
+# 6.x = Jaguar, 7.x = Panther
+ifeq "$(OS_VERSION)" ""
+  OS_VERSION = $(shell uname -r)
+endif
+DARWIN_MAJOR_VERSION = $(word 1, $(subst ., ,$(OS_VERSION)))
+DARWIN_MINOR_VERSION = $(word 2, $(subst ., ,$(OS_VERSION)))
+ifeq "$(DARWIN_MAJOR_VERSION)" "7"
+CFLAGS += -DMACOSX_PANTHER
+endif
+endif
+
 CFLAGS += $(OTHER_CFLAGS) $(RC_CFLAGS)
 LDFLAGS += $(OTHER_LDFLAGS)
 
@@ -136,7 +149,7 @@ CFLAGS_OPTIMIZED = $(CFLAGS) $(OPTIMIZATION_CFLAGS)
 CFLAGS_DEBUG     = $(CFLAGS) $(DEBUG_CFLAGS)
 CFLAGS_PROFILE   = $(CFLAGS) $(PROFILE_CFLAGS)
 
-LDFLAGS_OPTIMIZED = $(LDFLAGS)
+LDFLAGS_OPTIMIZED = $(LDFLAGS) -g
 LDFLAGS_DEBUG     = $(LDFLAGS) -g
 LDFLAGS_PROFILE   = $(LDFLAGS) -g -pg
 
@@ -157,13 +170,15 @@ OTHER_HEADERS=
 SOURCES += $(addprefix runtime/, \
         Object.m Protocol.m hashtable2.m maptable.m objc-class.m objc-errors.m \
         objc-file.m objc-load.m objc-moninit.c objc-runtime.m objc-sel.m \
+	objc-sync.m objc-exception.m \
         )
 PUBLIC_HEADERS += $(addprefix runtime/, \
         objc-class.h objc-api.h objc-load.h objc-runtime.h objc.h Object.h \
+	objc-sync.h objc-exception.h \
         Protocol.h error.h hashtable2.h \
         )
-PRIVATE_HEADERS += runtime/objc-private.h runtime/objc-config.h
-OTHER_HEADERS += runtime/maptable.h
+PRIVATE_HEADERS += runtime/objc-private.h runtime/objc-config.h runtime/objc-sel-table.h
+OTHER_HEADERS += runtime/maptable.h 
 
 # OldClasses
 SOURCES += runtime/OldClasses.subproj/List.m
@@ -174,7 +189,7 @@ SOURCES += runtime/Messengers.subproj/objc-msg.s
 OTHER_SOURCES += runtime/Messengers.subproj/objc-msg-ppc.s runtime/Messengers.subproj/objc-msg-i386.s
 
 # project root
-OTHER_SOURCES += Makefile APPLE_LICENSE objc-exports
+OTHER_SOURCES += Makefile APPLE_LICENSE objc-exports libobjc.order
 
 OBJECTS = $(addprefix $(OBJROOT)/, $(addsuffix .o, $(basename $(SOURCES) ) ) )
 OBJECTS_OPTIMIZED = $(OBJECTS:.o=.opt.o)
@@ -295,6 +310,7 @@ install: build installhdrs
 
 # optimized
 	$(SILENT) $(COPY) $(SYMROOT)/libobjc.$(VERSION_NAME)$(LIBRARY_EXT) $(DSTROOT)/$(INSTALLDIR)
+	$(SILENT) $(STRIP) -S $(DSTROOT)/$(INSTALLDIR)/libobjc.$(VERSION_NAME)$(LIBRARY_EXT)
 	-$(SILENT) $(CHOWN) root:wheel $(DSTROOT)/$(INSTALLDIR)/libobjc.$(VERSION_NAME)$(LIBRARY_EXT)
 	$(SILENT) $(CHMOD) 755 $(DSTROOT)/$(INSTALLDIR)/libobjc.$(VERSION_NAME)$(LIBRARY_EXT)
 	$(SILENT) $(CD) $(DSTROOT)/$(INSTALLDIR)  &&  \
@@ -383,16 +399,14 @@ compile-profile: $(OBJECTS_PROFILE)
 ifeq "$(PLATFORM)" "Darwin"
 
 define link
-	$(foreach A, $(ARCH_LIST), \
-		$(SILENT) $(LD) -arch $A -r -o $(OBJROOT)/libobjc$1.$A.o $3 ; )
-	$(foreach A, $(ARCH_LIST), \
-		-$(SILENT) $(NMEDIT) -s $(SRCROOT)/objc-exports \
-			$(OBJROOT)/libobjc$1.$A.o ; )
 	$(SILENT) $(CC) $2 \
-                -Wl,-init,__objcInit \
-                -install_name /$(INSTALLDIR)/libobjc$1.$(VERSION_NAME)$(LIBRARY_EXT) \
-                -o $(SYMROOT)/libobjc$1.$(VERSION_NAME)$(LIBRARY_EXT) \
-		$(foreach A, $(ARCH_LIST), $(OBJROOT)/libobjc$1.$A.o )
+          -Wl,-init,__objcInit \
+          -Wl,-single_module \
+          -Wl,-exported_symbols_list,$(SRCROOT)/objc-exports \
+          -Wl,-sectorder,__TEXT,__text,$(SRCROOT)/libobjc.order \
+          -install_name /$(INSTALLDIR)/libobjc$1.$(VERSION_NAME)$(LIBRARY_EXT) \
+          -o $(SYMROOT)/libobjc$1.$(VERSION_NAME)$(LIBRARY_EXT) \
+          $3
 endef
 
 else
@@ -407,7 +421,6 @@ endif
 link-optimized:
 	$(SILENT) $(ECHO) "Linking (optimized)..."
 	$(call link,,$(LDFLAGS_OPTIMIZED),$(OBJECTS_OPTIMIZED) )
-	$(SILENT) $(STRIP) -x $(SYMROOT)/libobjc.$(VERSION_NAME)$(LIBRARY_EXT)
 
 link-debug:
 	$(SILENT) $(ECHO) "Linking (debug)..."

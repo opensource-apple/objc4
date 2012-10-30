@@ -2,23 +2,24 @@
  * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- *
- * Portions Copyright (c) 1999 Apple Computer, Inc.  All Rights
- * Reserved.  This file contains Original Code and/or Modifications of
- * Original Code as defined in and that are subject to the Apple Public
- * Source License Version 1.1 (the "License").  You may not use this file
- * except in compliance with the License.  Please obtain a copy of the
- * License at http://www.apple.com/publicsource and read it before using
- * this file.
- *
+ * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
  * The Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON- INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- *
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
  * @APPLE_LICENSE_HEADER_END@
  */
 /***********************************************************************
@@ -87,23 +88,21 @@ typedef struct _PendingClass
 * Exports.
 **********************************************************************/
 
-// Function to call when message sent to nil object.
-void		(*_objc_msgNil)(id, SEL) = NULL;
-
 // Function called after class has been fixed up (MACH only)
 void		(*callbackFunction)(Class, const char *) = 0;
-
-// Prototype for function passed to
-typedef void (*NilObjectMsgCallback) (id nilObject, SEL selector);
 
 // Lock for class hashtable
 OBJC_DECLARE_LOCK (classLock);
 
 // Condition for logging load progress
-static int LaunchingDebug = -1;
+static int LaunchingDebug = -1; // env "LaunchingDebug"
+static int PrintBinding = -1;    // env "OBJC_PRINT_BIND"
 
 // objc's key for pthread_getspecific
 pthread_key_t _objc_pthread_key;
+
+// Is every library up to now prebound?
+static int all_modules_prebound = 0;
 
 /***********************************************************************
 * Function prototypes internal to this module.
@@ -155,6 +154,10 @@ NXHashTable *_objc_debug_class_hash = NULL;
 // Function pointer objc_getClass calls through when class is not found
 static int			(*objc_classHandler) (const char *) = _objc_defaultClassHandler;
 
+// Function pointer called by objc_getClass and objc_lookupClass when 
+// class is not found. _objc_classLoader is called before objc_classHandler.
+static BOOL (*_objc_classLoader)(const char *) = NULL;
+
 // Category and class registries
 static NXMapTable *		category_hash = NULL;
 
@@ -204,8 +207,9 @@ static int		classIsEqual	       (void *		info,
                                  struct objc_class *		cls)
 {
     // Standard string comparison
-    return ((name->name[0] == cls->name[0]) &&
-            (strcmp (name->name, cls->name) == 0));
+    // Our local inlined version is significantly shorter on PPC and avoids the
+    // mflr/mtlr and dyld_stub overhead when calling strcmp.
+    return _objc_strcmp(name->name, cls->name) == 0;
 }
 
 /***********************************************************************
@@ -246,7 +250,9 @@ int objc_getClassList(Class *buffer, int bufferLen) {
     }
     cnt = 0;
     state = NXInitHashState(class_hash);
-    while (cnt < num && NXNextHashState(class_hash, &state, (void **)&class)) {
+    while (cnt < bufferLen  &&  
+           NXNextHashState(class_hash, &state, (void **)&class)) 
+    {
         buffer[cnt++] = class;
     }
     OBJC_UNLOCK(&classLock);
@@ -289,10 +295,8 @@ void	objc_setClassHandler	(int	(*userSuppliedHandler) (const char *))
 
 /***********************************************************************
 * objc_getClass.  Return the id of the named class.  If the class does
-* not exist, call the objc_classHandler routine with the class name.
-* If the objc_classHandler returns a non-zero value, try once more to
-* find the class.  Default objc_classHandler always returns zero.
-* objc_setClassHandler is how someone can install a non-default routine.
+* not exist, call _objc_classLoader and then objc_classHandler, either of 
+* which may create a new class.
 * Warning: doesn't work if aClassName is the name of a posed-for class's isa!
 **********************************************************************/
 id		objc_getClass	       (const char *	aClassName)
@@ -300,13 +304,20 @@ id		objc_getClass	       (const char *	aClassName)
     struct objc_class	cls;
     id					ret;
 
-    // Synchronize access to hash table
-    OBJC_LOCK (&classLock);
+    cls.name = aClassName;
 
     // Check the hash table
-    cls.name = aClassName;
+    OBJC_LOCK (&classLock);
     ret = (id) NXHashGet (class_hash, &cls);
     OBJC_UNLOCK (&classLock);
+
+    // If not found, go call objc_classLoader and try again
+    if (!ret  &&  _objc_classLoader  &&  (*_objc_classLoader)(aClassName))
+    {
+        OBJC_LOCK (&classLock);
+        ret = (id) NXHashGet (class_hash, &cls);
+        OBJC_UNLOCK (&classLock);
+    }
 
     // If not found, go call objc_classHandler and try again
     if (!ret && (*objc_classHandler)(aClassName))
@@ -321,6 +332,8 @@ id		objc_getClass	       (const char *	aClassName)
 
 /***********************************************************************
 * objc_lookUpClass.  Return the id of the named class.
+* If the class does not exist, call _objc_classLoader, which may create 
+* a new class.
 *
 * Formerly objc_getClassWithoutWarning ()
 **********************************************************************/
@@ -329,15 +342,23 @@ id		objc_lookUpClass       (const char *	aClassName)
     struct objc_class	cls;
     id					ret;
 
-    // Synchronize access to hash table
-    OBJC_LOCK (&classLock);
+    cls.name = aClassName;
 
     // Check the hash table
-    cls.name = aClassName;
+    OBJC_LOCK (&classLock);
     ret = (id) NXHashGet (class_hash, &cls);
-
-    // Desynchronize
     OBJC_UNLOCK (&classLock);
+
+    // If not found, go call objc_classLoader and try again
+    if (!ret  &&  _objc_classLoader  &&  (*_objc_classLoader)(aClassName))
+    {
+        OBJC_LOCK (&classLock);
+        ret = (id) NXHashGet (class_hash, &cls);
+        OBJC_UNLOCK (&classLock);
+    }
+
+    // Don't call objc_classHandler; it's only used by objc_getClass().
+
     return ret;
 }
 
@@ -636,6 +657,11 @@ static void _objc_add_categories_from_image (header_info *  hi)
     unsigned int	midx;
     int			isDynamic = (hi->mhdr->filetype == MH_DYLIB) || (hi->mhdr->filetype == MH_BUNDLE);
 
+    if (_objcHeaderIsReplacement(hi)) {
+        // Ignore any categories in this image
+        return;
+    }
+
     // Major loop - process all modules in the header
     mods = (Module) ((unsigned long) hi->mod_ptr + hi->image_slide);
 
@@ -661,7 +687,7 @@ static void _objc_add_categories_from_image (header_info *  hi)
         // Minor loop - register all categories from given module
         for (index = mods[midx].symtab->cls_def_cnt; index < total; index += 1)
         {
-            _objc_register_category(mods[midx].symtab->defs[index], mods[midx].version, isDynamic);
+            _objc_register_category(mods[midx].symtab->defs[index], mods[midx].version, isDynamic && !all_modules_prebound);
         }
 
         trace(0xb124, midx, 0, 0);
@@ -670,10 +696,12 @@ static void _objc_add_categories_from_image (header_info *  hi)
     trace(0xb12f, 0, 0, 0);
 }
 
+
 /***********************************************************************
-* _headerForClass.
+* _headerForAddress.
+* addr can be a class or a category
 **********************************************************************/
-static const header_info *  _headerForClass     (struct objc_class *	cls)
+static const header_info *_headerForAddress(void *addr)
 {
     const struct segment_command *	objcSeg;
     unsigned int			size;
@@ -684,20 +712,94 @@ static const header_info *  _headerForClass     (struct objc_class *	cls)
     for (hInfo = FirstHeader; hInfo != NULL; hInfo = hInfo->next)
     {
         // Locate header data, if any
-        objcSeg = _getObjcHeaderData ((headerType *) hInfo->mhdr, &size);
+        objcSeg = (struct segment_command *)hInfo->objcData;
+        size = hInfo->objcDataSize;
         if (!objcSeg)
             continue;
 
         // Is the class in this header?
         vmaddrPlus = (unsigned long) objcSeg->vmaddr + hInfo->image_slide;
-        if ((vmaddrPlus <= (unsigned long) cls) &&
-            ((unsigned long) cls < (vmaddrPlus + size)))
+        if ((vmaddrPlus <= (unsigned long) addr) &&
+            ((unsigned long) addr < (vmaddrPlus + size)))
             return hInfo;
     }
 
     // Not found
     return 0;
 }
+
+
+/***********************************************************************
+* _headerForCategory
+* Return the image header containing this category, or NULL
+**********************************************************************/
+static const header_info *_headerForCategory(struct objc_category *cat)
+{
+    return _headerForAddress(cat);
+}
+
+
+/***********************************************************************
+* _headerForClass
+* Return the image header containing this class, or NULL.
+* Returns NULL on runtime-constructed classes, and the NSCF classes.
+**********************************************************************/
+static const header_info *_headerForClass(struct objc_class *cls)
+{
+    return _headerForAddress(cls);
+}
+
+
+/***********************************************************************
+* _moduleForClassFromImage
+* Returns the module containing the definition for a class, or NULL.
+* The class is assumed to be in the given image, and the module
+* returned will be in that image.
+**********************************************************************/
+static Module _moduleForClassFromImage(struct objc_class *cls,
+                                       const header_info *hInfo)
+{
+    Module mods = (Module)((unsigned long)hInfo->mod_ptr + hInfo->image_slide);
+    int m, d;
+    for (m = 0; m < hInfo->mod_count; m++) {
+        if (mods[m].symtab) {
+            for (d = 0; d < mods[m].symtab->cls_def_cnt; d++) {
+                if (cls == (struct objc_class *) mods[m].symtab->defs[d]) {
+                    return &mods[m];
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+
+/***********************************************************************
+* _moduleForCategoryFromImage
+* Returns the module containing the definition for a category, or NULL.
+* The category is assumed to be in the given image, and the module
+* returned will be in that image.
+**********************************************************************/
+static Module _moduleForCategoryFromImage(struct objc_category *cat,
+                                          const header_info *hInfo)
+{
+    Module mods = (Module)((unsigned long)hInfo->mod_ptr + hInfo->image_slide);
+    int m, d;
+    for (m = 0; m < hInfo->mod_count; m++) {
+        if (mods[m].symtab) {
+            for (d = mods[m].symtab->cls_def_cnt;
+                 d < mods[m].symtab->cls_def_cnt + mods[m].symtab->cat_def_cnt;
+                 d++)
+            {
+                if (cat == (struct objc_category *) mods[m].symtab->defs[d]) {
+                    return &mods[m];
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
 
 /***********************************************************************
 * _nameForHeader.
@@ -856,6 +958,11 @@ static void	_objc_add_classes_from_image(NXHashTable *clsHash, header_info *hi)
     Module		mods;
     int			isDynamic = (hi->mhdr->filetype == MH_DYLIB) || (hi->mhdr->filetype == MH_BUNDLE);
 
+    if (_objcHeaderIsReplacement(hi)) {
+        // Ignore any classes in this image
+        return;
+    }
+
     // Major loop - process all modules in the image
     mods = (Module) ((unsigned long) hi->mod_ptr + hi->image_slide);
     for (midx = 0; midx < hi->mod_count; midx += 1)
@@ -874,7 +981,7 @@ static void	_objc_add_classes_from_image(NXHashTable *clsHash, header_info *hi)
             newCls = mods[midx].symtab->defs[index];
 
             // remember to bind the module on initialization
-            if (isDynamic)
+            if (isDynamic  &&  !all_modules_prebound)
                 newCls->info |= CLS_NEED_BIND ;
 
             // Convert old style method list to the new style
@@ -1017,19 +1124,23 @@ static inline void map_selrefs(SEL *sels, unsigned int	cnt)
 {
     unsigned int	index;
 
+    sel_lock();
+
     // Process each selector
     for (index = 0; index < cnt; index += 1)
     {
         SEL	sel;
 
         // Lookup pointer to uniqued string
-        sel = sel_registerNameNoCopy ((const char *) sels[index]);
+        sel = sel_registerNameNoCopyNoLock ((const char *) sels[index]);
 
         // Replace this selector with uniqued one (avoid
         // modifying the VM page if this would be a NOP)
         if (sels[index] != sel)
             sels[index] = sel;
     }
+    
+    sel_unlock();
 }
 
 
@@ -1041,6 +1152,8 @@ static void  map_method_descs (struct objc_method_description_list * methods)
 {
     unsigned int	index;
 
+    sel_lock();
+
     // Process each method
     for (index = 0; index < methods->count; index += 1)
     {
@@ -1051,13 +1164,15 @@ static void  map_method_descs (struct objc_method_description_list * methods)
         method = &methods->list[index];
 
         // Lookup pointer to uniqued string
-        sel = sel_registerNameNoCopy ((const char *) method->name);
+        sel = sel_registerNameNoCopyNoLock ((const char *) method->name);
 
         // Replace this selector with uniqued one (avoid
         // modifying the VM page if this would be a NOP)
         if (method->name != sel)
             method->name = sel;
     }
+
+    sel_unlock();
 }
 
 /***********************************************************************
@@ -1128,10 +1243,6 @@ static void _objc_bind_symbol(const char *name)
     header_info *hInfo;
     const headerType	*imageHeader = lastHeader ? lastHeader->mhdr : NULL;
 
-    // Ideally we would have a way to not even process a symbol in a module
-    //  we've already visited
-
-
     // First assume there is some locality and search where we last found a symbol
     if ( imageHeader
         && NSIsSymbolNameDefinedInImage(imageHeader, name)
@@ -1145,6 +1256,9 @@ static void _objc_bind_symbol(const char *name)
     // Search in all the images known to contain ObjcC
     for ( hInfo = FirstHeader; hInfo != NULL; hInfo = hInfo->next)
     {
+        if (_objcHeaderIsReplacement(hInfo)) {
+            continue; // no classes or categories used from image; skip it
+        }
         imageHeader = hInfo->mhdr;
         if ( hInfo != lastHeader
              && NSIsSymbolNameDefinedInImage(imageHeader, name)
@@ -1160,70 +1274,53 @@ static void _objc_bind_symbol(const char *name)
 }
 
 /***********************************************************************
-* _objc_bindModuleContainingCategory.  Bind the module containing the
-* category.
+* _symbolNameForCategory
+* Constructs the symbol name for the given category.
+* The symbol name is ".objc_category_name_<classname>_<categoryname>",
+* where <classname> is the class name with the leading '%'s stripped.
+* The caller must free() the result.
 **********************************************************************/
-static void  _objc_bindModuleContainingCategory   (Category	cat)
+static char *_symbolNameForCategory(Category cat)
 {
     char *		class_name;
     char *		category_name;
     char *		name;
-    char		tmp_buf[128];
-    unsigned int	name_len;
 
-    // Bind ".objc_category_name_<classname>_<categoryname>",
-    // where <classname> is the class name with the leading
-    // '%'s stripped.
     class_name    = cat->class_name;
     category_name = cat->category_name;
-    name_len      = strlen(class_name) + strlen(category_name) + 30;
-    if ( name_len > 128 )
-        name = malloc(name_len);
-    else
-        name = tmp_buf;
+
+    name = malloc(strlen(class_name) + strlen(category_name) + 30);
+
     while (*class_name == '%')
         class_name += 1;
     strcpy (name, ".objc_category_name_");
     strcat (name, class_name);
     strcat (name, "_");
     strcat (name, category_name);
-    if (LaunchingDebug) { _objc_syslog("_objc_bindModuleContainingCategory for %s on %s", category_name, class_name); }
-    _objc_bind_symbol(name);
-    if ( name != tmp_buf )
-        free(name);
+    return name;
 }
 
 /***********************************************************************
-* _objc_bindModuleContainingClass.  Bind the module containing the
-* class.
-* This is done lazily, just after initializing the class (if needed)
+* _symbolNameForClass
+* Constructs the symbol name for the given class.
+* The symbol name is ".objc_class_name_<classname>",
+* where <classname> is the class name with the leading '%'s stripped.
+* The caller must free() the result.
 **********************************************************************/
-
-void _objc_bindModuleContainingClass (struct objc_class * cls) {
+static char *_symbolNameForClass(Class cls) 
+{
     char *		name;
     const char *	class_name;
-    char		tmp_buf[128];
-    unsigned int	name_len;
 
-    // Use the real class behind the poser
-    if (CLS_GETINFO (cls, CLS_POSING))
-        cls = getOriginalClassForPosingClass (cls);
     class_name = cls->name;
 
-    name_len   = strlen(class_name) + 20;
-    if ( name_len > 128 )
-        name = malloc(name_len);
-    else
-        name = tmp_buf;
+    name = malloc(strlen(class_name) + 20);
 
     while (*class_name == '%')
         class_name += 1;
     strcpy (name, ".objc_class_name_");
     strcat (name, class_name);
-    if (LaunchingDebug) { _objc_syslog("_objc_bindModuleContainingClass for %s", class_name); }
-    _objc_bind_symbol(name);
-    if ( name != tmp_buf )
-        free(name);
+    return name;
 }
 
 
@@ -1246,6 +1343,76 @@ void _objc_bindClassIfNeeded(struct objc_class *cls)
 
 
 /***********************************************************************
+* _objc_bindModuleContainingCategory.  Bind the module containing the
+* category. If that module is already bound, do nothing.
+**********************************************************************/
+static void _objc_bindModuleContainingCategory(struct objc_category *cat)
+{
+    const header_info *hInfo;
+    
+    if (PrintBinding) {
+        _objc_inform("binding category %s(%s)",
+                     cat->class_name, cat->category_name);
+    }
+    
+    hInfo = _headerForCategory(cat);
+    if (hInfo) {
+        Module module = _moduleForCategoryFromImage(cat, hInfo);
+        if (module) {
+            _dyld_bind_objc_module(module);
+            return;
+        }
+    }
+    
+    {
+        // Header-finding or module-finding shortcut didn't work.
+        // Bind using symbol name.
+        char *symbolName = _symbolNameForCategory(cat);
+        _objc_bind_symbol(symbolName);
+        free(symbolName);
+    }
+}
+
+    
+/***********************************************************************
+* _objc_bindModuleContainingClass.  Bind the module containing the
+* class. If that module is already bound, do nothing.
+* This is done lazily, just before calling +load or +initialize.
+**********************************************************************/
+void _objc_bindModuleContainingClass(struct objc_class *cls)
+{
+    const header_info *hInfo;
+    
+    if (PrintBinding) {
+        _objc_inform("binding class %s", cls->name);
+    }
+    
+    // Use the real class behind the poser
+    if (CLS_GETINFO (cls, CLS_POSING)) {
+        cls = getOriginalClassForPosingClass (cls);
+    }
+    
+    hInfo = _headerForClass(cls);
+    if (hInfo) {
+        Module module = _moduleForClassFromImage(cls, hInfo);
+        if (module) {
+            _dyld_bind_objc_module(module);
+            return;
+        }
+    }
+    
+    {
+        // Module not bound, and header-finding or module-finding shortcut
+        // didn't work. Bind using symbol name.
+        // This happens for the NSCF class structs which are copied elsewhere.
+        char *symbolName = _symbolNameForClass(cls);
+        _objc_bind_symbol(symbolName);
+        free(symbolName);
+    }
+}
+
+
+/***********************************************************************
 * _objc_addHeader.
 *
 **********************************************************************/
@@ -1260,6 +1427,7 @@ static header_info * _objc_addHeader(const headerType *header, unsigned long	vma
 {
     int mod_count;
     Module mod_ptr = _getObjcModules ((headerType *) header, &mod_count);
+    char *image_info_ptr = (char *)_getObjcImageInfo((headerType *)header);
     header_info *result;
     
     // if there is no objc data - ignore this entry!
@@ -1280,6 +1448,12 @@ static header_info * _objc_addHeader(const headerType *header, unsigned long	vma
     result->mod_ptr = mod_ptr;
     result->mod_count  = mod_count;
     result->image_slide	= vmaddr_slide;
+    result->objcData = _getObjcHeaderData(header, &result->objcDataSize);
+    if (image_info_ptr) {
+        result->info = (objc_image_info *)(vmaddr_slide + image_info_ptr);
+    } else {
+        result->info = NULL;
+    }
 
     // chain it on
     // (a simple lock here would go a long way towards thread safety)
@@ -1342,6 +1516,10 @@ static void _objc_call_loads_for_image (header_info * header)
     unsigned int		nCategories;
     struct objc_symtab *	symtab;
     struct objc_module *	module;
+
+    if (_objcHeaderIsReplacement(header)) {
+        return; // Don't call +load again
+    }
 
     // Major loop - process all modules named in header
     module = (struct objc_module *) ((unsigned long) header->mod_ptr + header->image_slide);
@@ -1406,6 +1584,9 @@ static void objc_setConfiguration() {
     if ( LaunchingDebug == -1 ) {
         // watch image loading and binding
         LaunchingDebug = getenv("LaunchingDebug") != NULL;
+    }
+    if ( PrintBinding == -1 ) {
+        PrintBinding = getenv("OBJC_PRINT_BIND") != NULL;
     }
 }
 /***********************************************************************
@@ -1510,15 +1691,15 @@ void _objcInit(void) {
         struct objc_class *	cls;
 
         module = (struct objc_module *) ((unsigned long) hInfo->mod_ptr + hInfo->image_slide);
-        for (nModules = hInfo->mod_count; nModules; nModules -= 1)
+        for (nModules = hInfo->mod_count; nModules; nModules--, module++)
         {
-            for (index = 0; index < module->symtab->cls_def_cnt; index += 1)
-            {
-                cls = (struct objc_class *) module->symtab->defs[index];
-                _class_install_relationships (cls, module->version);
+            if (module->symtab) {
+                for (index = 0; index < module->symtab->cls_def_cnt; index++)
+                {
+                    cls = (struct objc_class *) module->symtab->defs[index];
+                    _class_install_relationships (cls, module->version);
+                }
             }
-
-            module += 1;
         }
 
         trace(0xb007, hInfo, hInfo->mod_count, 0);
@@ -1571,9 +1752,27 @@ static void	_objc_map_image(headerType *mh, unsigned long	vmaddr_slide)
 
     if (!hInfo) return;
     
-    if (LaunchingDebug) { _objc_syslog("objc_map_image for %s\n", _nameForHeader(mh)); }
+    if (LaunchingDebug) { 
+        _objc_syslog("objc_map_image for %s%s\n", 
+                     _nameForHeader(mh), 
+                     _objcHeaderIsReplacement(hInfo) ? " (replacement)" : "");
+    }
 
     trace(0xb101, 0, 0, 0);
+
+#ifdef MACOSX_PANTHER
+    // Check if all loaded libraries up to and including this one are prebound
+    // SPI introduced in Panther (Mac OS X 10.3)
+    all_modules_prebound = _dyld_all_twolevel_modules_prebound();
+    if (PrintBinding) {
+        static int warned = -1;
+        if (warned != all_modules_prebound) {
+            _objc_inform("objc: binding: all_modules_prebound is now %d", 
+                         all_modules_prebound);
+            warned = all_modules_prebound;
+        }
+    }
+#endif
 
     // Register any categories and/or classes and/or selectors this image contains
     _objc_add_categories_from_image (hInfo);
@@ -1606,8 +1805,10 @@ static void	_objc_map_image(headerType *mh, unsigned long	vmaddr_slide)
 
         trace(0xb106, hInfo->mod_count, 0, 0);
 
-        for (nModules = hInfo->mod_count; nModules; nModules -= 1)
+        for (nModules = hInfo->mod_count; nModules; nModules--, module++)
         {
+            if (!module->symtab) continue;
+
             // Minor loop - process each class in a given module
             for (index = 0; index < module->symtab->cls_def_cnt; index += 1)
             {
@@ -1633,9 +1834,6 @@ static void	_objc_map_image(headerType *mh, unsigned long	vmaddr_slide)
                     ((struct objc_class *)cls)->isa->super_class = _objc_getNonexistentClass ();
                 }
             }
-
-            // Move on
-            module += 1;
         }
 
         trace(0xb108, 0, 0, 0);
@@ -1675,19 +1873,34 @@ static void	_objc_unmap_image(headerType *mh, unsigned long	vmaddr_slide) {
 }
 
 /***********************************************************************
-* objc_setNilObjectMsgHandler.
+* _objc_setNilReceiver
 **********************************************************************/
-void  objc_setNilObjectMsgHandler   (NilObjectMsgCallback  nilObjMsgCallback)
+id _objc_setNilReceiver(id newNilReceiver)
 {
-    _objc_msgNil = nilObjMsgCallback;
+    id oldNilReceiver;
+
+    oldNilReceiver = _objc_nilReceiver;
+    _objc_nilReceiver = newNilReceiver;
+
+    return oldNilReceiver;
 }
 
 /***********************************************************************
-* objc_getNilObjectMsgHandler.
+* _objc_getNilReceiver
 **********************************************************************/
-NilObjectMsgCallback  objc_getNilObjectMsgHandler   (void)
+id _objc_getNilReceiver(void)
 {
-    return _objc_msgNil;
+    return _objc_nilReceiver;
 }
 
 
+/***********************************************************************
+* _objc_setClassLoader
+* Similar to objc_setClassHandler, but objc_classLoader is used for 
+* both objc_getClass() and objc_lookupClass(), and objc_classLoader 
+* pre-empts objc_classHandler. 
+**********************************************************************/
+void _objc_setClassLoader(BOOL (*newClassLoader)(const char *))
+{
+    _objc_classLoader = newClassLoader;
+}

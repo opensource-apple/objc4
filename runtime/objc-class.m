@@ -2,23 +2,24 @@
  * Copyright (c) 1999 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- *
- * Portions Copyright (c) 1999 Apple Computer, Inc.  All Rights
- * Reserved.  This file contains Original Code and/or Modifications of
- * Original Code as defined in and that are subject to the Apple Public
- * Source License Version 1.1 (the "License").  You may not use this file
- * except in compliance with the License.  Please obtain a copy of the
- * License at http://www.apple.com/publicsource and read it before using
- * this file.
- *
+ * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
  * The Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON- INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
- *
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ * 
  * @APPLE_LICENSE_HEADER_END@
  */
 /***********************************************************************
@@ -233,6 +234,9 @@ enum {
 // Amount of space required for count hash table buckets, knowing that
 // one entry is embedded in the cache structure itself
 #define TABLE_SIZE(count)	((count - 1) * sizeof(Method))
+
+// A sentinal (magic value) to report bad thread_get_state status
+#define PC_SENTINAL             0
 
 
 /***********************************************************************
@@ -2162,7 +2166,7 @@ IMP	_class_lookupMethodAndLoadCache	   (Class	cls,
         // entries here! See note in "Method cache locking" above.
         // The upshot is that _cache_getMethod() will return NULL 
         // instead of returning a forward:: entry.
-        meth = _cache_getMethod(curClass, sel);
+        meth = _cache_getMethod(curClass, sel, &_objc_msgForward);
         if (meth) {
             // Found the method in this class or a superclass.
             // Cache the method in this class, unless we just found it in 
@@ -2578,36 +2582,36 @@ static unsigned long	_get_pc_for_thread     (mach_port_t	thread)
 {
     struct hp_pa_frame_thread_state		state;
     unsigned int count = HPPA_FRAME_THREAD_STATE_COUNT;
-    thread_get_state (thread, HPPA_FRAME_THREAD_STATE, (thread_state_t)&state, &count);
-    return state.ts_pcoq_front;
+    kern_return_t okay = thread_get_state (thread, HPPA_FRAME_THREAD_STATE, (thread_state_t)&state, &count);
+    return (okay == KERN_SUCCESS) ? state.ts_pcoq_front : PC_SENTINAL;
 }
 #elif defined(sparc)
 {
     struct sparc_thread_state_regs		state;
     unsigned int count = SPARC_THREAD_STATE_REGS_COUNT;
-    thread_get_state (thread, SPARC_THREAD_STATE_REGS, (thread_state_t)&state, &count);
-    return state.regs.r_pc;
+    kern_return_t okay = thread_get_state (thread, SPARC_THREAD_STATE_REGS, (thread_state_t)&state, &count);
+    return (okay == KERN_SUCCESS) ? state.regs.r_pc : PC_SENTINAL;
 }
 #elif defined(__i386__) || defined(i386)
 {
     i386_thread_state_t			state;
     unsigned int count = i386_THREAD_STATE_COUNT;
-    thread_get_state (thread, i386_THREAD_STATE, (thread_state_t)&state, &count);
-    return state.eip;
+    kern_return_t okay = thread_get_state (thread, i386_THREAD_STATE, (thread_state_t)&state, &count);
+    return (okay == KERN_SUCCESS) ? state.eip : PC_SENTINAL;
 }
 #elif defined(m68k)
 {
     struct m68k_thread_state_regs		state;
     unsigned int count = M68K_THREAD_STATE_REGS_COUNT;
-    thread_get_state (thread, M68K_THREAD_STATE_REGS, (thread_state_t)&state, &count);
-    return state.pc;
+    kern_return_t okay = thread_get_state (thread, M68K_THREAD_STATE_REGS, (thread_state_t)&state, &count);
+    return (okay == KERN_SUCCESS) ? state.pc : PC_SENTINAL;
 }
 #elif defined(__ppc__) || defined(ppc)
 {
     struct ppc_thread_state			state;
     unsigned int count = PPC_THREAD_STATE_COUNT;
-    thread_get_state (thread, PPC_THREAD_STATE, (thread_state_t)&state, &count);
-    return state.srr0;
+    kern_return_t okay = thread_get_state (thread, PPC_THREAD_STATE, (thread_state_t)&state, &count);
+    return (okay == KERN_SUCCESS) ? state.srr0 : PC_SENTINAL;
 }
 #else
 {
@@ -2639,8 +2643,7 @@ static int	_collecting_in_critical		(void)
     ret = task_threads (mach_task_self (), &threads, &number);
     if (ret != KERN_SUCCESS)
     {
-        _objc_inform ("task_thread failed (result %d)\n", ret);
-        exit (1);
+        _objc_fatal("task_thread failed (result %d)\n", ret);
     }
 
     // Check whether any thread is in the cache lookup code
@@ -2657,6 +2660,13 @@ static int	_collecting_in_critical		(void)
         // Find out where thread is executing
         pc = _get_pc_for_thread (threads[count]);
 
+        // Check for bad status, and if so, assume the worse (can't collect)
+        if (pc == PC_SENTINAL)
+        {
+            result = TRUE;
+            goto done;
+        }
+        
         // Check whether it is in the cache lookup code
         for (region = 0; objc_entryPoints[region] != 0; region++)
         {

@@ -21,16 +21,32 @@ _method_getNumberOfArguments
 _method_getSizeOfArguments
 _method_getArgumentInfo
 _class_nextMethodList
+# objc-exception.h
+_objc_exception_throw
+_objc_exception_try_enter
+_objc_exception_try_exit
+_objc_exception_extract
+_objc_exception_match
+_objc_exception_get_functions
+_objc_exception_set_functions
+# objc-sync.h
+_objc_sync_enter
+_objc_sync_exit
+_objc_sync_wait
+_objc_sync_notify
+_objc_sync_notifyAll
 # objc-load.h
 _objc_loadModules
 _objc_loadModule
 _objc_unloadModules
 # objc-runtime.h
-# fixme does anybody use objc_msgSendFew* ?
 _objc_getClass
 _objc_getMetaClass
 _objc_msgSend
+# non-nil entry points disabled for now
+# _objc_msgSendNonNil
 _objc_msgSend_stret
+# _objc_msgSendNonNil_stret
 _objc_msgSendSuper
 _objc_msgSendSuper_stret
 _objc_msgSendv
@@ -131,6 +147,10 @@ __objc_create_zone
 __objc_error
 __objc_flush_caches
 __objc_msgForward
+__objc_resolve_categories_for_class
+__objc_setClassLoader
+__objc_setNilReceiver
+__objc_getNilReceiver
 __objcInit
 _class_lookupMethod
 _class_respondsToMethod
@@ -141,4 +161,5 @@ __dummy
 _do_not_remove_this_dummy_function
 # used by debugging tools like heap
 __objc_debug_class_hash
-
+# used by Foundation's NSAutoreleaseFreedObjectCheckEnabled
+__objc_getFreedObjectClass

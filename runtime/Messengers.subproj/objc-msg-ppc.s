@@ -3,21 +3,22 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Portions Copyright (c) 1999 Apple Computer, Inc.  All Rights
- * Reserved.  This file contains Original Code and/or Modifications of
- * Original Code as defined in and that are subject to the Apple Public
- * Source License Version 1.1 (the "License").  You may not use this file
- * except in compliance with the License.  Please obtain a copy of the
- * License at http://www.apple.com/publicsource and read it before using
- * this file.
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
  * 
  * The Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON- INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -26,6 +27,15 @@
  *  objc-msg-ppc.s - PowerPC code to support objc messaging.
  *
  *  Copyright 1988-1996 NeXT Software, Inc.
+ *
+ *  December 2002 Andy Belk (abelk at apple.com)
+ *    Use r2 in the messenger - no longer need r10.
+ *    Removed "few args" variants (no longer worth it, especially since gcc3 still
+ *    doesn't generate code for them).
+ *    Add NonNil entry points to objc_msgSend and objc_msgSend_stret.
+ *    Align objc_msgSend et al on cache lines.
+ *    Replace CALL_EXTERN references (which caused excess mflr/mtlr usage) with
+ *    dyld-stub-compatible versions: shorter and become local branches within a dylib.
  *
  *  8-Nov-2000	Laurent Ramontianu (ramontia@apple.com)
  *		Added "few args" params. to CacheLookup and MethodTableLookup
@@ -49,38 +59,95 @@
  *		Created from m98k.
  ********************************************************************/
 
+/********************************************************************
+ * Data used by the ObjC runtime.
+ *
+ ********************************************************************/
+
+	.data
+; Substitute receiver for messages sent to nil (usually also nil)
+; id _objc_nilReceiver
+	.align 4
+.globl __objc_nilReceiver
+__objc_nilReceiver:
+	.long   0
+
 ; _objc_entryPoints and _objc_exitPoints are used by method dispatch
 ; caching code to figure out whether any threads are actively 
 ; in the cache for dispatching.  The labels surround the asm code
 ; that do cache lookups.  The tables are zero-terminated.
-	.data
 .globl _objc_entryPoints
 _objc_entryPoints:
-	.long	__cache_getImp
-	.long	__cache_getMethod
-	.long	_objc_msgSend
-	.long	_objc_msgSend_stret
-	.long	_objc_msgSendSuper
-	.long	_objc_msgSendSuper_stret
-	.long	_objc_msgSendFew
-	.long	_objc_msgSendFew_stret
-	.long	_objc_msgSendSuperFew
-	.long	_objc_msgSendSuperFew_stret
-	.long	0
+	.long   __cache_getImp
+	.long   __cache_getMethod
+	.long   _objc_msgSend
+	.long   _objc_msgSend_stret
+	.long   _objc_msgSendSuper
+	.long   _objc_msgSendSuper_stret
+	.long   0
 
 .globl _objc_exitPoints
 _objc_exitPoints:
-	.long	LGetImpExit
-	.long	LGetMethodExit
-	.long	LMsgSendExit
-	.long	LMsgSendStretExit
-	.long	LMsgSendSuperExit
-	.long	LMsgSendSuperStretExit
-	.long	LMsgSendFewExit
-	.long	LMsgSendFewStretExit
-	.long	LMsgSendSuperFewExit
-	.long	LMsgSendSuperFewStretExit
-	.long	0
+	.long   LGetImpExit
+	.long   LGetMethodExit
+	.long   LMsgSendExit
+	.long   LMsgSendStretExit
+	.long   LMsgSendSuperExit
+	.long   LMsgSendSuperStretExit
+	.long   0
+
+/*
+ * Handcrafted dyld stubs for each external call.
+ * They should be converted into a local branch after linking. aB.
+ */
+
+/* asm_help.h version is not what we want */
+#undef CALL_EXTERN
+
+#if defined(__DYNAMIC__)
+
+#define CALL_EXTERN(name)	bl      L ## name ## $stub
+
+#define LAZY_PIC_FUNCTION_STUB(name) \
+.data                         @\
+.picsymbol_stub               @\
+L ## name ## $stub:           @\
+	.indirect_symbol name     @\
+	mflr    r0                @\
+	bcl     20,31,L0$ ## name @\
+L0$ ## name:                  @\
+	mflr    r11               @\
+	addis   r11,r11,ha16(L ## name ## $lazy_ptr-L0$ ## name) @\
+	mtlr    r0                @\
+	lwz     r12,lo16(L ## name ## $lazy_ptr-L0$ ## name)(r11) @\
+	mtctr   r12               @\
+	addi    r11,r11,lo16(L ## name ## $lazy_ptr-L0$ ## name) @\
+	bctr                      @\
+.data                         @\
+.lazy_symbol_pointer          @\
+L ## name ## $lazy_ptr:       @\
+	.indirect_symbol name     @\
+	.long dyld_stub_binding_helper
+
+#else /* __DYNAMIC__ */
+
+#define CALL_EXTERN(name)	bl      name
+
+#define LAZY_PIC_FUNCTION_STUB(name)
+
+#endif /* __DYNAMIC__ */
+
+; _class_lookupMethodAndLoadCache
+LAZY_PIC_FUNCTION_STUB(__class_lookupMethodAndLoadCache)
+
+; __objc_error
+LAZY_PIC_FUNCTION_STUB(___objc_error) /* No stub needed */
+
+#if defined(PROFILE)
+; mcount
+LAZY_PIC_FUNCTION_STUB(mcount)
+#endif /* PROFILE */
+
 
 /********************************************************************
  *
@@ -89,32 +156,32 @@ _objc_exitPoints:
  ********************************************************************/
 
 ; objc_super parameter to sendSuper
-	receiver		= 0
-	class			= 4
+#define RECEIVER         0
+#define CLASS            4
 
 ; Selected field offsets in class structure
-	isa			= 0
-	cache			= 32
+#define ISA              0
+#define CACHE            32
 
 ; Method descriptor
-	method_name		= 0
-	method_imp		= 8
+#define METHOD_NAME      0
+#define METHOD_IMP       8
 
 ; Cache header
-	mask			= 0
-	occupied		= 4
-	buckets			= 8	// variable length array
+#define MASK             0
+#define OCCUPIED         4
+#define BUCKETS          8	// variable length array
 
 #if defined(OBJC_INSTRUMENTED)
 ; Cache instrumentation data, follows buckets
-	hitCount		= 0
-	hitProbes		= hitCount + 4
-	maxHitProbes		= hitProbes + 4
-	missCount		= maxHitProbes + 4
-	missProbes		= missCount + 4
-	maxMissProbes		= missProbes + 4
-	flushCount		= maxMissProbes + 4
-	flushedEntries		= flushCount + 4
+#define hitCount         0
+#define hitProbes        hitCount + 4
+#define maxHitProbes     hitProbes + 4
+#define missCount        maxHitProbes + 4
+#define missProbes       missCount + 4
+#define maxMissProbes    missProbes + 4
+#define flushCount       maxMissProbes + 4
+#define flushedEntries   flushCount + 4
 #endif
 
 /********************************************************************
@@ -126,10 +193,11 @@ _objc_exitPoints:
 // In case the implementation is _objc_msgForward, indicate to it
 // whether the method was invoked as a word-return or struct-return.
 // The li instruction costs nothing because it fits into spare
-// processor cycles.
+// processor cycles. We choose to make the MsgSend indicator non-zero
+// as r11 is already guaranteed non-zero for a cache hit (no li needed).
 
-kFwdMsgSend		= 0
-kFwdMsgSendStret	= 1
+#define kFwdMsgSend          1
+#define kFwdMsgSendStret     0
 
 /********************************************************************
  *
@@ -152,29 +220,29 @@ kFwdMsgSendStret	= 1
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Values to specify whether the symbols is plain or nonlazy
-LOCAL_SYMBOL	= 0
-EXTERNAL_SYMBOL	= 1
+#define LOCAL_SYMBOL     0
+#define EXTERNAL_SYMBOL  1
 
-.macro	LOAD_STATIC_WORD
+.macro LOAD_STATIC_WORD
 
 #if defined(__DYNAMIC__)
-	mflr		r0
-	bcl		20,31,1f	; 31 is cr7[so]
-1:	mflr		$0
-	mtlr		r0
+	mflr    r0
+	bcl     20,31,1f	; 31 is cr7[so]
+1:	mflr    $0
+	mtlr    r0
 .if $2 == EXTERNAL_SYMBOL
-	addis		$0,$0,ha16(L$1-1b)
-	lwz		$0,lo16(L$1-1b)($0)
-	lwz		$0,0($0)
+	addis   $0,$0,ha16(L$1-1b)
+	lwz     $0,lo16(L$1-1b)($0)
+	lwz     $0,0($0)
 .elseif $2 == LOCAL_SYMBOL
-	addis		$0,$0,ha16($1-1b)
-	lwz		$0,lo16($1-1b)($0)
+	addis   $0,$0,ha16($1-1b)
+	lwz     $0,lo16($1-1b)($0)
 .else
 	!!! Unknown symbol type !!!
 .endif
 #else
-	lis		$0,ha16($1)
-	lwz		$0,lo16($1)($0)
+	lis     $0,ha16($1)
+	lwz     $0,lo16($1)($0)
 #endif
 
 .endmacro
@@ -193,24 +261,24 @@ EXTERNAL_SYMBOL	= 1
 ; Eats: r0 and targetReg
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-.macro	LEA_STATIC_DATA
+.macro LEA_STATIC_DATA
 #if defined(__DYNAMIC__)
-	mflr		r0
-	bcl		20,31,1f	; 31 is cr7[so]
-1:	mflr		$0
-	mtlr		r0
+	mflr    r0
+	bcl     20,31,1f	; 31 is cr7[so]
+1:	mflr    $0
+	mtlr    r0
 .if $2 == EXTERNAL_SYMBOL
-	addis		$0,$0,ha16(L$1-1b)
-	lwz		$0,lo16(L$1-1b)($0)
+	addis   $0,$0,ha16(L$1-1b)
+	lwz     $0,lo16(L$1-1b)($0)
 .elseif $2 == LOCAL_SYMBOL
-	addis		$0,$0,ha16($1-1b)
-	addi		$0,$0,lo16($1-1b)
+	addis   $0,$0,ha16($1-1b)
+	addi    $0,$0,lo16($1-1b)
 .else
 	!!! Unknown symbol type !!!
 .endif
 #else
-	lis		$0,hi16($1)
-	ori		$0,$0,lo16($1)
+	lis     $0,hi16($1)
+	ori     $0,$0,lo16($1)
 #endif
 
 .endmacro
@@ -220,14 +288,15 @@ EXTERNAL_SYMBOL	= 1
 ; ENTRY		functionName
 ;
 ; Assembly directives to begin an exported function.
+; We align on cache boundaries for these few functions.
 ;
 ; Takes: functionName - name of the exported function
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 .macro ENTRY
 	.text
-	.align		2
-	.globl		$0
+	.align    5
+	.globl    $0
 $0:
 .endmacro
 
@@ -257,19 +326,19 @@ $0:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 .macro PLOCK
-	LEA_STATIC_DATA	$0, $1, EXTERNAL_SYMBOL
-	b		.+16			; jump into loop at the reserving check
-	lwz		r0,0($0)		; check with fast, less intrusive lwz versus lwarx
-	cmplwi		r0,0			; lock held?
-	bne		.-8			; if so, spin until it appears unlocked
-	lwarx		r0,0,$0			; get lock value, acquire memory reservation 
-	cmplwi		r0,0			; lock held?
-	bne		.-20			; if locked, go spin waiting for unlock
-	li		r0,1			; get value that means locked
-	stwcx.		r0,0,$0			; store it iff reservation still holds
-	bne-		.-20			; if reservation was lost, go re-reserve
-	isync					; discard effects of prefetched instructions 
-.endmacro	
+	LEA_STATIC_DATA $0, $1, EXTERNAL_SYMBOL
+	b       .+16			; jump into loop at the reserving check
+	lwz     r0,0($0)		; check with fast, less intrusive lwz versus lwarx
+	cmplwi  r0,0			; lock held?
+	bne     .-8				; if so, spin until it appears unlocked
+	lwarx   r0,0,$0			; get lock value, acquire memory reservation 
+	cmplwi  r0,0			; lock held?
+	bne     .-20			; if locked, go spin waiting for unlock
+	li      r0,1			; get value that means locked
+	stwcx.  r0,0,$0			; store it iff reservation still holds
+	bne-    .-20			; if reservation was lost, go re-reserve
+	isync   				; discard effects of prefetched instructions 
+.endmacro
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
@@ -278,37 +347,37 @@ $0:
 ; Release named spinlock.
 ;
 ; Takes: scratchReg - a register, other than r0, that can be mangled
-;	lockName   - the name of a static, aligned, 32-bit lock word
+;        lockName   - the name of a static, aligned, 32-bit lock word
 ;
 ; Eats: r0 and scratchReg
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 .macro PUNLOCK
-	sync					; force out changes before unlocking
+	sync    				; force out changes before unlocking
 	LEA_STATIC_DATA	$0, $1, EXTERNAL_SYMBOL
-	li		r0,0			; get value meaning "unlocked"
-	stw		r0,0($0)		; unlock the lock
+	li      r0,0			; get value meaning "unlocked"
+	stw     r0,0($0)		; unlock the lock
 .endmacro
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-; CacheLookup	WORD_RETURN | STRUCT_RETURN, MSG_SEND | MSG_SENDSUPER | CACHE_GET, cacheMissLabel, FEW_ARGS | MANY_ARGS
+; CacheLookup WORD_RETURN | STRUCT_RETURN, MSG_SEND | MSG_SENDSUPER | CACHE_GET, cacheMissLabel
 ;
 ; Locate the implementation for a selector in a class method cache.
 ;
-; Takes: WORD_RETURN	(r3 is first parameter)
-;	STRUCT_RETURN	(r3 is structure return address, r4 is first parameter)
-;	MSG_SEND	(first parameter is receiver)
-;	MSG_SENDSUPER	(first parameter is address of objc_super structure)
-;	CACHE_GET	(first parameter is class; return method triplet)
+; Takes: WORD_RETURN    (r3 is first parameter)
+;        STRUCT_RETURN  (r3 is structure return address, r4 is first parameter)
+;        MSG_SEND       (first parameter is receiver)
+;        MSG_SENDSUPER  (first parameter is address of objc_super structure)
+;        CACHE_GET      (first parameter is class; return method triplet)
 ;
-;	cacheMissLabel = label to branch to iff method is not cached
+;        cacheMissLabel = label to branch to iff method is not cached
 ;
 ; Eats: r0, r11, r12
-; On exit:	(found) MSG_SEND and MSG_SENDSUPER: return imp in r12 and ctr
-;		(found) CACHE_GET: return method triplet in r12
-;		(not found) jumps to cacheMissLabel
+; On exit: (found) MSG_SEND and MSG_SENDSUPER: return imp in r12 and ctr
+;          (found) CACHE_GET: return method triplet in r12
+;          (not found) jumps to cacheMissLabel
 ;
 ; For MSG_SEND and MSG_SENDSUPER, the messenger jumps to the imp 
 ; in ctr. The same imp in r12 is used by the method itself for its
@@ -319,159 +388,154 @@ $0:
 
 ; Values to specify to method lookup macros whether the return type of
 ; the method is an integer or structure.
-WORD_RETURN	= 0
-STRUCT_RETURN	= 1
+#define WORD_RETURN   0
+#define STRUCT_RETURN 1
 
 ; Values to specify to method lookup macros whether the return type of
 ; the method is an integer or structure.
-MSG_SEND	= 0
-MSG_SENDSUPER	= 1
-CACHE_GET	= 2
+#define MSG_SEND      0
+#define MSG_SENDSUPER 1
+#define CACHE_GET     2
 
-; Values to specify to method lookup macros whether this is a "few args" call or not
-; (number of args < 5 , including self and _cmd)
-FEW_ARGS	= 0
-MANY_ARGS	= 1
-
-.macro	CacheLookup
+.macro CacheLookup
 
 #if defined(OBJC_INSTRUMENTED)
 	; when instrumented, we use r6 and r7
-	stw		r6,36(r1)		; save r6 for use as cache pointer
-	stw		r7,40(r1)		; save r7 for use as probe count
-	li		r7,0			; no probes so far!
+	stw     r6,36(r1)		; save r6 for use as cache pointer
+	stw     r7,40(r1)		; save r7 for use as probe count
+	li      r7,0			; no probes so far!
 #endif
 
-.if $3 == MANY_ARGS
-	stw		r9,48(r1)		; save r9 and r10
-	stw		r10,52(r1)		;
-.endif
+.if $1 == CACHE_GET         ; Only WORD_RETURN applies
+	lwz     r12,CACHE(r3)	; cache = class->cache (class = 1st parameter)
+.else
 
-.if $0 == WORD_RETURN				; WORD_RETURN
+.if $0 == WORD_RETURN		; WORD_RETURN
 
 .if $1 == MSG_SEND				; MSG_SEND
-	lwz		r12,isa(r3)		; class = receiver->isa
-.elseif $1 == MSG_SENDSUPER			; MSG_SENDSUPER
-	lwz		r12,class(r3)		; class = super->class
-.else						; CACHE_GET
-	mr		r12,r3	 		; class = class
+	lwz     r12,ISA(r3)				; class = receiver->isa
+.elseif $1 == MSG_SENDSUPER		; MSG_SENDSUPER
+	lwz     r12,CLASS(r3)			; class = super->class
+.else
+	trap						; Should not happen
 .endif
 
-.else	
-						; STRUCT_RETURN
-.if $1 == MSG_SEND				; MSG_SEND
-	lwz		r12,isa(r4)		; class = receiver->isa
-.elseif $1 == MSG_SENDSUPER			; MSG_SENDSUPER
-	lwz		r12,class(r4)		; class = super->class
-.else						; CACHE_GET
-	mr		r12,r4	 		; class = class
-.endif
-
-.endif
-
-
-	lwz		r12,cache(r12)		; cache = class->cache
-#if defined(OBJC_INSTRUMENTED)
-	mr		r6,r12			; save cache pointer
-#endif
-	lwz		r11,mask(r12)		; mask = cache->mask
-
-	addi		r9,r12,buckets		; buckets = cache->buckets
-	slwi		r11,r11,2		; r11 = mask << 2 
-.if $0 == WORD_RETURN				; WORD_RETURN
-	and		r12,r4,r11		; bytes = sel & (mask<<2)
 .else						; STRUCT_RETURN
-	and		r12,r5,r11		; bytes = sel & (mask<<2)
+
+.if $1 == MSG_SEND				; MSG_SEND
+	lwz     r12,ISA(r4)				; class = receiver->isa
+.elseif $1 == MSG_SENDSUPER		; MSG_SENDSUPER
+	lwz     r12,CLASS(r4)			; class = super->class
+.else
+	trap						; Should not happen
+.endif
+
+.endif
+
+	lwz     r12,CACHE(r12)		; cache = class->cache
+
+.endif ; CACHE_GET
+
+	stw     r9,48(r1)		; save r9
+
+#if defined(OBJC_INSTRUMENTED)
+	mr      r6,r12			; save cache pointer
+#endif
+	lwz     r11,MASK(r12)	; mask = cache->mask
+
+	addi    r9,r12,BUCKETS	; buckets = cache->buckets
+	slwi    r11,r11,2		; r11 = mask << 2 
+.if $0 == WORD_RETURN		; WORD_RETURN
+	and     r12,r4,r11			; bytes = sel & (mask<<2)
+.else						; STRUCT_RETURN
+	and     r12,r5,r11			; bytes = sel & (mask<<2)
 .endif
 
 #if defined(OBJC_INSTRUMENTED)
-	b		LLoop_$0_$1_$2
+	b       LLoop_$0_$1_$2
 
 LMiss_$0_$1_$2:
 	; r6 = cache, r7 = probeCount
-	lwz		r9,mask(r6)		; entryCount = mask + 1
-	addi		r9,r9,1			;
-	slwi		r9,r9,2			; tableSize = entryCount * sizeof(entry)
-	addi		r9,r9,buckets		; offset = buckets + tableSize
-	add		r11,r6,r9		; cacheData = &cache->buckets[mask+1]
-	lwz		r9,missCount(r11)	; cacheData->missCount += 1
-	addi		r9,r9,1			; 
-	stw		r9,missCount(r11)	; 
-	lwz		r9,missProbes(r11)	; cacheData->missProbes += probeCount
-	add		r9,r9,r7		; 
-	stw		r9,missProbes(r11)	; 
-	lwz		r9,maxMissProbes(r11)	; if (probeCount > cacheData->maxMissProbes)
-	cmplw		r7,r9			; maxMissProbes = probeCount
-	ble		.+8			; 
-	stw		r7,maxMissProbes(r11)	;
+	lwz     r9,MASK(r6)		; entryCount = mask + 1
+	addi    r9,r9,1			;
+	slwi    r9,r9,2			; tableSize = entryCount * sizeof(entry)
+	addi    r9,r9,BUCKETS		; offset = buckets + tableSize
+	add     r11,r6,r9		; cacheData = &cache->buckets[mask+1]
+	lwz     r9,missCount(r11)	; cacheData->missCount += 1
+	addi    r9,r9,1			; 
+	stw     r9,missCount(r11)	; 
+	lwz     r9,missProbes(r11)	; cacheData->missProbes += probeCount
+	add     r9,r9,r7		; 
+	stw     r9,missProbes(r11)	; 
+	lwz     r9,maxMissProbes(r11)	; if (probeCount > cacheData->maxMissProbes)
+	cmplw   r7,r9			; maxMissProbes = probeCount
+	ble     .+8			; 
+	stw     r7,maxMissProbes(r11)	;
 
-	lwz		r6,36(r1)		; restore r6
-	lwz		r7,40(r1)		; restore r7
+	lwz     r6,36(r1)		; restore r6
+	lwz     r7,40(r1)		; restore r7
 
-	b		$2			; goto cacheMissLabel
+	b       $2				; goto cacheMissLabel
 #endif
 
 ; search the cache
 LLoop_$0_$1_$2:
 #if defined(OBJC_INSTRUMENTED)
-	addi		r7,r7,1			; probeCount += 1
+	addi    r7,r7,1			; probeCount += 1
 #endif
 
-	lwzx		r10,r9,r12		; method = buckets[bytes/4]
-	addi		r12,r12,4		; bytes += 4
-	cmplwi		r10,0			; if (method == NULL)
+	lwzx    r2,r9,r12		; method = buckets[bytes/4]
+	addi    r12,r12,4		; bytes += 4
+	cmplwi  r2,0			; if (method == NULL)
 #if defined(OBJC_INSTRUMENTED)
-	beq		LMiss_$0_$1_$2
+	beq     LMiss_$0_$1_$2
 #else
-	beq		$2			; goto cacheMissLabel
+	beq     $2			; goto cacheMissLabel
 #endif
 
-	lwz		r0,method_name(r10)	; name  = method->method_name
-	and		r12,r12,r11		; bytes &= (mask<<2)
+	lwz     r0,METHOD_NAME(r2)	; name  = method->method_name
+	and     r12,r12,r11		; bytes &= (mask<<2)
 .if $0 == WORD_RETURN				; WORD_RETURN
-	cmplw		r0,r4			; if (name != selector)
+	cmplw   r0,r4			; if (name != selector)
 .else						; STRUCT_RETURN
-	cmplw		r0,r5			; if (name != selector)
+	cmplw   r0,r5			; if (name != selector)
 .endif
-	bne		LLoop_$0_$1_$2		; goto loop
+	bne     LLoop_$0_$1_$2		; goto loop
 
-; cache hit, r10 == method triplet address
+; cache hit, r2 == method triplet address
 .if $1 == CACHE_GET
-	;  return method triplet in r12
-	mr		r12,r10
+	; return method triplet in r12
+	; N.B. A better way to do this is have CACHE_GET swap the use of r12 and r2.
+	mr      r12,r2
 .else
 	; return method imp in ctr and r12
-	lwz		r10,method_imp(r10)	; imp = method->method_imp
-	mr		r12,r10			; copy implementation to r12
-	mtctr		r10			; ctr = imp
+	lwz     r12,METHOD_IMP(r2)	; imp = method->method_imp (in r12)
+	mtctr   r12					; ctr = imp
 .endif
 
 #if defined(OBJC_INSTRUMENTED)
 	; r6 = cache, r7 = probeCount
-	lwz		r9,mask(r6)		; entryCount = mask + 1
-	addi		r9,r9,1			;
-	slwi		r9,r9,2			; tableSize = entryCount * sizeof(entry)
-	addi		r9,r9,buckets		; offset = buckets + tableSize
-	add		r11,r6,r9		; cacheData = &cache->buckets[mask+1]
-	lwz		r9,hitCount(r11)	; cache->hitCount += 1
-	addi		r9,r9,1			; 
-	stw		r9,hitCount(r11)	; 
-	lwz		r9,hitProbes(r11)	; cache->hitProbes += probeCount
-	add		r9,r9,r7		; 
-	stw		r9,hitProbes(r11)	; 
-	lwz		r9,maxHitProbes(r11)	; if (probeCount > cache->maxMissProbes)
-	cmplw		r7,r9			;maxMissProbes = probeCount
-	ble		.+8			; 
-	stw		r7,maxHitProbes(r11)	; 
+	lwz     r9,MASK(r6)		; entryCount = mask + 1
+	addi    r9,r9,1			;
+	slwi    r9,r9,2			; tableSize = entryCount * sizeof(entry)
+	addi    r9,r9,BUCKETS		; offset = buckets + tableSize
+	add     r11,r6,r9		; cacheData = &cache->buckets[mask+1]
+	lwz     r9,hitCount(r11)	; cache->hitCount += 1
+	addi    r9,r9,1			; 
+	stw     r9,hitCount(r11)	; 
+	lwz     r9,hitProbes(r11)	; cache->hitProbes += probeCount
+	add     r9,r9,r7		; 
+	stw     r9,hitProbes(r11)	; 
+	lwz     r9,maxHitProbes(r11)	; if (probeCount > cache->maxMissProbes)
+	cmplw   r7,r9			;maxMissProbes = probeCount
+	ble     .+8			; 
+	stw     r7,maxHitProbes(r11)	; 
 
-	lwz		r6,36(r1)		; restore r6
-	lwz		r7,40(r1)		; restore r7
+	lwz     r6,36(r1)		; restore r6
+	lwz     r7,40(r1)		; restore r7
 #endif
 
-.if $3 == MANY_ARGS
-	lwz		r9,48(r1)		; restore r9 and r10
-	lwz		r10,52(r1)		;
-.endif
+	lwz     r9,48(r1)		; restore r9
 
 .endmacro
 
@@ -516,121 +580,121 @@ LLoop_$0_$1_$2:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
 ;
-; MethodTableLookup WORD_RETURN | STRUCT_RETURN, MSG_SEND | MSG_SENDSUPER, FEW_ARGS | MANY_ARGS
+; MethodTableLookup WORD_RETURN | STRUCT_RETURN, MSG_SEND | MSG_SENDSUPER
 ;
-; Takes: WORD_RETURN	(r3 is first parameter)
-;	STRUCT_RETURN	(r3 is structure return address, r4 is first parameter)
-;	MSG_SEND	(first parameter is receiver)
-;	MSG_SENDSUPER	(first parameter is address of objc_super structure)
+; Takes: WORD_RETURN    (r3 is first parameter)
+;        STRUCT_RETURN  (r3 is structure return address, r4 is first parameter)
+;        MSG_SEND       (first parameter is receiver)
+;        MSG_SENDSUPER  (first parameter is address of objc_super structure)
 ;
-; Eats: r0, r11, r12
-; On exit: if MANY_ARGS, restores r9,r10 saved by CacheLookup
-;	imp in ctr
+; Eats: r0, r2, r11, r12
+; On exit: restores r9 saved by CacheLookup
+;          imp in ctr
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-HAVE_CALL_EXTERN_lookupMethodAndLoadCache	= 0
+.macro MethodTableLookup
+	mflr    r0              ; save lr
+	stw     r0,   8(r1)     ;
 
-.macro  MethodTableLookup
-	stw		r3, 24(r1)		; save arguments
-	stw		r4, 28(r1)		; 
-	stw		r5, 32(r1)		;
-	stw		r6, 36(r1)		;
-	stw		r7, 40(r1)		;
-	stw		r8, 44(r1)		;
-	; if MANY_ARGS, r9 and r10 were saved by CacheLookup
+	stw     r3,  24(r1)     ; save arguments
+	stw     r4,  28(r1)     ; 
+	stw     r5,  32(r1)     ;
+	stw     r6,  36(r1)     ;
+	stw     r7,  40(r1)     ;
+	stw     r8,  44(r1)     ;
+	; r9 was saved by CacheLookup
+	stw     r10, 52(r1)     ;
 
-	mflr		r0			; save lr
-	stw		r0,8(r1)		;
+#if !defined(KERNEL)
+; Save the FP parameter registers.
+; Note: If we (the compiler) could determine that no FP arguments were in use,
+; we could use a different variant of this macro and avoid the need to spill the FP
+; registers (provided the runtime uses no FP).
+; We still do not spill vector argument registers, for which we really should have an alternate
+; entry point.
+	stfd    f1, -104(r1)	;
+	stfd    f2,  -96(r1)	;
+	stfd    f3,  -88(r1)	;
+	stfd    f4,  -80(r1)	;
+	stfd    f5,  -72(r1)	;
+	stfd    f6,  -64(r1)	;
+	stfd    f7,  -56(r1)	;
+	stfd    f8,  -48(r1)	;
+	stfd    f9,  -40(r1)	;
+	stfd    f10, -32(r1)	;
+	stfd    f11, -24(r1)	;
+	stfd    f12, -16(r1)	;
+	stfd    f13,  -8(r1)	;
 
-#if defined(KERNEL)
-	stwu		r1,-64(r1)		; grow the stack
+	stwu    r1,-56-(13*8)(r1)	; grow the stack. Must be 16-byte-aligned.
 #else
-
-.if $2 == MANY_ARGS
-	stfd		f13, -8(r1)		; save the fp parameter registers
-	stfd		f12, -16(r1)		;
-	stfd		f11, -24(r1)		;
-	stfd		f10, -32(r1)		;
-	stfd		f9, -40(r1)		;
-	stfd		f8, -48(r1)		;
-	stfd		f7, -56(r1)		;
-	stfd		f6, -64(r1)		;
-	stfd		f5, -72(r1)		;
-.endif
-	stfd		f4, -80(r1)		;
-	stfd		f3, -88(r1)		;
-	stfd		f2, -96(r1)		;
-	stfd		f1, -104(r1)		;
-
-	stwu		r1,-56-(13*8)(r1)	; grow the stack
+	stwu    r1,-64(r1)     ; grow the stack. Must be 16-byte-aligned.
 #endif
 
 ; Pass parameters to __class_lookupMethodAndLoadCache.  First parameter is
 ; the class pointer.  Second parameter is the selector.  Where they come
 ; from depends on who called us.  In the int return case, the selector is
 ; already in r4.
-.if $0 == WORD_RETURN				; WORD_RETURN
+.if $0 == WORD_RETURN		; WORD_RETURN
 .if $1 == MSG_SEND				; MSG_SEND
-	lwz		r3,isa(r3)		; class = receiver->isa
-.else						; MSG_SENDSUPER
-	lwz		r3,class(r3)		; class = super->class
+	lwz     r3,ISA(r3)		; class = receiver->isa
+.else							; MSG_SENDSUPER
+	lwz     r3,CLASS(r3)	; class = super->class
 .endif
 
 .else						; STRUCT_RETURN
 .if $1 == MSG_SEND				; MSG_SEND
-	lwz		r3,isa(r4)		; class = receiver->isa
-.else						; MSG_SENDSUPER
-	lwz		r3,class(r4)		; class = super->class
+	lwz     r3,ISA(r4)		; class = receiver->isa
+.else							; MSG_SENDSUPER
+	lwz     r3,CLASS(r4)	; class = super->class
 .endif
-	mr		r4,r5			; selector = selector 
+	mr      r4,r5			; selector = selector 
 .endif
 
-.if HAVE_CALL_EXTERN_lookupMethodAndLoadCache == 0
-HAVE_CALL_EXTERN_lookupMethodAndLoadCache = 1
+	; We code the call inline rather than using the CALL_EXTERN macro because
+	; that leads to a lot of extra unnecessary and inefficient instructions.
 	CALL_EXTERN(__class_lookupMethodAndLoadCache)
-.else
-	CALL_EXTERN_AGAIN(__class_lookupMethodAndLoadCache)
-.endif
 
-	mr		r12,r3			; copy implementation to r12
-	mtctr		r3			; copy imp to ctr
-	lwz		r1,0(r1)		; restore the stack pointer
-	lwz		r0,8(r1)		;
-	mtlr		r0			; restore return pc
+	mr      r12,r3			; copy implementation to r12
+	mtctr   r3				; copy imp to ctr
+	lwz     r1,0(r1)		; restore the stack pointer
+	lwz     r0,8(r1)		;
+	mtlr    r0				; restore return pc
 
 #if !defined(KERNEL)
 
-.if $2 == MANY_ARGS
-	lfd		f13, -8(r1)		; restore fp parameter registers
-	lfd		f12, -16(r1)		;
-	lfd		f11, -24(r1)		;
-	lfd		f10, -32(r1)		;
-	lfd		f9, -40(r1)		;
-	lfd		f8, -48(r1)		;
-	lfd		f7, -56(r1)		;
-	lfd		f6, -64(r1)		;
-	lfd		f5, -72(r1)		;
-.endif
-	lfd		f4, -80(r1)		;
-	lfd		f3, -88(r1)		;
-	lfd		f2, -96(r1)		;
-	lfd		f1, -104(r1)		;
-#endif
+; Restore FP parameter registers
+; Note: If we (the compiler) could determine that no FP arguments were in use,
+; we could use a different variant of this macro and avoid the need to restore the FP
+; registers (provided the runtime uses no FP).
+; We still do not restore vector argument registers, for which we really should have an alternate
+; entry point.
+	lfd     f1, -104(r1)	;
+	lfd     f2,  -96(r1)	;
+	lfd     f3,  -88(r1)	;
+	lfd     f4,  -80(r1)	;
+	lfd     f5,  -72(r1)	;
+	lfd     f6,  -64(r1)	;
+	lfd     f7,  -56(r1)	;
+	lfd     f8,  -48(r1)	;
+	lfd     f9,  -40(r1)	;
+	lfd     f10, -32(r1)	;
+	lfd     f11, -24(r1)	;
+	lfd     f12, -16(r1)	;
+	lfd     f13, -8(r1)		;
 
-	lwz		r3, 24(r1)		; restore parameter registers
-	lwz		r4, 28(r1)		;
-	lwz		r5, 32(r1)		;
-	lwz		r6, 36(r1)		;
-	lwz		r7, 40(r1)		;
-	lwz		r8, 44(r1)		;
+	lwz     r3,  24(r1)		; restore parameter registers
+	lwz     r4,  28(r1)		;
+	lwz     r5,  32(r1)		;
+	lwz     r6,  36(r1)		;
+	lwz     r7,  40(r1)		;
+	lwz     r8,  44(r1)		;
+	lwz     r9,  48(r1)		; r9 was saved by CacheLookup
+	lwz     r10, 52(r1)		;
 
-.if $2 == MANY_ARGS
-	lwz		r9, 48(r1)		; restore saves from CacheLookup
-	lwz		r10,52(r1)		;
-.endif
+#endif /* !KERNEL */
 
 .endmacro
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
@@ -647,85 +711,80 @@ HAVE_CALL_EXTERN_lookupMethodAndLoadCache = 1
 ; Eats: r0
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-HAVE_CALL_EXTERN_mcount	= 0
-
-	.macro	CALL_MCOUNT
+	.macro CALL_MCOUNT
 #if defined(PROFILE)
-	mflr		r0			; save return pc
-	stw		r0,8(r1)		;
+	mflr    r0				; save return pc
+	stw     r0,8(r1)		;
 
-	stwu		r1,-208(r1)		; push aligned areas, set stack link
+	stwu    r1,-208(r1)		; push aligned areas, set stack link
 
-	stw		r3, 56(r1)		; save all volatile registers
-	stw		r4, 60(r1)		; 
-	stw		r5, 64(r1)		;
-	stw		r6, 68(r1)		; 
-	stw		r7, 72(r1)		;
-	stw		r8, 76(r1)		;
-	stw		r9, 80(r1)		;
-	stw		r10,84(r1)		;
-	stw		r11,88(r1)		; save r11 and r12, too
-	stw		r12,92(r1)		;
+	stw     r3, 56(r1)		; save all volatile registers
+	stw     r4, 60(r1)		; 
+	stw     r5, 64(r1)		;
+	stw     r6, 68(r1)		; 
+	stw     r7, 72(r1)		;
+	stw     r8, 76(r1)		;
+	stw     r9, 80(r1)		;
+	stw     r10,84(r1)		;
+	stw     r11,88(r1)		; save r11 and r12, too
+	stw     r12,92(r1)		;
 
-	stfd		f1, 96(r1)		;
-	stfd		f2, 104(r1)		;
-	stfd		f3, 112(r1)		;
-	stfd		f4, 120(r1)		;
-	stfd		f5, 128(r1)		;
-	stfd		f6, 136(r1)		;
-	stfd		f7, 144(r1)		;
-	stfd		f8, 152(r1)		;
-	stfd		f9, 160(r1)		;
-	stfd		f10, 168(r1)		;
-	stfd		f11, 176(r1)		;
-	stfd		f12, 184(r1)		;
-	stfd		f13, 192(r1)		;
+	stfd    f1, 96(r1)		;
+	stfd    f2, 104(r1)		;
+	stfd    f3, 112(r1)		;
+	stfd    f4, 120(r1)		;
+	stfd    f5, 128(r1)		;
+	stfd    f6, 136(r1)		;
+	stfd    f7, 144(r1)		;
+	stfd    f8, 152(r1)		;
+	stfd    f9, 160(r1)		;
+	stfd    f10,168(r1)		;
+	stfd    f11,176(r1)		;
+	stfd    f12,184(r1)		;
+	stfd    f13,192(r1)		;
 
-	mflr		r3			; pass our callers address
-.if HAVE_CALL_EXTERN_mcount == 0
-HAVE_CALL_EXTERN_mcount = 1
+	mr      r3, r0			; pass our callers address
+
 	CALL_EXTERN(mcount)
-.else
-	CALL_EXTERN_AGAIN(mcount)
-.endif
 
-	lwz		r3, 56(r1)		; restore all volatile registers
-	lwz		r4, 60(r1)		; 
-	lwz		r5, 64(r1)		;
-	lwz		r6, 68(r1)		; 
-	lwz		r7, 72(r1)		;
-	lwz		r8, 76(r1)		;
-	lwz		r9, 80(r1)		;
-	lwz		r10,84(r1)		;
-	lwz		r11,88(r1)		; restore r11 and r12, too
-	lwz		r12,92(r1)		;
+	lwz     r3, 56(r1)		; restore all volatile registers
+	lwz     r4, 60(r1)		; 
+	lwz     r5, 64(r1)		;
+	lwz     r6, 68(r1)		; 
+	lwz     r7, 72(r1)		;
+	lwz     r8, 76(r1)		;
+	lwz     r9, 80(r1)		;
+	lwz     r10,84(r1)		;
+	lwz     r11,88(r1)		; restore r11 and r12, too
+	lwz     r12,92(r1)		;
 
-	lfd		f1, 96(r1)		;
-	lfd		f2, 104(r1)		;
-	lfd		f3, 112(r1)		;
-	lfd		f4, 120(r1)		;
-	lfd		f5, 128(r1)		;
-	lfd		f6, 136(r1)		;
-	lfd		f7, 144(r1)		;
-	lfd		f8, 152(r1)		;
-	lfd		f9, 160(r1)		;
-	lfd		f10, 168(r1)		;
-	lfd		f11, 176(r1)		;
-	lfd		f12, 184(r1)		;
-	lfd		f13, 192(r1)		;
+	lfd     f1, 96(r1)		;
+	lfd     f2, 104(r1)		;
+	lfd     f3, 112(r1)		;
+	lfd     f4, 120(r1)		;
+	lfd     f5, 128(r1)		;
+	lfd     f6, 136(r1)		;
+	lfd     f7, 144(r1)		;
+	lfd     f8, 152(r1)		;
+	lfd     f9, 160(r1)		;
+	lfd     f10,168(r1)		;
+	lfd     f11,176(r1)		;
+	lfd     f12,184(r1)		;
+	lfd     f13,192(r1)		;
 
-	lwz		r1,0(r1)		; restore the stack pointer
-	lwz		r0,8(r1)		;
-	mtlr		r0			; restore return pc
+	lwz     r1,0(r1)		; restore the stack pointer
+	lwz     r0,8(r1)		;
+	mtlr	r0				; restore return pc
 #endif
 	.endmacro
 
 
 /********************************************************************
- * Method _cache_getMethod(Class cls, SEL sel)
+ * Method _cache_getMethod(Class cls, SEL sel, IMP objc_msgForward_imp)
  *
  * On entry:    r3 = class whose cache is to be searched
  *              r4 = selector to search for
+ *              r5 = _objc_msgForward IMP
  *
  * If found, returns method triplet pointer.
  * If not found, returns NULL.
@@ -733,32 +792,31 @@ HAVE_CALL_EXTERN_mcount = 1
  * NOTE: _cache_getMethod never returns any cache entry whose implementation
  * is _objc_msgForward. It returns NULL instead. This prevents thread-
  * safety and memory management bugs in _class_lookupMethodAndLoadCache. 
- * See _class_lookupMethodAndLoadCache for details. 
+ * See _class_lookupMethodAndLoadCache for details.
+ *
+ * _objc_msgForward is passed as a parameter because it's more efficient
+ * to do the (PIC) lookup once in the caller than repeatedly here.
  ********************************************************************/
-        
-        ENTRY __cache_getMethod
+
+    ENTRY __cache_getMethod
 ; do profiling if enabled
-        CALL_MCOUNT
+    CALL_MCOUNT
 
 ; do lookup
-        CacheLookup     WORD_RETURN, CACHE_GET, LGetMethodMiss, MANY_ARGS
-        
+    CacheLookup WORD_RETURN, CACHE_GET, LGetMethodMiss
+
 ; cache hit, method triplet in r12
-; check for _objc_msgForward
-        lwz     r11, method_imp(r12)    ; get the imp
-        LEA_STATIC_DATA r10, __objc_msgForward, LOCAL_SYMBOL
-        cmplw   r11, r10
-        beq     LGetMethodMiss          ; if (imp==_objc_msgForward) return nil
-        mr      r3, r12                 ; else return method triplet address
-        blr
-        
+    lwz     r11, METHOD_IMP(r12)    ; get the imp
+    cmplw   r11, r5                 ; check for _objc_msgForward
+    mr      r3, r12                 ; optimistically get the return value
+    bnelr                           ; Not _objc_msgForward, return the triplet address
+
 LGetMethodMiss:
-; cache miss, return nil
-        li      r3, 0           ; return nil
-        blr
+    li      r3, 0                   ; cache miss or _objc_msgForward, return nil
+    blr
 
 LGetMethodExit: 
-        END_ENTRY __cache_getMethod
+    END_ENTRY __cache_getMethod
 
 
 /********************************************************************
@@ -771,24 +829,24 @@ LGetMethodExit:
  * If not found, returns NULL.
  ********************************************************************/
 
-        ENTRY __cache_getImp
+    ENTRY __cache_getImp
 ; do profiling if enabled
-        CALL_MCOUNT
+    CALL_MCOUNT
 
 ; do lookup
-        CacheLookup WORD_RETURN, CACHE_GET, LGetImpMiss, MANY_ARGS
-        
+    CacheLookup WORD_RETURN, CACHE_GET, LGetImpMiss
+
 ; cache hit, method triplet in r12
-        lwz     r3, method_imp(r12)    ; return method imp address
-        blr
-        
+    lwz     r3, METHOD_IMP(r12)    ; return method imp address
+    blr
+
 LGetImpMiss:
 ; cache miss, return nil
-        li      r3, 0           ; return nil
-        blr
+    li      r3, 0           ; return nil
+    blr
 
 LGetImpExit: 
-        END_ENTRY __cache_getImp
+    END_ENTRY __cache_getImp
 
 
 /********************************************************************
@@ -796,58 +854,52 @@ LGetImpExit:
  *			SEL	op,
  *			...);
  *
- * On entry:	r3 is the message receiver,
- *		r4 is the selector
+ * On entry: r3 is the message receiver,
+ *           r4 is the selector
  ********************************************************************/
 
-#if defined(__DYNAMIC__)
-/* Allocate reference to external static data */
-	.non_lazy_symbol_pointer
-L__objc_msgNil:
-	.indirect_symbol __objc_msgNil
-	.long	0
-	.text
-#endif
+	ENTRY _objc_msgSend
+; check whether receiver is nil
+	cmplwi  r3,0				; receiver nil?
+	beq-    LMsgSendNilSelf		; if so, call handler or return nil
 
-	ENTRY	_objc_msgSend
+; guaranteed non-nil entry point (disabled for now)
+; .globl _objc_msgSendNonNil
+; _objc_msgSendNonNil:
+
 ; do profiling when enabled
 	CALL_MCOUNT
 
-; check whether receiver is nil
-	cmplwi		r3,0			; receiver nil?
-	beq		LMsgSendNilSelf		; if so, call handler or return nil
-
 ; receiver is non-nil: search the cache
-	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendCacheMiss, MANY_ARGS
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
+LMsgSendReceiverOk:
+	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendCacheMiss
+	; r11 guaranteed non-zero on exit from CacheLookup with a hit
+	// li      r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
+	bctr						; goto *imp;
 
 ; cache miss: go search the method lists
 LMsgSendCacheMiss:
-	MethodTableLookup WORD_RETURN, MSG_SEND, MANY_ARGS
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
+	MethodTableLookup WORD_RETURN, MSG_SEND
+	li      r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
 	bctr					; goto *imp;
 
-; message sent to nil object call: optional handler and return nil
+; message sent to nil: redirect to nil receiver, if any
 LMsgSendNilSelf:
-	LOAD_STATIC_WORD r11, __objc_msgNil, EXTERNAL_SYMBOL
-	cmplwi		r11,0			; handler nil?
-	beqlr					; if no handler, return nil
+	mflr    r0			; load new receiver
+	bcl     20,31,1f		; 31 is cr7[so]
+1:	mflr    r11
+	addis   r11,r11,ha16(__objc_nilReceiver-1b)
+	lwz     r11,lo16(__objc_nilReceiver-1b)(r11)
+	mtlr    r0
 
-	mflr		r0			; save return pc
-	stw		r0,8(r1)		;
-	subi		r1,r1,64		; allocate linkage area
-	mtctr		r11			; 
-	bctrl					; call handler
-	addi		r1,r1,64		; deallocate linkage area
-	lwz		r0,8(r1)		; restore return pc
-	mtlr		r0			; 
+	cmplwi  r11,0			; return nil if no new receiver
+	beqlr
 
-	li		r3,0		; re-zero return value, in case handler changed it
-	blr					; return to caller
+	mr	r3,r11			; send to new receiver
+	b	LMsgSendReceiverOk
 
 LMsgSendExit:
-	END_ENTRY	_objc_msgSend
+	END_ENTRY _objc_msgSend
 
 
 /********************************************************************
@@ -859,51 +911,52 @@ LMsgSendExit:
  * The ABI calls for r3 to be used as the address of the structure
  * being returned, with the parameters in the succeeding registers.
  *
- * On entry:	r3 is the address where the structure is returned,
- *		r4 is the message receiver,
- *		r5 is the selector
+ * On entry: r3 is the address where the structure is returned,
+ *           r4 is the message receiver,
+ *           r5 is the selector
  ********************************************************************/
 
-	ENTRY	_objc_msgSend_stret
+	ENTRY _objc_msgSend_stret
+; check whether receiver is nil
+	cmplwi  r4,0			; receiver nil?
+	beq     LMsgSendStretNilSelf	; if so, call handler or just return
+
+; guaranteed non-nil entry point (disabled for now)
+; .globl _objc_msgSendNonNil_stret
+; _objc_msgSendNonNil_stret:
+
 ; do profiling when enabled
 	CALL_MCOUNT
 
-; check whether receiver is nil
-	cmplwi		r4,0			; receiver nil?
-	beq		LMsgSendStretNilSelf	; if so, call handler or just return
-
 ; receiver is non-nil: search the cache
-	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendStretCacheMiss, MANY_ARGS
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
+LMsgSendStretReceiverOk:
+	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendStretCacheMiss
+	li      r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
+	bctr    				; goto *imp;
 
 ; cache miss: go search the method lists
 LMsgSendStretCacheMiss:
-	MethodTableLookup STRUCT_RETURN, MSG_SEND, MANY_ARGS
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
+	MethodTableLookup STRUCT_RETURN, MSG_SEND
+	li      r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
+	bctr    				; goto *imp;
 
-; message sent to nil object call optional handler and return nil
+; message sent to nil: redirect to nil receiver, if any
 LMsgSendStretNilSelf:
-	LOAD_STATIC_WORD r11, __objc_msgNil, EXTERNAL_SYMBOL
-	cmplwi		r11,0			; handler nil?
-	beqlr					; if no handler, return
+	mflr    r0			; load new receiver
+	bcl     20,31,1f		; 31 is cr7[so]
+1:	mflr    r11
+	addis   r11,r11,ha16(__objc_nilReceiver-1b)
+	lwz     r11,lo16(__objc_nilReceiver-1b)(r11)
+	mtlr    r0
 
-	mflr		r0			; save return pc
-	stw		r0,8(r1)		;
-	subi		r1,r1,64		; allocate linkage area
-	mr		r3,r4			; move self to r3
-	mr		r4,r5			; move SEL to r4
-	mtctr		r11					; 
-	bctrl					; call handler
-	addi		r1,r1,64		; deallocate linkage area
-	lwz		r0,8(r1)		; restore return pc
-	mtlr		r0			; 
+	cmplwi  r11,0			; return nil if no new receiver
+	beqlr
 
-	blr					; return to caller
+	mr	r4,r11			; send to new receiver
+	b	LMsgSendStretReceiverOk
 
 LMsgSendStretExit:
-	END_ENTRY	_objc_msgSend_stret
+	END_ENTRY _objc_msgSend_stret
 
 
 /********************************************************************
@@ -917,25 +970,26 @@ LMsgSendStretExit:
  * };
  ********************************************************************/
 
-	ENTRY	_objc_msgSendSuper
+	ENTRY _objc_msgSendSuper
 ; do profiling when enabled
 	CALL_MCOUNT
 
 ; search the cache
-	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperCacheMiss, MANY_ARGS
-	lwz		r3,receiver(r3)		; receiver is the first arg
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
+	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperCacheMiss
+	lwz     r3,RECEIVER(r3)		; receiver is the first arg
+	; r11 guaranteed non-zero after cache hit
+	; li      r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
+	bctr    				; goto *imp;
 
 ; cache miss: go search the method lists
 LMsgSendSuperCacheMiss:
-	MethodTableLookup WORD_RETURN, MSG_SENDSUPER, MANY_ARGS
-	lwz		r3,receiver(r3)		; receiver is the first arg
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
+	MethodTableLookup WORD_RETURN, MSG_SENDSUPER
+	lwz     r3,RECEIVER(r3)		; receiver is the first arg
+	li      r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
+	bctr    				; goto *imp;
 
 LMsgSendSuperExit:
-	END_ENTRY	_objc_msgSendSuper
+	END_ENTRY _objc_msgSendSuper
 
 
 /********************************************************************
@@ -958,25 +1012,25 @@ LMsgSendSuperExit:
  *		r5 is the selector
  ********************************************************************/
 
-	ENTRY	_objc_msgSendSuper_stret
+	ENTRY _objc_msgSendSuper_stret
 ; do profiling when enabled
 	CALL_MCOUNT
 
 ; search the cache
-	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperStretCacheMiss, MANY_ARGS
-	lwz		r4,receiver(r4)		; receiver is the first arg
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
+	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperStretCacheMiss
+	lwz     r4,RECEIVER(r4)		; receiver is the first arg
+	li      r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
+	bctr    				; goto *imp;
 
 ; cache miss: go search the method lists
 LMsgSendSuperStretCacheMiss:
-	MethodTableLookup STRUCT_RETURN, MSG_SENDSUPER, MANY_ARGS
-	lwz		r4,receiver(r4)		; receiver is the first arg
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
+	MethodTableLookup STRUCT_RETURN, MSG_SENDSUPER
+	lwz     r4,RECEIVER(r4)		; receiver is the first arg
+	li      r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
+	bctr    				; goto *imp;
 
 LMsgSendSuperStretExit:
-	END_ENTRY	_objc_msgSendSuper_stret
+	END_ENTRY _objc_msgSendSuper_stret
 
 
 /********************************************************************
@@ -1030,92 +1084,92 @@ LMsgSendSuperStretExit:
 ; purposes.  ALWAYS dereference LFwdSel to get to "forward::" !!
 	.objc_meth_var_names
 	.align 1
-LFwdStr:	.ascii "forward::\0"
+LFwdStr: .ascii "forward::\0"
 
 	.objc_message_refs
-	.align	2
-LFwdSel:.long	LFwdStr
+	.align 2
+LFwdSel: .long LFwdStr
 
 	.cstring
-	.align	1
-LUnkSelStr:	.ascii	"Does not recognize selector %s\0"
+	.align 1
+LUnkSelStr: .ascii "Does not recognize selector %s\0"
 
-	ENTRY	__objc_msgForward
+	ENTRY __objc_msgForward
 ; do profiling when enabled
 	CALL_MCOUNT
 
-#if defined(KERNEL)
-	trap					; _objc_msgForward is not for the kernel
-#else
+#if !defined(KERNEL)
 	LOAD_STATIC_WORD r12, LFwdSel, LOCAL_SYMBOL	; get uniqued selector for "forward::"
-	cmplwi		r11,kFwdMsgSend		; via objc_msgSend or objc_msgSend_stret?
-	bne		LMsgForwardStretSel	; branch for objc_msgSend_stret
-	cmplw		r12,r4			; if (sel == @selector (forward::))
-	b		LMsgForwardSelCmpDone	; check the result in common code
+	cmplwi  r11,kFwdMsgSendStret	; via objc_msgSend or objc_msgSend_stret?
+	beq     LMsgForwardStretSel		; branch for objc_msgSend_stret
+	cmplw   r12,r4					; if (sel == @selector (forward::))
+	b       LMsgForwardSelCmpDone	; check the result in common code
 LMsgForwardStretSel:
-	cmplw		r12,r5			; if (sel == @selector (forward::))
+	cmplw   r12,r5					; if (sel == @selector (forward::))
 LMsgForwardSelCmpDone:
-	beq		LMsgForwardError	;   goto error
+	beq     LMsgForwardError		;   goto error
 
-	mflr		r0
-	stw		r0,8(r1)		; save lr
+	mflr    r0
+	stw     r0,  8(r1)		; save lr
 	
-	stw		r3, 24(r1)		; put register arguments on stack for forwarding
-	stw		r4, 28(r1)		; (stack based args already follow this area)
-	stw		r5, 32(r1)		;
-	stw		r6, 36(r1)		; 
-	stw		r7, 40(r1)		;
-	stw		r8, 44(r1)
-	stw		r9, 48(r1)
-	stw		r10,52(r1)
+	stw     r3, 24(r1)		; put register arguments on stack for forwarding
+	stw     r4, 28(r1)		; (stack based args already follow this area)
+	stw     r5, 32(r1)		;
+	stw     r6, 36(r1)		; 
+	stw     r7, 40(r1)		;
+	stw     r8, 44(r1)
+	stw     r9, 48(r1)
+	stw     r10,52(r1)
 
-	stfd		f13, -8(r1)		; prepend floating point registers to marg_list
-	stfd		f12, -16(r1)		;
-	stfd		f11, -24(r1)		;
-	stfd		f10, -32(r1)		;
-	stfd		f9, -40(r1)		;
-	stfd		f8, -48(r1)		;
-	stfd		f7, -56(r1)		;
-	stfd		f6, -64(r1)		;
-	stfd		f5, -72(r1)		;
-	stfd		f4, -80(r1)		;
-	stfd		f3, -88(r1)		;
-	stfd		f2, -96(r1)		;
-	stfd		f1, -104(r1)		;
+	stfd    f1, -104(r1)		; prepend floating point registers to marg_list
+	stfd    f2,  -96(r1)		;
+	stfd    f3,  -88(r1)		;
+	stfd    f4,  -80(r1)		;
+	stfd    f5,  -72(r1)		;
+	stfd    f6,  -64(r1)		;
+	stfd    f7,  -56(r1)		;
+	stfd    f8,  -48(r1)		;
+	stfd    f9,  -40(r1)		;
+	stfd    f10, -32(r1)		;
+	stfd    f11, -24(r1)		;
+	stfd    f12, -16(r1)		;
+	stfd    f13,  -8(r1)		;
 
-	cmplwi		r11,kFwdMsgSend		; via objc_msgSend or objc_msgSend_stret?
-	bne		LMsgForwardStretParams	; branch for objc_msgSend_stret
-						; first arg (r3) remains self
-	mr		r5,r4			; third arg is previous selector
-	b		LMsgForwardParamsDone
+	cmplwi  r11,kFwdMsgSendStret	; via objc_msgSend or objc_msgSend_stret?
+	beq     LMsgForwardStretParams	; branch for objc_msgSend_stret
+						    ; first arg (r3) remains self
+	mr      r5,r4			; third arg is previous selector
+	b       LMsgForwardParamsDone
+
 LMsgForwardStretParams:
-	mr		r3,r4			; first arg is self
-						; third arg (r5) remains previous selector
+	mr      r3,r4			; first arg is self
+                            ; third arg (r5) remains previous selector
 LMsgForwardParamsDone:
-	mr		r4,r12			; second arg is "forward::"
-	subi		r6,r1,13*8		; fourth arg is &objc_sendv_margs
+	mr      r4,r12			; second arg is "forward::"
+	subi    r6,r1,13*8		; fourth arg is &objc_sendv_margs
 
-	stwu		r1,-56-(13*8)(r1)	; push aligned linkage and parameter areas, set stack link
-	bl		_objc_msgSend		; [self forward:sel :objc_sendv_margs]
-	addi		r1,r1,56+13*8		; deallocate linkage and parameters areas
+	stwu    r1,-56-(13*8)(r1)	; push aligned linkage and parameter areas, set stack link
+	bl      _objc_msgSend		; [self forward:sel :objc_sendv_margs]
+	addi    r1,r1,56+13*8		; deallocate linkage and parameters areas
 
-	lwz		r0,8(r1)		; restore lr
-	mtlr		r0			;
-	blr					;
+	lwz     r0,8(r1)		; restore lr
+	mtlr    r0			;
+	blr     			;
 
 ; call error handler with unrecognized selector message
 LMsgForwardError:
-	cmplwi		r11,kFwdMsgSendStret	; via objc_msgSend or objc_msgSend_stret?
-	bne		LMsgForwardErrorParamsOK;  branch for objc_msgSend
-	mr		r3,r4			; first arg is self
+	cmplwi  r11,kFwdMsgSendStret	; via objc_msgSend or objc_msgSend_stret?
+	bne     LMsgForwardErrorParamsOK;  branch for objc_msgSend
+	mr      r3,r4			; first arg is self
 LMsgForwardErrorParamsOK:
 	LEA_STATIC_DATA r4, LUnkSelStr, LOCAL_SYMBOL
-	mr		r5,r12			; third arg is "forward::"
-	CALL_EXTERN(___objc_error)		; never returns
-	trap					; ___objc_error should never return
-#endif
+	mr      r5,r12			; third arg is "forward::"
+	CALL_EXTERN(___objc_error) ; never returns
+#endif /* !defined(KERNEL) */
+	trap    				; ___objc_error should never return
+    ; _objc_msgForward is not for the kernel - kernel code ends up here
 
-	END_ENTRY	__objc_msgForward
+	END_ENTRY __objc_msgForward
 
 
 /********************************************************************
@@ -1145,81 +1199,81 @@ LMsgForwardErrorParamsOK:
  * PowerPC-specific.  This is consistent with the other architectures.
  ********************************************************************/
 
-	ENTRY	_objc_msgSendv
+	ENTRY _objc_msgSendv
 
-#if defined(KERNEL)
-	trap					; _objc_msgSendv is not for the kernel
-#else
+#if !defined(KERNEL)
 ; do profiling when enabled
 	CALL_MCOUNT
 
-	mflr		r0
-	stw		r0,8(r1)		; save lr
+	mflr    r0
+	stw     r0,8(r1)		; save lr
 
-	cmplwi		r5,32			; check parameter size against minimum
-	ble+		LMsgSendvMinFrame	; is less than minimum, go use minimum
-	mr		r12,r1			; remember current stack pointer
-	sub		r11,r1,r5		; push parameter area
-	rlwinm		r1,r11,0,0,27		; align stack pointer to 16 byte boundary
-	stwu		r12,-32(r1)		; push aligned linkage area, set stack link 
-	b		LMsgSendvHaveFrame
+	cmplwi  r5,32			; check parameter size against minimum
+	ble+    LMsgSendvMinFrame	; is less than minimum, go use minimum
+	mr      r12,r1			; remember current stack pointer
+	sub     r11,r1,r5		; push parameter area
+	rlwinm  r1,r11,0,0,27		; align stack pointer to 16 byte boundary
+	stwu    r12,-32(r1)		; push aligned linkage area, set stack link 
+	b       LMsgSendvHaveFrame
 
 LMsgSendvMinFrame:
-	stwu		r1,-64(r1)		; push aligned linkage and parameter areas, set stack link
+	stwu    r1,-64(r1)		; push aligned linkage and parameter areas, set stack link
 
 LMsgSendvHaveFrame:
 	; restore floating point register parameters from marg_list
-	lfd		f13,96(r6)		; 
-	lfd		f12,88(r6)		;
-	lfd		f11,80(r6)		;
-	lfd		f10,72(r6)		;
-	lfd		f9,64(r6)		;
-	lfd		f8,56(r6)		;
-	lfd		f7,48(r6)		;
-	lfd		f6,40(r6)		;
-	lfd		f5,32(r6)		;
-	lfd		f4,24(r6)		;
-	lfd		f3,16(r6)		;
-	lfd		f2,8(r6)		;
-	lfd		f1,0(r6)		;
+	lfd     f1,  0(r6)		;
+	lfd     f2,  8(r6)		;
+	lfd     f3, 16(r6)		;
+	lfd     f4, 24(r6)		;
+	lfd     f5, 32(r6)		;
+	lfd     f6, 40(r6)		;
+	lfd     f7, 48(r6)		;
+	lfd     f8, 56(r6)		;
+	lfd     f9, 64(r6)		;
+	lfd     f10,72(r6)		;
+	lfd     f11,80(r6)		;
+	lfd     f12,88(r6)		;
+	lfd     f13,96(r6)		; 
 
 ; load the register based arguments from the marg_list
 ; the first two parameters are already in r3 and r4, respectively
-	subi		r0,r5,5			; make word count from byte count rounded up to multiple of 4...
-	srwi.		r0,r0,2			; ... and subtracting for params already in r3 and r4
-	beq		LMsgSendvSendIt		; branch if there are no parameters to load
-	mtctr		r0			; counter = number of remaining words
-	lwz		r5,32+(13*8)(r6)	; load 3rd parameter
-	bdz		LMsgSendvSendIt		; decrement counter, branch if result is zero
-	addi		r11,r6,36+(13*8)	; switch to r11, because we are setting r6
-	lwz		r6,0(r11)		; load 4th parameter
-	bdz		LMsgSendvSendIt		; decrement counter, branch if result is zero
-	lwz		r7,4(r11)		; load 5th parameter
-	bdz		LMsgSendvSendIt		; decrement counter, branch if result is zero
-	lwz		r8,8(r11)		; load 6th parameter
-	bdz		LMsgSendvSendIt		; decrement counter, branch if result is zero
-	lwz		r9,12(r11)		; load 7th parameter
-	bdz		LMsgSendvSendIt		; decrement counter, branch if result is zero
-	lwzu		r10,16(r11)		; load 8th parameter, and update r11
-	bdz		LMsgSendvSendIt		; decrement counter, branch if result is zero
+	subi    r0,r5,(2*4)-3			; make word count from byte count rounded up to multiple of 4...
+	srwi.   r0,r0,2			; ... and subtracting for params already in r3 and r4
+	beq     LMsgSendvSendIt		; branch if there are no parameters to load
+	mtctr   r0			; counter = number of remaining words
+	lwz     r5,32+(13*8)(r6)	; load 3rd parameter
+	bdz     LMsgSendvSendIt		; decrement counter, branch if result is zero
+	addi    r11,r6,36+(13*8)	; switch to r11, because we are setting r6
+	lwz     r6,0(r11)		; load 4th parameter
+	bdz     LMsgSendvSendIt		; decrement counter, branch if result is zero
+	lwz     r7,4(r11)		; load 5th parameter
+	bdz     LMsgSendvSendIt		; decrement counter, branch if result is zero
+	lwz     r8,8(r11)		; load 6th parameter
+	bdz     LMsgSendvSendIt		; decrement counter, branch if result is zero
+	lwz     r9,12(r11)		; load 7th parameter
+	bdz     LMsgSendvSendIt		; decrement counter, branch if result is zero
+	lwzu    r10,16(r11)		; load 8th parameter, and update r11
+	bdz     LMsgSendvSendIt		; decrement counter, branch if result is zero
 
 ; copy the stack based arguments from the marg_list
-	addi		r12,r1,24+32-4		; target = address of stack based parameters
+	addi    r12,r1,24+32-4		; target = address of stack based parameters
 LMsgSendvArgLoop:
-	lwzu		r0,4(r11)		; loop to copy remaining marg_list words to stack
-	stwu		r0,4(r12)		;
-	bdnz		LMsgSendvArgLoop	; decrement counter, branch if still non-zero
+	lwzu    r0,4(r11)		; loop to copy remaining marg_list words to stack
+	stwu    r0,4(r12)		;
+	bdnz    LMsgSendvArgLoop	; decrement counter, branch if still non-zero
 
 LMsgSendvSendIt:
-	bl		_objc_msgSend		; objc_msgSend (self, selector, ...)
+	bl      _objc_msgSend		; objc_msgSend (self, selector, ...)
 
-	lwz		r1,0(r1)		; restore stack pointer
-	lwz		r0,8(r1)		; restore lr
-	mtlr		r0			;
-	blr					;
+	lwz     r1,0(r1)		; restore stack pointer
+	lwz     r0,8(r1)		; restore lr
+	mtlr    r0				;
+	blr     				;
+#else
+	trap    				; _objc_msgSendv is not for the kernel
 #endif
 
-	END_ENTRY	_objc_msgSendv
+	END_ENTRY _objc_msgSendv
 
 
 /********************************************************************
@@ -1252,43 +1306,41 @@ LMsgSendvSendIt:
  *		r7 is the address of the marg_list
  ********************************************************************/
 
-	ENTRY	_objc_msgSendv_stret
+	ENTRY _objc_msgSendv_stret
 
-#if defined(KERNEL)
-	trap					; _objc_msgSendv_stret is not for the kernel 
-#else
+#if !defined(KERNEL)
 ; do profiling when enabled
 	CALL_MCOUNT
 
-	mflr		r0
-	stw		r0,8(r1)		; (save return pc)
+	mflr    r0
+	stw     r0,8(r1)		; (save return pc)
 
-	cmplwi		r6,32			; check parameter size against minimum
-	ble+		LMsgSendvStretMinFrame	; is less than minimum, go use minimum
-	mr		r12,r1			; remember current stack pointer
-	sub		r11,r1,r6		; push parameter area
-	rlwinm		r1,r11,0,0,27		; align stack pointer to 16 byte boundary
-	stwu		r12,-32(r1)		; push aligned linkage area, set stack link 
-	b		LMsgSendvStretHaveFrame
+	cmplwi  r6,32			; check parameter size against minimum
+	ble+    LMsgSendvStretMinFrame	; is less than minimum, go use minimum
+	mr      r12,r1			; remember current stack pointer
+	sub     r11,r1,r6		; push parameter area
+	rlwinm  r1,r11,0,0,27	; align stack pointer to 16 byte boundary
+	stwu    r12,-32(r1)		; push aligned linkage area, set stack link 
+	b       LMsgSendvStretHaveFrame
 
 LMsgSendvStretMinFrame:
-	stwu		r1,-64(r1)		; push aligned linkage and parameter areas, set stack link
+	stwu    r1,-64(r1)		; push aligned linkage and parameter areas, set stack link
 
 LMsgSendvStretHaveFrame:
 ; restore floating point register parameters from marg_list
-	lfd		f13,96(r7)		; 
-	lfd		f12,88(r7)		;
-	lfd		f11,80(r7)		;
-	lfd		f10,72(r7)		;
-	lfd		f9,64(r7)		;
-	lfd		f8,56(r7)		;
-	lfd		f7,48(r7)		;
-	lfd		f6,40(r7)		;
-	lfd		f5,32(r7)		;
-	lfd		f4,24(r7)		;
-	lfd		f3,16(r7)		;
-	lfd		f2,8(r7)		;
-	lfd		f1,0(r7)		;
+	lfd     f1,0(r7)		;
+	lfd     f2,8(r7)		;
+	lfd     f3,16(r7)		;
+	lfd     f4,24(r7)		;
+	lfd     f5,32(r7)		;
+	lfd     f6,40(r7)		;
+	lfd     f7,48(r7)		;
+	lfd     f8,56(r7)		;
+	lfd     f9,64(r7)		;
+	lfd     f10,72(r7)		;
+	lfd     f11,80(r7)		;
+	lfd     f12,88(r7)		;
+	lfd     f13,96(r7)		; 
 
 ; load the register based arguments from the marg_list
 ; the structure return address and the first two parameters
@@ -1298,229 +1350,38 @@ LMsgSendvStretHaveFrame:
 ; storage used by the caller could be an intermediate buffer
 ; that will end up being copied into the original
 ; struct-return buffer (pointed to by the marg_listed r3).
-	subi		r0,r6,5			; make word count from byte count rounded up to multiple of 4...
-	srwi.		r0,r0,2			; ... and subtracting for params already in r4 and r5
-	beq		LMsgSendvStretSendIt	; branch if there are no parameters to load
-	mtctr		r0			; counter = number of remaining words
-	lwz		r6,36+(13*8)(r7)	; load 4th parameter
-	bdz		LMsgSendvStretSendIt	; decrement counter, branch if result is zero
-	addi		r11,r7,40+(13*8)	; switch to r11, because we are setting r7
-	lwz		r7,0(r11)		; load 5th parameter
-	bdz		LMsgSendvStretSendIt	; decrement counter, branch if result is zero
-	lwz		r8,4(r11)		; load 6th parameter
-	bdz		LMsgSendvStretSendIt	; decrement counter, branch if result is zero
-	lwz		r9,8(r11)		; load 7th parameter
-	bdz		LMsgSendvStretSendIt	; decrement counter, branch if result is zero
-	lwzu		r10,12(r11)		; load 8th parameter, and update r11
-	bdz		LMsgSendvStretSendIt	; decrement counter, branch if result is zero
+	subi    r0,r6,(3*4)-3		; make word count from byte count rounded up to multiple of 4...
+	srwi.   r0,r0,2			; ... and subtracting for params already in r3 and r4 and r5
+	beq     LMsgSendvStretSendIt	; branch if there are no parameters to load
+	mtctr   r0					; counter = number of remaining words
+	lwz     r6,36+(13*8)(r7)	; load 4th parameter
+	bdz     LMsgSendvStretSendIt	; decrement counter, branch if result is zero
+	addi    r11,r7,40+(13*8)	; switch to r11, because we are setting r7
+	lwz     r7,0(r11)			; load 5th parameter
+	bdz     LMsgSendvStretSendIt	; decrement counter, branch if result is zero
+	lwz     r8,4(r11)			; load 6th parameter
+	bdz     LMsgSendvStretSendIt	; decrement counter, branch if result is zero
+	lwz     r9,8(r11)			; load 7th parameter
+	bdz     LMsgSendvStretSendIt	; decrement counter, branch if result is zero
+	lwzu    r10,12(r11)			; load 8th parameter, and update r11
+	bdz     LMsgSendvStretSendIt	; decrement counter, branch if result is zero
 
 ; copy the stack based arguments from the marg_list
-	addi		r12,r1,24+32-4		; target = address of stack based parameters
+	addi    r12,r1,24+32-4		; target = address of stack based parameters
 LMsgSendvStretArgLoop:
-	lwzu		r0,4(r11)		; loop to copy remaining marg_list words to stack
-	stwu		r0,4(r12)		;
-	bdnz		LMsgSendvStretArgLoop	; decrement counter, branch if still non-zero
+	lwzu    r0,4(r11)			; loop to copy remaining marg_list words to stack
+	stwu    r0,4(r12)			;
+	bdnz    LMsgSendvStretArgLoop	; decrement counter, branch if still non-zero
 
 LMsgSendvStretSendIt:
-	bl		_objc_msgSend_stret	; struct_type objc_msgSend_stret (self, selector, ...)
+	bl      _objc_msgSend_stret	; struct_type objc_msgSend_stret (self, selector, ...)
 
-	lwz		r1,0(r1)		; restore stack pointer
-	lwz		r0,8(r1)		; restore return pc
-	mtlr		r0
-	blr					; return
-#endif
+	lwz     r1,0(r1)		; restore stack pointer
+	lwz     r0,8(r1)		; restore return pc
+	mtlr    r0
+	blr     				; return
+#else /* KERNEL */
+	trap    				; _objc_msgSendv_stret is not for the kernel
+#endif /* !KERNEL */
 
-	END_ENTRY	_objc_msgSendv_stret
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;
-; ****************  THE "FEW" API  ****************
-;
-; The "few args" apis; The compiler needs to be updated to generate calls to
-; these functions, rather than to their counterparts, when the number of
-; arguments to a method is < 6 (5 for struct returns).
-;
-; *************************************************
-;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-/********************************************************************
- * id		objc_msgSendFew(id	self,
- *				SEL	op,
- *					...);
- *
- * On entry:	r3 is the message receiver,
- *		r4 is the selector
- *		+ at most 3 args (ints or doubles)
- ********************************************************************/
-
-	ENTRY	_objc_msgSendFew
-; do profiling when enabled
-	CALL_MCOUNT
-
-; check whether receiver is nil
-	cmplwi		r3,0			; receiver nil?
-	beq		LMsgSendFewNilSelf	; if so, call handler or return nil
-
-; receiver is non-nil: search the cache
-	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendFewCacheMiss, FEW_ARGS
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendFewCacheMiss:
-	MethodTableLookup WORD_RETURN, MSG_SEND, FEW_ARGS
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; message sent to nil object call: optional handler and return nil
-LMsgSendFewNilSelf:
-	LOAD_STATIC_WORD r11, __objc_msgNil, EXTERNAL_SYMBOL
-	cmplwi		r11,0			; handler nil?
-	beqlr					; if no handler, return nil
-
-	mflr		r0			; save return pc
-	stw		r0,8(r1)		;
-	subi		r1,r1,64		; allocate linkage area
-	mtctr		r11			; 
-	bctrl					; call handler
-	addi		r1,r1,64		; deallocate linkage area
-	lwz		r0,8(r1)		; restore return pc
-	mtlr		r0			; 
-
-	li		r3,0		; re-zero return value, in case handler changed it
-	blr					; return to caller
-
-LMsgSendFewExit:
-	END_ENTRY	_objc_msgSendFew
-
-
-/********************************************************************
- * struct_type	objc_msgSendFew_stret(id	self,
- *					SEL	op,
- *						...);
- *
- * objc_msgSend_stret is the struct-return form of msgSend.
- * The ABI calls for r3 to be used as the address of the structure
- * being returned, with the parameters in the succeeding registers.
- *
- * On entry:	r3 is the address where the structure is returned,
- *		r4 is the message receiver,
- *		r5 is the selector
- ********************************************************************/
-
-	ENTRY	_objc_msgSendFew_stret
-; do profiling when enabled
-	CALL_MCOUNT
-
-; check whether receiver is nil
-	cmplwi		r4,0			; receiver nil?
-	beq		LMsgSendFewStretNilSelf	; if so, call handler or just return
-
-; receiver is non-nil: search the cache
-	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendFewStretCacheMiss, FEW_ARGS
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendFewStretCacheMiss:
-	MethodTableLookup STRUCT_RETURN, MSG_SEND, FEW_ARGS
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; message sent to nil object call optional handler and return nil
-LMsgSendFewStretNilSelf:
-	LOAD_STATIC_WORD r11, __objc_msgNil, EXTERNAL_SYMBOL
-	cmplwi		r11,0			; handler nil?
-	beqlr					; if no handler, return
-
-	mflr		r0			; save return pc
-	stw		r0,8(r1)		;
-	subi		r1,r1,64		; allocate linkage area
-	mr		r3,r4			; move self to r3
-	mr		r4,r5			; move SEL to r4
-	mtctr		r11			; 
-	bctrl					; call handler
-	addi		r1,r1,64		; deallocate linkage area
-	lwz		r0,8(r1)		; restore return pc
-	mtlr		r0			; 
-
-	blr					; return to caller
-
-LMsgSendFewStretExit:
-	END_ENTRY	_objc_msgSendFew_stret
-
-
-/********************************************************************
- * id	objc_msgSendSuperFew(struct objc_super	*super,
- *				SEL			op,
- *							...);
- *
- * struct objc_super {
- *	id	receiver;
- *	Class	class;
- * };
- ********************************************************************/
-
-	ENTRY	_objc_msgSendSuperFew
-; do profiling when enabled
-	CALL_MCOUNT
-
-; search the cache
-	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperFewCacheMiss, FEW_ARGS
-	lwz		r3,receiver(r3)		; receiver is the first arg
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendSuperFewCacheMiss:
-	MethodTableLookup WORD_RETURN, MSG_SENDSUPER, FEW_ARGS
-	lwz		r3,receiver(r3)		; receiver is the first arg
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-
-LMsgSendSuperFewExit:
-	END_ENTRY	_objc_msgSendSuperFew
-
-
-/********************************************************************
- * struct_type	objc_msgSendSuperFew_stret(objc_super	*super,
- *						SEL		op,
- *								...);
- *
- * struct objc_super {
- *	id	receiver;
- *	Class	class;
- * };
- *
- *
- * objc_msgSendSuper_stret is the struct-return form of msgSendSuper.
- * The ABI calls for r3 to be used as the address of the structure
- * being returned, with the parameters in the succeeding registers.
- *
- * On entry:	r3 is the address to which to copy the returned structure,
- *		r4 is the address of the objc_super structure,
- *		r5 is the selector
- ********************************************************************/
-
-	ENTRY	_objc_msgSendSuperFew_stret
-; do profiling when enabled
-	CALL_MCOUNT
-
-; search the cache
-	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperFewStretCacheMiss, FEW_ARGS
-	lwz		r4,receiver(r4)		; receiver is the first arg
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendSuperFewStretCacheMiss:
-	MethodTableLookup STRUCT_RETURN, MSG_SENDSUPER, FEW_ARGS
-	lwz		r4,receiver(r4)		; receiver is the first arg
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-
-LMsgSendSuperFewStretExit:
-	END_ENTRY	_objc_msgSendSuperFew_stret
-
+	END_ENTRY _objc_msgSendv_stret

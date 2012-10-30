@@ -1,0 +1,162 @@
+# objc4 order file
+# Updated August 2003 (Panther)
+# Start with automatic order file, then:
+# 1. move or add _objc_msgSendNonNil immediately after _objc_msgSend
+# 2. move or add _objc_msgSendNonNil_stret immediately after _objc_msgSend_stret
+# msgSend and msgSendNonNil must not be separated by the linker.
+libobjc.o:_objc_msgSend
+libobjc.o:_objc_msgSendNonNil
+libobjc.o:_objc_msgSend_stret
+libobjc.o:_objc_msgSendNonNil_stret
+libobjc.o:__class_lookupMethodAndLoadCache
+libobjc.o:__cache_fill
+libobjc.o:__internal_object_dispose
+libobjc.o:___sel_registerName
+libobjc.o:__cache_getMethod
+libobjc.o:__internal_class_createInstanceFromZone
+libobjc.o:__cache_getImp
+libobjc.o:_objc_msgSendSuper
+libobjc.o:__objc_search_builtins
+libobjc.o:_sel_registerNameNoCopyNoLock
+libobjc.o:_NXHashGet
+libobjc.o:_class_respondsToMethod
+libobjc.o:_object_getClassName
+libobjc.o:_objc_getClass
+libobjc.o:__objc_getFreedObjectClass
+libobjc.o:__objc_fixup_selector_refs
+libobjc.o:_class_lookupMethod
+libobjc.o:_NXNextHashState
+libobjc.o:_class_poseAs
+libobjc.o:_classIsEqual
+libobjc.o:_classHash
+libobjc.o:__objcTweakMethodListPointerForClass
+libobjc.o:_class_initialize
+libobjc.o:_objc_lookUpClass
+libobjc.o:-[Protocol conformsTo:]
+libobjc.o:__objc_create_zone
+libobjc.o:_NXHashInsert
+libobjc.o:__objc_add_classes_from_image
+libobjc.o:__cache_collect_free
+libobjc.o:__objc_hash_selector
+libobjc.o:__class_install_relationships
+libobjc.o:__objc_register_category
+libobjc.o:__mapStrIsEqual
+libobjc.o:__cache_malloc
+libobjc.o:__cache_expand
+libobjc.o:_objc_msgSendSuper_stret
+libobjc.o:_NXMapInsert
+libobjc.o:__fetchInitializingClassList
+libobjc.o:__NXMapMember
+libobjc.o:_map_method_descs
+libobjc.o:__mapStrHash
+libobjc.o:__objc_call_loads_for_image
+libobjc.o:_objc_getClassList
+libobjc.o:__objc_equal_selector
+libobjc.o:__cache_addForwardEntry
+libobjc.o:_NXMapGet
+libobjc.o:__objc_checkForPendingClassReferences
+libobjc.o:_NXMapRemove
+libobjc.o:_get_base_method_list
+libobjc.o:__objc_resolve_categories_for_class
+libobjc.o:__objc_insertMethods
+libobjc.o:_sel_lock
+libobjc.o:_sel_unlock
+libobjc.o:__cache_create
+libobjc.o:__thisThreadIsInitializingClass
+libobjc.o:__garbage_make_room
+libobjc.o:__objcInit
+libobjc.o:__objc_map_class_refs_for_image
+libobjc.o:_class_lookupNamedMethodInMethodList
+libobjc.o:_sel_registerName
+libobjc.o:__collecting_in_critical
+libobjc.o:__objc_add_categories_from_image
+libobjc.o:+[Object alloc]
+libobjc.o:__setThisThreadIsInitializingClass
+libobjc.o:__setThisThreadIsNotInitializingClass
+libobjc.o:_NXUniqueString
+libobjc.o:_NXStrIsEqual
+libobjc.o:__get_pc_for_thread
+libobjc.o:__objc_map_image
+libobjc.o:__objc_addHeader
+libobjc.o:-[Object init]
+libobjc.o:__objc_fixup_protocol_objects_for_image
+libobjc.o:__objc_bindClassIfNeeded
+libobjc.o:_class_getInstanceMethod
+libobjc.o:_NXStrHash
+libobjc.o:-[Object free]
+libobjc.o:__getObjcModules
+libobjc.o:__getObjcImageInfo
+libobjc.o:_class_getVariable
+libobjc.o:-[Protocol descriptionForInstanceMethod:]
+libobjc.o:__NXMapRehash
+libobjc.o:__internal_object_copyFromZone
+libobjc.o:_NXPtrHash
+libobjc.o:__NXHashRehash
+libobjc.o:__getObjcClassRefs
+libobjc.o:_sel_getName
+libobjc.o:_CopyIntoReadOnly
+libobjc.o:_hashPrototype
+libobjc.o:_lookup_method
+libobjc.o:_class_nextMethodList
+libobjc.o:__objc_addOrigClass
+libobjc.o:_NXHashRemove
+libobjc.o:_objc_msgSendv
+libobjc.o:__objc_msgForward
+libobjc.o:-[Object class]
+libobjc.o:+[Object name]
+libobjc.o:_objc_getOrigClass
+libobjc.o:_object_setInstanceVariable
+libobjc.o:_NXCreateHashTableFromZone
+libobjc.o:_hashPrototype
+libobjc.o:__objc_add_category_flush_caches
+libobjc.o:-[Object perform:with:with:]
+libobjc.o:__objc_defaultClassHandler
+libobjc.o:_class_getInstanceVariable
+libobjc.o:_freeBuckets
+libobjc.o:_freeBucketPairs
+libobjc.o:_NXNoEffectFree
+libobjc.o:__getObjcHeaderData
+libobjc.o:__getObjcMessageRefs
+libobjc.o:_NXCreateMapTableFromZone
+libobjc.o:_flush_caches
+libobjc.o:_objc_msgSendv_stret
+libobjc.o:-[Object respondsTo:]
+libobjc.o:-[Object perform:]
+libobjc.o:-[Object self]
+libobjc.o:+[Object class]
+libobjc.o:-[Object isMemberOf:]
+libobjc.o:__objc_init_class_hash
+libobjc.o:_bootstrap
+libobjc.o:_isEqualPrototype
+libobjc.o:_NXInitHashState
+libobjc.o:_log2
+libobjc.o:_exp2m1
+libobjc.o:_objc_setConfiguration
+libobjc.o:_NXCreateHashTable
+libobjc.o:_log2
+libobjc.o:__objc_fixup_string_objects_for_image
+libobjc.o:__getObjcStringObjects
+libobjc.o:__getObjcProtocols
+libobjc.o:+[Object initialize]
+libobjc.o:+[Protocol _fixup:numElements:]
+libobjc.o:__objc_flush_caches
+libobjc.o:+[Protocol load]
+libobjc.o:__getObjcHeaders
+libobjc.o:_objc_exception_set_functions
+libobjc.o:_isEqualPrototype
+libobjc.o:_objc_getClasses
+libobjc.o:_addClassToOriginalClass
+libobjc.o:__mapPtrHash
+libobjc.o:_objc_setMultithreaded
+libobjc.o:__objc_unmap_image
+libobjc.o:__objc_fatalHeader
+libobjc.o:__objc_headerStart
+libobjc.o:__mapPtrIsEqual
+libobjc.o:_lookup_instance_method
+libobjc.o:_NXCountHashTable
+libobjc.o:_objc_pendClassReference
+libobjc.o:__objc_getNonexistentClass
+libobjc.o:__cache_flush
+libobjc.o:__objc_pthread_destroyspecific
+libobjc.o:__destroyInitializingClassList
+libobjc.o:_objc_loadModule

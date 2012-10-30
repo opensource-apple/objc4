@@ -3,21 +3,22 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Portions Copyright (c) 1999 Apple Computer, Inc.  All Rights
- * Reserved.  This file contains Original Code and/or Modifications of
- * Original Code as defined in and that are subject to the Apple Public
- * Source License Version 1.1 (the "License").  You may not use this file
- * except in compliance with the License.  Please obtain a copy of the
- * License at http://www.apple.com/publicsource and read it before using
- * this file.
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
  * 
  * The Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON- INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -54,8 +55,12 @@
 
     #import <objc/objc-runtime.h>
 
-    // This needs <...> -- malloc.h is not ours, really...
+#ifdef MACOSX_PANTHER
+    #import <malloc/malloc.h>
+#else
+    // pre-Panther
     #import <objc/malloc.h>
+#endif
 
 
 /* Opaque cookie used in _getObjc... routines.  File format independant.
@@ -81,12 +86,35 @@ typedef struct _NXConstantStringTemplate {
 #define OBJC_PROTOCOL_PTR ProtocolTemplate*
 #define OBJC_PROTOCOL_DEREF .
 
+typedef struct {
+    uint32_t version; // currently 0
+    uint32_t flags;
+} objc_image_info;
+
+// masks for objc_image_info.flags
+#define OBJC_IMAGE_IS_REPLACEMENT (1<<0)
+#define _objcHeaderIsReplacement(h)  ((h)->info  &&  ((h)->info->flags & OBJC_IMAGE_IS_REPLACEMENT))
+
+/* OBJC_IMAGE_IS_REPLACEMENT:
+   Don't load any classes
+   Don't load any categories
+   Do fix up selector refs (@selector points to them)
+   Do fix up class refs (@class and objc_msgSend points to them)
+   Do fix up protocols (@protocol points to them)
+   Future: do load new classes?
+   Future: do load new categories?
+   Future: do insert new methods on existing classes?
+   Future: do insert new methods on existing categories?
+*/
+
+
 // both
 OBJC_EXPORT headerType **	_getObjcHeaders();
 OBJC_EXPORT Module		_getObjcModules(headerType *head, int *nmodules);
 OBJC_EXPORT Class *		_getObjcClassRefs(headerType *head, int *nclasses);
-OBJC_EXPORT void *		_getObjcHeaderData(headerType *head, unsigned *size);
+OBJC_EXPORT void *		_getObjcHeaderData(const headerType *head, unsigned *size);
 OBJC_EXPORT const char *	_getObjcHeaderName(headerType *head);
+OBJC_EXPORT objc_image_info *	_getObjcImageInfo(headerType *head);
 
 // internal routines for delaying binding
 void _objc_resolve_categories_for_class	(struct objc_class * cls);
@@ -108,9 +136,12 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
     typedef struct _header_info
     {
       const headerType *	mhdr;
-      Module			mod_ptr;
+      Module			mod_ptr; // NOT adjusted by image_slide
       unsigned int		mod_count;
       unsigned long		image_slide;
+      void *			objcData;     // getObjcHeaderData result
+      unsigned 			objcDataSize; // getObjcHeaderData result
+      objc_image_info *		info;    // IS adjusted by image_slide
       struct _header_info *	next;
     } header_info;
     OBJC_EXPORT header_info *_objc_headerStart ();
@@ -129,7 +160,9 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
     OBJC_EXPORT void _class_install_relationships(Class, long);
     OBJC_EXPORT void *_objc_create_zone(void);
 
-    OBJC_EXPORT SEL sel_registerNameNoCopy(const char *str);
+    OBJC_EXPORT SEL sel_registerNameNoCopyNoLock(const char *str);
+    OBJC_EXPORT void sel_lock(void);
+    OBJC_EXPORT void sel_unlock(void);
 
     /* selector fixup in method lists */
 
@@ -147,11 +180,13 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
             size = sizeof(struct objc_method_list) - sizeof(struct objc_method) + old_mlist->method_count * sizeof(struct objc_method);
             mlist = malloc_zone_malloc(_objc_create_zone(), size);
             memmove(mlist, old_mlist, size);
+            sel_lock();
             for ( i = 0; i < mlist->method_count; i += 1 ) {
                 method = &mlist->method_list[i];
                 method->method_name =
-                    sel_registerNameNoCopy((const char *)method->method_name);
+                    sel_registerNameNoCopyNoLock((const char *)method->method_name);
             }
+            sel_unlock();
             mlist->obsolete = _OBJC_FIXED_UP;
         }
         return mlist;
@@ -189,14 +224,14 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
     OBJC_EXPORT void _objc_removeMethods( struct objc_method_list *mlist, struct objc_method_list ***list );
 
     OBJC_EXPORT IMP _cache_getImp(Class cls, SEL sel);
-    OBJC_EXPORT Method _cache_getMethod(Class cls, SEL sel);
+    OBJC_EXPORT Method _cache_getMethod(Class cls, SEL sel, IMP objc_msgForward_imp);
 
     /* message dispatcher */
     OBJC_EXPORT IMP _class_lookupMethodAndLoadCache(Class, SEL);
     OBJC_EXPORT id _objc_msgForward (id self, SEL sel, ...);
 
     /* errors */
-    OBJC_EXPORT volatile void __S(_objc_fatal)(const char *message);
+    OBJC_EXPORT volatile void _objc_fatal(const char *fmt, ...);
     OBJC_EXPORT volatile void _objc_error(id, const char *, va_list);
     OBJC_EXPORT volatile void __objc_error(id, const char *, ...);
     OBJC_EXPORT void _objc_inform(const char *fmt, ...);
@@ -212,9 +247,11 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
     #define OBJC_DECLARE_LOCK(MTX) pthread_mutex_t MTX = PTHREAD_MUTEX_INITIALIZER
     OBJC_EXPORT pthread_mutex_t classLock;
 
-    // _objc_msgNil is actually (unsigned dummy, id, SEL) for i386;
-    // currently not implemented for any sparc or hppa platforms
-    OBJC_EXPORT void (*_objc_msgNil)(id, SEL);
+    /* nil handler object */
+    OBJC_EXPORT id _objc_nilReceiver;
+    OBJC_EXPORT id _objc_setNilReceiver(id newNilReceiver);
+    OBJC_EXPORT id _objc_getNilReceiver(void);
+
 
     typedef struct {
        long addressOffset;
@@ -237,14 +274,11 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
 
 
 static __inline__ int _objc_strcmp(const unsigned char *s1, const unsigned char *s2) {
-    int a, b, idx = 0;
-    for (;;) {
-	a = s1[idx];
-	b = s2[idx];
-        if (a != b || 0 == a) break;
-        idx++;
-    }
-    return a - b;
+    unsigned char c1, c2;
+    for ( ; (c1 = *s1) == (c2 = *s2); s1++, s2++)
+        if (c1 == '\0')
+            return 0;
+    return (c1 - c2);
 }       
 
 static __inline__ unsigned int _objc_strhash(const unsigned char *s) {

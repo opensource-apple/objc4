@@ -3,21 +3,22 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Portions Copyright (c) 1999 Apple Computer, Inc.  All Rights
- * Reserved.  This file contains Original Code and/or Modifications of
- * Original Code as defined in and that are subject to the Apple Public
- * Source License Version 1.1 (the "License").  You may not use this file
- * except in compliance with the License.  Please obtain a copy of the
- * License at http://www.apple.com/publicsource and read it before using
- * this file.
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
  * 
  * The Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON- INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -32,8 +33,11 @@
 #include <syslog.h>
 #include <sys/fcntl.h>
 
-
 #import "objc-private.h"
+
+static volatile void _objc_trap(void);
+
+
 static int hasTerminal()
 {
     static char hasTerm = -1;
@@ -94,17 +98,24 @@ volatile void _objc_error(id self, const char *fmt, va_list ap)
     vsnprintf (bigBuffer, sizeof(bigBuffer), fmt, ap);
     _objc_syslog ("objc: %s: %s", object_getClassName (self), bigBuffer);
 
-    abort();		/* generates a core file */
+    _objc_trap();
 }
 
 /*	
  *	this routine handles severe runtime errors...like not being able
  * 	to read the mach headers, allocate space, etc...very uncommon.
  */
-volatile void _objc_fatal(const char *msg)
+volatile void _objc_fatal(const char *fmt, ...)
 {
-    _objc_syslog("objc: %s\n", msg);
-    exit(1);
+    va_list ap; 
+    char bigBuffer[4*1024];
+
+    va_start (ap,fmt); 
+    vsnprintf (bigBuffer, sizeof(bigBuffer), fmt, ap);
+    _objc_syslog ("objc: %s", bigBuffer);
+    va_end (ap);
+
+    _objc_trap();
 }
 
 /*
@@ -122,3 +133,17 @@ void _objc_inform(const char *fmt, ...)
     va_end (ap);
 }
 
+
+/* Kill the process in a way that generates a crash log. 
+ * This is better than calling exit(). */
+static volatile void _objc_trap(void) 
+{
+#if defined(__ppc__) || defined(ppc)
+    asm("trap");
+#elif defined(__i386__) || defined(i386)
+    asm("int3");
+#else
+#warning _objc_trap not specified for this architecture; using _exit instead
+    _exit(1);
+#endif   
+}
