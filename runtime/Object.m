@@ -1044,9 +1044,6 @@ Ivar object_getInstanceVariable(id obj, const char *name, void **value)
 	return ivar;
 }
 
-#if defined(__hpux__)
-id (*_objc_msgSend_v)(id, SEL, ...) = objc_msgSend;
-#endif
 
 id (*_copy)(id, unsigned) = _internal_object_copy;
 id (*_realloc)(id, unsigned) = _internal_object_realloc;

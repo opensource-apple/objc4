@@ -18,26 +18,10 @@ create-profile-lib-compat-link:
 	$(SYMLINK) $(notdir $(VERSIONED_PROFILE_PRODUCT)) $(DSTROOT)$(INSTALLDIR)/libobjc.A_profile.dylib
 
 link-hashtable:
-ifeq ("$(PLATFORM_OS)", "macos")
 	$(RM) -f $(DSTROOT)$(PUBLIC_HEADER_DIR)$(PUBLIC_HEADER_DIR_SUFFIX)/hashtable.h
 	$(CP) $(DSTROOT)$(PUBLIC_HEADER_DIR)$(PUBLIC_HEADER_DIR_SUFFIX)/hashtable2.h $(DSTROOT)$(PUBLIC_HEADER_DIR)$(PUBLIC_HEADER_DIR_SUFFIX)/hashtable.h
-endif
-ifeq ("$(PLATFORM_OS)", "solaris")
-	$(RM) -f $(DSTROOT)$(PUBLIC_HEADER_DIR)$(PUBLIC_HEADER_DIR_SUFFIX)/hashtable.h
-	$(LN) $(DSTROOT)$(PUBLIC_HEADER_DIR)$(PUBLIC_HEADER_DIR_SUFFIX)/hashtable2.h $(DSTROOT)$(PUBLIC_HEADER_DIR)$(PUBLIC_HEADER_DIR_SUFFIX)/hashtable.h
-endif
-ifeq ("$(PLATFORM_OS)", "hpux")
-	$(RM) -f $(DSTROOT)$(PUBLIC_HEADER_DIR)$(PUBLIC_HEADER_DIR_SUFFIX)/hashtable.h
-	$(LN) $(DSTROOT)$(PUBLIC_HEADER_DIR)$(PUBLIC_HEADER_DIR_SUFFIX)/hashtable2.h $(DSTROOT)$(PUBLIC_HEADER_DIR)$(PUBLIC_HEADER_DIR_SUFFIX)/hashtable.h
-endif
 	true
 
 # from AFTER_POSTINSTALL
 postprocess:
-ifeq ("$(PLATFORM_OS)", "winnt")
-	$(MKDIRS) $(DSTROOT)$(LOCAL_DEVELOPER_DIR)/Libraries
-	$(CP) $(SYMROOT)/runtime.lib $(DSTROOT)$(LOCAL_DEVELOPER_DIR)/Libraries/libobjc.a
-	$(CP) $(SYMROOT)/runtime.lib $(DSTROOT)$(LOCAL_DEVELOPER_DIR)/Libraries/libobjc_g.a
-	$(RM) -f $(DSTROOT)$(INSTALLDIR)/runtime.lib
-endif
 

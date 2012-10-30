@@ -151,16 +151,7 @@ OBJC_EXPORT id	(*_zoneAlloc)(Class, unsigned int, void *);
 OBJC_EXPORT id	(*_zoneRealloc)(id, unsigned int, void *);
 OBJC_EXPORT id	(*_zoneCopy)(id, unsigned int, void *);
 
-#if defined(NeXT_PDO)
-    OBJC_EXPORT void   (*_error)();
-#else
-    OBJC_EXPORT void	(*_error)(id, const char *, va_list);
-#endif
+OBJC_EXPORT void	(*_error)(id, const char *, va_list);
 
-#if defined(WIN32)
-/* This seems like a strange place to put this, but there's really
-   no very appropriate place! */
-OBJC_EXPORT const char* NSRootDirectory(void);
-#endif 
 
 #endif /* _OBJC_RUNTIME_H_ */

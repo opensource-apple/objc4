@@ -32,13 +32,8 @@
             Object.m, 
             Protocol.m
         ); 
-        OTHER_SOURCES = (
-            Makefile.preamble, 
-            Makefile, 
-            Makefile.postamble, 
-            objc_hpux_register_shlib.c, 
-            objc_dllMain.c
-        ); 
+        OTHER_SOURCES = (Makefile.preamble, Makefile, Makefile.postamble); 
+        PROJECT_HEADERS = ("objc-runtime.h", "objc-class.h"); 
         PUBLIC_HEADERS = (
             "objc-class.h", 
             "objc-api.h", 
@@ -55,7 +50,7 @@
     LANGUAGE = English; 
     LOCALIZABLE_FILES = {}; 
     MAKEFILEDIR = "$(MAKEFILEPATH)/pb_makefiles"; 
-    NEXTSTEP_BUILDTOOL = /bin/gnumake; 
+    NEXTSTEP_BUILDTOOL = /usr/bin/gnumake; 
     NEXTSTEP_INSTALLDIR = /usr/lib; 
     NEXTSTEP_JAVA_COMPILER = /usr/bin/javac; 
     NEXTSTEP_OBJCPLUS_COMPILER = /usr/bin/cc; 

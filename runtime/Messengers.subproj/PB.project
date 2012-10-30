@@ -8,17 +8,8 @@
             Makefile.preamble, 
             Makefile, 
             Makefile.postamble, 
-            "objc-msg-hppa-lock.s", 
-            "objc-msg-hppa-nolock.s", 
-            "objc-msg-hppa-pdo.s", 
-            "objc-msg-hppa-pdo-pic.s", 
             "objc-msg-i386.s", 
-            "objc-msg-i386-nextpdo-winnt3.5.s", 
-            "objc-msg-ppc.s", 
-            "objc-msg-m68k-lock.s", 
-            "objc-msg-m68k-nolock.s", 
-            "objc-msg-sparc.s", 
-            "objc-msg-sparc-pdo.s"
+            "objc-msg-ppc.s"
         ); 
         SUBPROJECTS = (); 
     }; 

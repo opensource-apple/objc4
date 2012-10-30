@@ -39,10 +39,6 @@
 #include <setjmp.h>
 #import <objc/objc-api.h>
 
-#if defined(__svr4__)
-    #define _setjmp setjmp
-    #define _longjmp longjmp
-#endif
 
 typedef struct _NXHandler {	/* a node in the handler chain */
     jmp_buf jumpState;			/* place to longjmp to */

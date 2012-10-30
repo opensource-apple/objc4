@@ -23,40 +23,50 @@
  */
 /*
  *	objc-errors.m
- * 	Copyright 1988-1996, NeXT Software, Inc.
+ * 	Copyright 1988-2001, NeXT Software, Inc., Apple Computer, Inc.
  */
 
-/*
-	NXLogObjcError was snarfed from "logErrorInc.c" in the kit.
-  
-	Contains code for writing error messages to stderr or syslog.
-  
-	This code is included in errors.m in the kit, and in pbs.c
-	so pbs can use it also.
-*/
 
-#if defined(WIN32)
-    #import <winnt-pdo.h>
-    #import <windows.h>
-    #import <sys/types.h>
-    #import <sys/stat.h>
-    #import <io.h>
-    #define syslog(a, b, c) 	fprintf(stderr, b, c)
-#else 
-    #import <syslog.h>
-#endif
+#include <stdarg.h>
+#include <unistd.h>
+#include <syslog.h>
+#include <sys/fcntl.h>
 
-    #if defined(NeXT_PDO)
-        #if !defined(WIN32)
-            #include	<syslog.h>	// major head banging in attempt to find syslog
-            #import 	<stdarg.h>
-            #include 	<unistd.h>	// close
-        #endif
-        #import 	<fcntl.h>	// file open flags
-    #endif
 
 #import "objc-private.h"
+static int hasTerminal()
+{
+    static char hasTerm = -1;
 
+    if (hasTerm == -1) {
+	int fd = open("/dev/tty", O_RDWR, 0);
+	if (fd >= 0) {
+	    (void)close(fd);
+	    hasTerm = 1;
+	} else
+	    hasTerm = 0;
+    }
+    return hasTerm;
+}
+
+void _objc_syslog(const char *format, ...)
+{
+    va_list ap;
+    char bigBuffer[4*1024];
+
+    va_start(ap, format);
+    vsprintf(bigBuffer, format, ap);
+    va_end(ap);
+
+
+    if (hasTerminal()) {
+	fwrite(bigBuffer, sizeof(char), strlen(bigBuffer), stderr);
+	if (bigBuffer[strlen(bigBuffer)-1] != '\n')
+	    fputc('\n', stderr);
+    } else {
+	syslog(LOG_ERR, "%s", bigBuffer);
+    }
+}
 /*	
  *	this routine handles errors that involve an object (or class).
  */
@@ -82,13 +92,9 @@ volatile void _objc_error(id self, const char *fmt, va_list ap)
     char bigBuffer[4*1024];
 
     vsprintf (bigBuffer, fmt, ap);
-    _NXLogError ("objc: %s: %s", object_getClassName (self), bigBuffer);
+    _objc_syslog ("objc: %s: %s", object_getClassName (self), bigBuffer);
 
-#if defined(WIN32)
-    RaiseException(0xdead, EXCEPTION_NONCONTINUABLE, 0, NULL);
-#else
     abort();		/* generates a core file */
-#endif
 }
 
 /*	
@@ -97,12 +103,8 @@ volatile void _objc_error(id self, const char *fmt, va_list ap)
  */
 volatile void _objc_fatal(const char *msg)
 {
-    _NXLogError("objc: %s\n", msg);
-#if defined(WIN32)
-    RaiseException(0xdead, EXCEPTION_NONCONTINUABLE, 0, NULL);
-#else
+    _objc_syslog("objc: %s\n", msg);
     exit(1);
-#endif
 }
 
 /*
@@ -116,7 +118,7 @@ void _objc_inform(const char *fmt, ...)
 
     va_start (ap,fmt); 
     vsprintf (bigBuffer, fmt, ap);
-    _NXLogError ("objc: %s", bigBuffer);
+    _objc_syslog ("objc: %s", bigBuffer);
     va_end (ap);
 }
 

@@ -26,9 +26,6 @@
 	Copyright 1991-1996 NeXT Software, Inc.
 */
 
-#if defined(WIN32)
-    #include <winnt-pdo.h>
-#endif
 
 #include "objc-private.h"
 #import <objc/Protocol.h>
@@ -36,10 +33,8 @@
 #include <objc/objc-runtime.h>
 #include <stdlib.h>
 
-#if defined(__MACH__) 
-    #include <mach-o/dyld.h>
-    #include <mach-o/ldsyms.h>
-#endif 
+#include <mach-o/dyld.h>
+#include <mach-o/ldsyms.h>
 
 /* some forward declarations */
 

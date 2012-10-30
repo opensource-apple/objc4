@@ -32,39 +32,8 @@
 
 #import "../objc-config.h"
 
-#if defined (m68k)
-    #if defined(OBJC_COLLECTING_CACHE)
-        #include "objc-msg-m68k-nolock.s"
-    #else
-        #include "objc-msg-m68k-lock.s"
-    #endif
-
-#elif defined (WIN32)
-    #include "objc-msg-i386-nextpdo-winnt3.5.s"
-
-#elif defined (__i386__) || defined (i386)
+#if defined (__i386__) || defined (i386)
     #include "objc-msg-i386.s"
-
-#elif defined (hppa)
-    #if defined(NeXT_PDO)
-        #if defined(NSBUILDINGHPUXSHLIB)
-            #include "objc-msg-hppa-pdo-pic.s"
-        #else
-            #include "objc-msg-hppa-pdo.s"
-        #endif
-    #elif defined(OBJC_COLLECTING_CACHE)
-        #include "objc-msg-hppa-nolock.s"
-    #else
-        #include "objc-msg-hppa-lock.s"
-    #endif
-
-#elif defined (sparc)
-    #if defined(NeXT_PDO)
-        #include "objc-msg-sparc-pdo.s"
-    #else
-        #include "objc-msg-sparc.s"
-    #endif
-
 #elif defined (__ppc__) || defined(ppc)
     #include "objc-msg-ppc.s"
 

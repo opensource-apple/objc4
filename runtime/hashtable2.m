@@ -141,7 +141,7 @@ NXHashTable *NXCreateHashTableFromZone (NXHashTablePrototype prototype, unsigned
     if (! prototype.isEqual) prototype.isEqual = NXPtrIsEqual;
     if (! prototype.free) prototype.free = NXNoEffectFree;
     if (prototype.style) {
-	_NXLogError ("*** NXCreateHashTable: invalid style\n");
+	_objc_syslog ("*** NXCreateHashTable: invalid style\n");
 	return NULL;
 	};
     proto = NXHashGet (prototypes, &prototype); 
@@ -153,7 +153,7 @@ NXHashTable *NXCreateHashTableFromZone (NXHashTablePrototype prototype, unsigned
     	(void) NXHashInsert (prototypes, proto);
 	proto = NXHashGet (prototypes, &prototype);
 	if (! proto) {
-	    _NXLogError ("*** NXCreateHashTable: bug\n");
+	    _objc_syslog ("*** NXCreateHashTable: bug\n");
 	    return NULL;
 	    };
 	};
@@ -310,7 +310,7 @@ static void _NXHashRehash (NXHashTable *table) {
 	(void) NXHashInsert (table, aux);
     freeBuckets (old, NO);
     if (old->count != table->count)
-	_NXLogError("*** hashtable: count differs after rehashing; probably indicates a broken invariant: there are x and y such as isEqual(x, y) is TRUE but hash(x) != hash (y)\n");
+	_objc_syslog("*** hashtable: count differs after rehashing; probably indicates a broken invariant: there are x and y such as isEqual(x, y) is TRUE but hash(x) != hash (y)\n");
     free (old->buckets); 
     free (old);
     };
@@ -603,7 +603,7 @@ NXAtom NXUniqueString (const char *buffer) {
     if (previous) return previous;
     previous = CopyIntoReadOnly (buffer);
     if (NXHashInsert (uniqueStrings, previous)) {
-	_NXLogError ("*** NXUniqueString: invariant broken\n");
+	_objc_syslog ("*** NXUniqueString: invariant broken\n");
 	return NULL;
 	};
     return previous;

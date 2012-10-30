@@ -42,11 +42,7 @@ struct objc_class {
 	long instance_size;
 	struct objc_ivar_list *ivars;
 
-#if defined(Release3CompatibilityBuild)
-	struct objc_method_list *methods;
-#else
 	struct objc_method_list **methodLists;
-#endif
 
 	struct objc_cache *cache;
  	struct objc_protocol_list *protocols;
@@ -61,7 +57,11 @@ struct objc_class {
 #define CLS_MAPPED		0x10L
 #define CLS_FLUSH_CACHE		0x20L
 #define CLS_GROW_CACHE		0x40L
+#define CLS_NEED_BIND		0x80L
 #define CLS_METHOD_ARRAY        0x100L
+// the JavaBridge constructs classes with these markers
+#define CLS_JAVA_HYBRID		0x200L
+#define CLS_JAVA_CLASS		0x400L
 /* 
  *	Category Template
  */
@@ -103,11 +103,7 @@ OBJC_EXPORT Ivar object_getInstanceVariable(id, const char *name, void **);
 typedef struct objc_method *Method;
 
 struct objc_method_list {
-#if defined(Release3CompatibilityBuild)
-        struct objc_method_list *method_next;
-#else
 	struct objc_method_list *obsolete;
-#endif
 
 	int method_count;
 #ifdef __alpha__
@@ -202,29 +198,6 @@ OBJC_EXPORT struct objc_method_list *class_nextMethodList(Class, void **);
 
 typedef void *marg_list;
 
-#if hppa
-
-#define marg_malloc(margs, method) \
-	do { \
-		unsigned int _sz = (7 + method_getSizeOfArguments(method)) & ~7; \
-		char *_ml = (char *)malloc(_sz + sizeof(marg_list)); \
-		void	**_z ; \
-		margs = (marg_list *)(_ml + _sz); \
-		_z = margs; \
-		*_z = (marg_list)_ml; \
-	} while (0)
-
-#define marg_free(margs) \
-	do { \
-		void	**_z = margs; \
-		free(*_z); \
-	} while (0)
-	
-#define marg_adjustedOffset(method, offset) \
-	( (!offset) ? -(sizeof(id)) : offset)
-
-#else
-
 #if defined(__ppc__) || defined(ppc)
 #define marg_prearg_size	128
 #else
@@ -245,7 +218,7 @@ typedef void *marg_list;
 #define marg_adjustedOffset(method, offset) \
 	(marg_prearg_size + offset)
 
-#endif /* hppa */
+
 
 
 #define marg_getRef(margs, offset, type) \
@@ -258,35 +231,5 @@ typedef void *marg_list;
 	( marg_getValue(margs, offset, type) = (value) )
 
 /* Load categories and non-referenced classes from libraries. */
-#if defined(NeXT_PDO)
-#if defined(__hpux__) || defined(hpux)
-
-#define OBJC_REGISTER_SYMBOL(NAME) asm("._" #NAME "=0\n .globl ._" #NAME "\n")
-#define OBJC_REFERENCE_SYMBOL(NAME) asm(".SPACE $PRIVATE$\n\t.SUBSPA $DATA$\n\t.word ._" #NAME "\n\t.SPACE $TEXT$\n\t.SUBSPA $CODE$\n")
-#define OBJC_REGISTER_CATEGORY(NAME) asm("._" #NAME "=0\n .globl ._" #NAME "\n")
-#define OBJC_REFERENCE_CATEGORY(NAME) asm(".SPACE $PRIVATE$\n\t.SUBSPA $DATA$\n\t.word ._" #NAME "\n\t.SPACE $TEXT$\n\t.SUBSPA $CODE$\n")
-#define OBJC_REFERENCE_CLASS_CATEGORY(CL, CAT) asm(".SPACE $PRIVATE$\n\t.SUBSPA $DATA$\n\t.word .objc_category_name_" #CL "_" #CAT "\n\t.SPACE $TEXT$\n\t.SUBSPA $CODE$\n")
-#define OBJC_REFERENCE_CLASS(NAME) asm(".SPACE $PRIVATE$\n\t.SUBSPA $DATA$\n\t.word .objc_class_name_" #NAME "\n\t.SPACE $TEXT$\n\t.SUBSPA $CODE$\n")
-
-#elif defined(__osf__)
-
-#define OBJC_REGISTER_SYMBOL(NAME) asm(".globl ._" #NAME "\n\t.align 3\n._" #NAME ":\n\t.quad 0\n")
-#define OBJC_REFERENCE_SYMBOL(NAME) asm(".align 3\n\t.quad ._" #NAME "\n")
-#define OBJC_REGISTER_CATEGORY(NAME) asm(".globl ._" #NAME "\n\t.align 3\n._" #NAME ":\n\t.quad 0\n")
-#define OBJC_REFERENCE_CATEGORY(NAME) asm(".align 3\n\t.quad ._" #NAME "\n")
-#define OBJC_REFERENCE_CLASS_CATEGORY(CL, CAT) asm(".align 3\n\t.quad .objc_category_name_" #CL "_" #CAT "\n")
-#define OBJC_REFERENCE_CLASS(NAME) asm(".quad .objc_class_name_" #NAME "\n")
-
-#else	/* Solaris || SunOS */
-
-#define OBJC_REGISTER_SYMBOL(NAME) asm("._" #NAME "=0\n .globl ._" #NAME "\n")
-#define OBJC_REFERENCE_SYMBOL(NAME) asm(".global ._" #NAME "\n")
-#define OBJC_REGISTER_CATEGORY(NAME) asm("._" #NAME "=0\n .globl ._" #NAME "\n")
-#define OBJC_REFERENCE_CATEGORY(NAME) asm(".global ._" #NAME "\n")
-#define OBJC_REFERENCE_CLASS_CATEGORY(CL, CAT) asm(".global .objc_category_name_" #CL "_" #CAT "\n")
-#define OBJC_REFERENCE_CLASS(NAME) asm(".global .objc_class_name_" #NAME "\n")
-
-#endif /* __hpux__ || hpux */
-#endif /* NeXT_PDO */
 
 #endif /* _OBJC_CLASS_H_ */

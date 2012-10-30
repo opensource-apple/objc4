@@ -29,7 +29,6 @@
 #ifndef _OBJC_LOAD_H_
 #define _OBJC_LOAD_H_
 
-#if !defined(NeXT_PDO)
 #import <objc/objc-class.h>
 
 #import <mach-o/loader.h>
@@ -60,5 +59,5 @@ OBJC_EXPORT void objc_register_header(
 	char *name					/* input */
 );
 
-#endif NeXT_PDO
+
 #endif /* _OBJC_LOAD_H_ */

@@ -28,11 +28,6 @@
 	Responsibility: Bertrand Serlet
 */
 
-#if defined(__svr4__) || defined(__hpux__) || defined(hpux)
-    #import <strings.h>		// for bcmp()
-#elif defined(WIN32)
-    #import <pdo.h>		// for bcopy()
-#endif
 
 #import <stdlib.h>
 #import <stdio.h>

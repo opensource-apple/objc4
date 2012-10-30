@@ -65,13 +65,6 @@
 #    DEBUG_BUILD_LDFLAGS, OPTIMIZE_BUILD_LDFLAGS, PROFILE_BUILD_LDFLAGS: flags
 #	passed to ld/libtool (defaults to nothing)
 
-ifeq "$(PLATFORM_OS)" "solaris"
-CODE_GEN_STYLE = STATIC
-else
-ifeq "$(PLATFORM_OS)" "hpux"
-CODE_GEN_STYLE = STATIC
-endif # hpux
-endif # solaris
 
 # Library and Framework projects only:
 #    INSTALL_NAME_DIRECTIVE:  This directive ensures that executables linked

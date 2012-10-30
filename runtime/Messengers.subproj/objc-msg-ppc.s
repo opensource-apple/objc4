@@ -264,7 +264,6 @@ $0:
 	cmplwi		r0,0			; lock held?
 	bne		.-20			; if locked, go spin waiting for unlock
 	li		r0,1			; get value that means locked
-	sync					; PPC errata #7: Avoid address comparison qualification failure
 	stwcx.		r0,0,$0			; store it iff reservation still holds
 	bne-		.-20			; if reservation was lost, go re-reserve
 	isync					; discard effects of prefetched instructions 
@@ -340,6 +339,9 @@ MANY_ARGS	= 1
 .endif
 
 ; locate the cache
+; Locking idea:
+;LGetMask_$0_$1_$2
+
 .if $0 == WORD_RETURN				; WORD_RETURN
 
 .if $1 == MSG_SEND				; MSG_SEND
@@ -358,11 +360,21 @@ MANY_ARGS	= 1
 
 .endif
 
+
 	lwz		r12,cache(r12)		; cache = class->cache
 #if defined(OBJC_INSTRUMENTED)
 	mr		r6,r12			; save cache pointer
 #endif
-	lwz		r11,mask(r12)		; mask = cache->mask
+	lwz	r11,mask(r12)		; mask = cache->mask
+
+; Locking idea
+;	lea	r0,mask(r12)		; XXX eliminate this by moving the mask to first position
+;	lwarx	r11,r0			; mask = reserve(cache->mask)
+;	bgt	LGetMask_$0_$1_$2	; if (mask > 0) goto LGetMask  // someone already using it
+;	neg	r11			; mask = -mask
+;	stcwx.	r11,r0			; cache->mask = mask		// store positive to mark in use
+;	bf	LGetMask_$0_$1_$2	; go to the class and get a possibly new one again
+
 	addi		r9,r12,buckets		; buckets = cache->buckets
 .if $0 == WORD_RETURN				; WORD_RETURN
 	and		r12,r4,r11		; index = selector & mask
@@ -421,6 +433,14 @@ LLoop_$0_$1_$2:
 	cmplw		r8,r5			; if (name != selector)
 .endif
 	bne		LLoop_$0_$1_$2		; goto loop
+
+; Locking idea
+;   clear lock
+;	lwz	r12,isa(r3)	; XXX or r4 or class(r3/4) - use macro
+;	lwz	r12,cache(r12)
+;	neg	r11			; mask = -mask
+;	stwz	r11,mask(r12)		; cache->mask = mask		// store negative to mark free
+
 
 ; cache hit, r10 == method implementation address
 	mr		r12,r10			; copy implementation to r12

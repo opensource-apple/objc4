@@ -35,28 +35,16 @@
 
     #import "objc-config.h"
 
-    #if defined(NeXT_PDO)
-        #define LITERAL_STRING_OBJECTS
-        #import <mach/cthreads_private.h>
-        #if defined(WIN32)
-	    #import <winnt-pdo.h>
-	    #import <ntunix.h>
-	#else
-            #import <pdo.h>	// for pdo_malloc and pdo_free defines
-            #import <sys/time.h>
-        #endif
-    #else
-        #import <pthread.h>
-        #define	mutex_alloc()	(pthread_mutex_t*)calloc(1, sizeof(pthread_mutex_t))
-        #define	mutex_init(m)	pthread_mutex_init(m, NULL)
-        #define	mutex_lock(m)	pthread_mutex_lock(m)
-        #define	mutex_try_lock(m) (! pthread_mutex_trylock(m))
-        #define	mutex_unlock(m)	pthread_mutex_unlock(m)
-        #define	mutex_clear(m)
-        #define	mutex_t		pthread_mutex_t*
-        #define mutex		MUTEX_DEFINE_ERROR
-        #import <sys/time.h>
-    #endif
+    #import <pthread.h>
+    #define	mutex_alloc()	(pthread_mutex_t*)calloc(1, sizeof(pthread_mutex_t))
+    #define	mutex_init(m)	pthread_mutex_init(m, NULL)
+    #define	mutex_lock(m)	pthread_mutex_lock(m)
+    #define	mutex_try_lock(m) (! pthread_mutex_trylock(m))
+    #define	mutex_unlock(m)	pthread_mutex_unlock(m)
+    #define	mutex_clear(m)
+    #define	mutex_t		pthread_mutex_t*
+    #define mutex		MUTEX_DEFINE_ERROR
+    #import <sys/time.h>
 
     #import <stdlib.h>
     #import <stdarg.h>
@@ -111,29 +99,31 @@ OBJC_EXPORT Class *		_getObjcClassRefs(headerType *head, int *nclasses);
 OBJC_EXPORT void *		_getObjcHeaderData(headerType *head, unsigned *size);
 OBJC_EXPORT const char *	_getObjcHeaderName(headerType *head);
 
-#if defined(NeXT_PDO) // GENERIC_OBJ_FILE
-    OBJC_EXPORT ProtocolTemplate ** _getObjcProtocols(headerType *head, int *nprotos);
-    OBJC_EXPORT NXConstantStringTemplate **_getObjcStringObjects(headerType *head, int *nstrs);
-#elif defined(__MACH__)
-    OBJC_EXPORT ProtocolTemplate * _getObjcProtocols(headerType *head, int *nprotos);
-    OBJC_EXPORT NXConstantStringTemplate *_getObjcStringObjects(headerType *head, int *nstrs);
-    OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
-#endif 
+// internal routines for delaying binding
+void _objc_resolve_categories_for_class	(struct objc_class * cls);
+void _objc_bindModuleContainingClass(struct objc_class * cls);
 
-    #define END_OF_METHODS_LIST ((struct objc_method_list*)-1)
+// someday a logging facility
+// ObjC is assigned the range 0xb000 - 0xbfff for first parameter
+#define trace(a, b, c, d) do {} while (0)
 
-    struct header_info
+
+
+OBJC_EXPORT ProtocolTemplate * _getObjcProtocols(headerType *head, int *nprotos);
+OBJC_EXPORT NXConstantStringTemplate *_getObjcStringObjects(headerType *head, int *nstrs);
+OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
+
+#define END_OF_METHODS_LIST ((struct objc_method_list*)-1)
+
+    typedef struct _header_info
     {
       const headerType *	mhdr;
-      Module				mod_ptr;
-      unsigned int			mod_count;
-      unsigned long			image_slide;
-      unsigned int			objcSize;
-    };
-    typedef struct header_info	header_info;
-    OBJC_EXPORT header_info *_objc_headerVector (const headerType * const *machhdrs);
-    OBJC_EXPORT unsigned int _objc_headerCount (void);
-    OBJC_EXPORT void _objc_addHeader (const headerType *header, unsigned long vmaddr_slide);
+      Module			mod_ptr;
+      unsigned int		mod_count;
+      unsigned long		image_slide;
+      struct _header_info *	next;
+    } header_info;
+    OBJC_EXPORT header_info *_objc_headerStart ();
 
     OBJC_EXPORT int _objcModuleCount();
     OBJC_EXPORT const char *_objcModuleNameAtIndex(int i);
@@ -147,7 +137,6 @@ OBJC_EXPORT const char *	_getObjcHeaderName(headerType *head);
     /* initialize */
     OBJC_EXPORT void _sel_resolve_conflicts(headerType * header, unsigned long slide);
     OBJC_EXPORT void _class_install_relationships(Class, long);
-    OBJC_EXPORT void _objc_add_category(Category, int);
     OBJC_EXPORT void *_objc_create_zone(void);
 
     OBJC_EXPORT SEL sel_registerNameNoCopy(const char *str);
@@ -219,7 +208,7 @@ OBJC_EXPORT const char *	_getObjcHeaderName(headerType *head);
     OBJC_EXPORT volatile void _objc_error(id, const char *, va_list);
     OBJC_EXPORT volatile void __objc_error(id, const char *, ...);
     OBJC_EXPORT void _objc_inform(const char *fmt, ...);
-    OBJC_EXPORT void _NXLogError(const char *format, ...);
+    OBJC_EXPORT void _objc_syslog(const char *fmt, ...);
 
     /* magic */
     OBJC_EXPORT Class _objc_getFreedObjectClass (void);
@@ -227,32 +216,10 @@ OBJC_EXPORT const char *	_getObjcHeaderName(headerType *head);
     OBJC_EXPORT void _objc_flush_caches (Class cls);
     
     /* locking */
-    #if defined(NeXT_PDO)
-        #if defined(WIN32)
-            #define MUTEX_TYPE long
-            #define OBJC_DECLARE_LOCK(MUTEX) MUTEX_TYPE MUTEX = 0L;
-        #elif defined(sparc)
-            #define MUTEX_TYPE long
-            #define OBJC_DECLARE_LOCK(MUTEX) MUTEX_TYPE MUTEX = 0L;
-        #elif defined(__alpha__)
-            #define MUTEX_TYPE long
-            #define OBJC_DECLARE_LOCK(MUTEX) MUTEX_TYPE MUTEX = 0L;
-        #elif defined(__hpux__) || defined(hpux)
-            typedef struct { int a; int b; int c; int d; } __mutex_struct;
-            #define MUTEX_TYPE __mutex_struct
-            #define OBJC_DECLARE_LOCK(MUTEX) MUTEX_TYPE MUTEX = { 1, 1, 1, 1 };
-        #else // unknown pdo platform
-            #define MUTEX_TYPE long
-            #define OBJC_DECLARE_LOCK(MUTEX) struct mutex MUTEX = { 0 };
-        #endif // WIN32
-        OBJC_EXPORT MUTEX_TYPE classLock;
-        OBJC_EXPORT MUTEX_TYPE messageLock;
-    #else
-        #define MUTEX_TYPE pthread_mutex_t*
-        #define OBJC_DECLARE_LOCK(MTX) pthread_mutex_t MTX = PTHREAD_MUTEX_INITIALIZER
-        OBJC_EXPORT pthread_mutex_t classLock;
-        OBJC_EXPORT pthread_mutex_t messageLock;
-    #endif // NeXT_PDO
+    #define MUTEX_TYPE pthread_mutex_t*
+    #define OBJC_DECLARE_LOCK(MTX) pthread_mutex_t MTX = PTHREAD_MUTEX_INITIALIZER
+    OBJC_EXPORT pthread_mutex_t classLock;
+    OBJC_EXPORT pthread_mutex_t messageLock;
 
     OBJC_EXPORT int _objc_multithread_mask;
 
@@ -266,9 +233,6 @@ OBJC_EXPORT const char *	_getObjcHeaderName(headerType *head);
     } FixupEntry;
 
     static inline int selEqual( SEL s1, SEL s2 ) {
-       OBJC_EXPORT int rocketLaunchingDebug;
-       if ( rocketLaunchingDebug )
-          checkUniqueness(s1, s2);
        return (s1 == s2);
     }
 
@@ -276,29 +240,7 @@ OBJC_EXPORT const char *	_getObjcHeaderName(headerType *head);
             #define OBJC_LOCK(MUTEX) 	mutex_lock (MUTEX)
             #define OBJC_UNLOCK(MUTEX)	mutex_unlock (MUTEX)
             #define OBJC_TRYLOCK(MUTEX)	mutex_try_lock (MUTEX)
-        #elif defined(NeXT_PDO)
-            #if !defined(WIN32)
-                /* Where are these defined?  NT should probably be using them! */
-                OBJC_EXPORT void _objc_private_lock(MUTEX_TYPE*);
-                OBJC_EXPORT void _objc_private_unlock(MUTEX_TYPE*);
-
-                /* I don't think this should be commented out for NT, should it? */
-                #define OBJC_LOCK(MUTEX)		\
-                    do {if (!_objc_multithread_mask)	\
-                    _objc_private_lock(MUTEX);} while(0)
-                #define OBJC_UNLOCK(MUTEX)		\
-                    do {if (!_objc_multithread_mask)	\
-                    _objc_private_unlock(MUTEX);} while(0)
-            #else
-                #define OBJC_LOCK(MUTEX)		\
-                    do {if (!_objc_multithread_mask)	\
-                    if( *MUTEX == 0 ) *MUTEX = 1;} while(0)
-                #define OBJC_UNLOCK(MUTEX)		\
-                    do {if (!_objc_multithread_mask)	\
-                    *MUTEX = 0;} while(0)
-            #endif // WIN32
-
-        #else // not NeXT_PDO
+        #else // not OBJC_COLLECTING_CACHE
             #define OBJC_LOCK(MUTEX)			\
               do					\
                 {					\
@@ -320,28 +262,7 @@ OBJC_EXPORT const char *	_getObjcHeaderName(headerType *head);
 #define SEG_OBJC        "__OBJC"        /* objective-C runtime segment */
 #endif
 
-#if defined(NeXT_PDO)
-    // GENERIC_OBJ_FILE
-    void send_load_message_to_category(Category cat, void *header_addr); 
-    void send_load_message_to_class(Class cls, void *header_addr);
-#endif
 
-#if !defined(__MACH__)
-typedef struct _objcSectionStruct {
-    void     **data;                   /* Pointer to array  */
-    int      count;                    /* # of elements     */
-    int      size;                     /* sizeof an element */
-} objcSectionStruct;
-
-typedef struct _objcModHeader {
-    char *            name;
-    objcSectionStruct Modules;
-    objcSectionStruct Classes;
-    objcSectionStruct Methods;
-    objcSectionStruct Protocols;
-    objcSectionStruct StringObjects;
-} objcModHeader;
-#endif
 
 
 static __inline__ int _objc_strcmp(const unsigned char *s1, const unsigned char *s2) {

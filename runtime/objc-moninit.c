@@ -28,8 +28,8 @@
 unsigned long *
 moninitobjc(unsigned long moncount_addr)
 {
-    extern void _NXLogError(const char *format, ...);
-    _NXLogError ("moninitobjc is obsoleted, refer to documentation for how to do profiling\n");
+    extern void _objc_inform(const char *format, ...);
+    _objc_inform ("moninitobjc is obsoleted, refer to documentation for how to do profiling\n");
     return (0);
 }
 

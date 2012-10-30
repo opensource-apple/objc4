@@ -26,9 +26,6 @@
 	Created by Bertrand Serlet, August 1990
  */
 
-#if defined(WIN32)
-    #include <winnt-pdo.h>
-#endif
 
 #import "objc-private.h"
 #import "maptable.h"
@@ -39,9 +36,6 @@
 #import <objc/Object.h>
 #import <objc/hashtable2.h>
 
-#if defined(NeXT_PDO)
-    #import <pdo.h>
-#endif
 
 /******		Macros and utilities	****************************/
 
@@ -111,7 +105,7 @@ NXMapTable *NXCreateMapTableFromZone(NXMapTablePrototype prototype, unsigned cap
     NXMapTablePrototype		*proto;
     if (! prototypes) prototypes = NXCreateHashTable(protoPrototype, 0, NULL);
     if (! prototype.hash || ! prototype.isEqual || ! prototype.free || prototype.style) {
-	_NXLogError("*** NXCreateMapTable: invalid creation parameters\n");
+	_objc_syslog("*** NXCreateMapTable: invalid creation parameters\n");
 	return NULL;
     }
     proto = NXHashGet(prototypes, &prototype); 
@@ -224,7 +218,7 @@ static void _NXMapRehash(NXMapTable *table) {
 	pair++;
     }
     if (oldCount != table->count)
-	_NXLogError("*** maptable: count differs after rehashing; probably indicates a broken invariant: there are x and y such as isEqual(x, y) is TRUE but hash(x) != hash (y)\n");
+	_objc_syslog("*** maptable: count differs after rehashing; probably indicates a broken invariant: there are x and y such as isEqual(x, y) is TRUE but hash(x) != hash (y)\n");
     free(pairs); 
 }
 
@@ -237,7 +231,7 @@ void *NXMapInsert(NXMapTable *table, const void *key, const void *value) {
     unsigned	index = bucketOf(table, key);
     MapPair	*pair = pairs + index;
     if (key == NX_MAPNOTAKEY) {
-	_NXLogError("*** NXMapInsert: invalid key: -1\n");
+	_objc_syslog("*** NXMapInsert: invalid key: -1\n");
 	return NULL;
     }
     mapInsert ++;
@@ -287,7 +281,7 @@ void *NXMapInsert(NXMapTable *table, const void *key, const void *value) {
 	    }
 	}
 	/* no room: can't happen! */
-	_NXLogError("**** NXMapInsert: bug\n");
+	_objc_syslog("**** NXMapInsert: bug\n");
 	return NULL;
     }
 }
@@ -315,7 +309,7 @@ void *NXMapRemove(NXMapTable *table, const void *key) {
 	}
     }
     if (! found) return NULL;
-    if (found != 1) _NXLogError("**** NXMapRemove: incorrect table\n");
+    if (found != 1) _objc_syslog("**** NXMapRemove: incorrect table\n");
     /* remove then reinsert */
     {
 	MapPair	buffer[16];
@@ -330,7 +324,7 @@ void *NXMapRemove(NXMapTable *table, const void *key) {
 	    index2 = nextIndex(table, index2);
 	}
 	table->count -= chain;
-	if (auxnb != chain-1) _NXLogError("**** NXMapRemove: bug\n");
+	if (auxnb != chain-1) _objc_syslog("**** NXMapRemove: bug\n");
 	while (auxnb--) NXMapInsert(table, aux[auxnb].key, aux[auxnb].value);
 	if (chain > 16) free(aux);
     }
