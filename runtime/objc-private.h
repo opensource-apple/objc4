@@ -328,5 +328,8 @@ typedef struct {
 // CoreFoundation-only process from three to two. See #3857126 and #3857136.
 #define NOBSS __attribute__((section("__DATA,__data")))
 
+// +load implementation
+#define CLS_HAS_LOAD_METHOD	0x8000L
+
 #endif /* _OBJC_PRIVATE_H_ */
 

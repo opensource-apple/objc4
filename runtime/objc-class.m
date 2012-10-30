@@ -193,6 +193,7 @@
  * CLS_FROM_BUNDLE: class load
  * CLS_HAS_CXX_STRUCTORS: compile-time and class load
  * CLS_NO_METHOD_ARRAY: class load and messaging
+ * CLS_HAS_LOAD_METHOD: class load
  * 
  * CLS_INITIALIZED and CLS_INITIALIZING have additional thread-safety 
  * constraints to support thread-safe +initialize. See "Thread safety 

@@ -84,6 +84,7 @@
  * 
  * Read all classes in all new images. 
  *   Add them all to unconnected_class_hash. 
+ *   Note any +load implementations before categories are attached.
  *   Fix up any pended classrefs referring to them.
  *   Attach any pending categories.
  * Read all categories in all new images. 
@@ -128,6 +129,11 @@
  * This constraint is in addition to superclass order. Some +load 
  * implementations expect to use another class in a linked-to library, 
  * even if the two classes don't share a direct superclass relationship.
+ * 
+ * Correctness: all classes are scanned for +load before any categories 
+ * are attached. Otherwise, if a category implements +load and its class 
+ * has no class methods, the class's +load scan would find the category's 
+ * +load method, which would then be called twice.
  * 
  **********************************************************************/
 
@@ -1311,9 +1317,11 @@ static void add_class_to_loadable_list(struct objc_class *cls)
     IMP method = NULL;
     struct objc_method_list *mlist;
     
-    mlist = get_base_method_list(cls->isa);
-    if (mlist) {
-        method = lookupNamedMethodInMethodList (mlist, "load");
+    if (cls->isa->info & CLS_HAS_LOAD_METHOD) {
+        mlist = get_base_method_list(cls->isa);
+        if (mlist) {
+            method = lookupNamedMethodInMethodList (mlist, "load");
+        }
     }
     // Don't bother if cls has no +load method
     if (!method) return;
@@ -1785,6 +1793,7 @@ static BOOL connect_class(struct objc_class *cls)
 /***********************************************************************
 * _objc_read_classes_from_image.
 * Read classes from the given image, perform assorted minor fixups, 
+*   scan for +load implementation.
 * Does not connect classes to superclasses. 
 * Does attach pended categories to the classes.
 * Adds all classes to unconnected_class_hash. class_hash is unchanged.
@@ -1823,6 +1832,7 @@ static void	_objc_read_classes_from_image(header_info *hi)
         for (index = 0; index < mods[midx].symtab->cls_def_cnt; index += 1)
         {
             struct objc_class *	newCls;
+            struct objc_method_list *mlist;
 
             // Locate the class description pointer
             newCls = mods[midx].symtab->defs[index];
@@ -1844,6 +1854,13 @@ static void	_objc_read_classes_from_image(header_info *hi)
             // methodLists is NULL or a single list, not an array
             newCls->info |= CLS_NO_METHOD_ARRAY;
             newCls->isa->info |= CLS_NO_METHOD_ARRAY;
+
+            // Check for +load implementation before categories are attached
+            if ((mlist = get_base_method_list(newCls->isa))) {
+                if (lookupNamedMethodInMethodList (mlist, "load")) {
+                    newCls->isa->info |= CLS_HAS_LOAD_METHOD;
+                }
+            }
             
             // Install into unconnected_class_hash
             OBJC_LOCK(&classLock);

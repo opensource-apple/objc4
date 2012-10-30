@@ -71,6 +71,8 @@ struct objc_class {
 #define CLS_HAS_CXX_STRUCTORS	0x2000L
 // Lazy method list arrays
 #define CLS_NO_METHOD_ARRAY	0x4000L
+// +load implementation
+// #define CLS_HAS_LOAD_METHOD	0x8000L
 
 
 /* 
