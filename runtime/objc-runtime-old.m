@@ -872,6 +872,39 @@ static void really_connect_class(struct old_class *cls,
     // Connect superclass pointers.
     set_superclass(cls, supercls);
 
+    // Update GC layouts
+    // For paranoia, this is a conservative update: only non-strong -> strong
+    // is corrected. Any bugs will be leaks instead of crashes. 
+    // rdar://5791689 covers any less-paranoid more-complete fix.
+    if (UseGC  &&  supercls  &&  
+        (cls->info & CLS_EXT)  &&  (supercls->info & CLS_EXT)) 
+    {
+        BOOL layoutsChanged = NO;
+        layout_bitmap ivarBitmap = 
+            layout_bitmap_create(cls->ivar_layout, 
+                                 cls->instance_size, 
+                                 cls->instance_size, NO);
+
+        layout_bitmap superBitmap = 
+            layout_bitmap_create(supercls->ivar_layout, 
+                                 supercls->instance_size, 
+                                 supercls->instance_size, NO);
+        layoutsChanged |= layout_bitmap_or(ivarBitmap, superBitmap, cls->name);
+        layout_bitmap_free(superBitmap);
+                
+        if (layoutsChanged) {
+            // Rebuild layout strings. 
+            if (PrintIvars) {
+                _objc_inform("IVARS: gc layout changed for class %s (super %s)",
+                             cls->name, supercls->name);
+            }
+            cls->ivar_layout = layout_string_create(ivarBitmap);
+        }
+        
+        layout_bitmap_free(ivarBitmap);
+    }
+
+    // Done!
     cls->info |= CLS_CONNECTED;
 
     OBJC_LOCK(&classLock);

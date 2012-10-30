@@ -278,6 +278,36 @@ layout_string_create(layout_bitmap bits)
 }
 
 
+/***********************************************************************
+* layout_bitmap_or
+* Set dst=dst|src.
+* dst must be at least as long as src.
+* Returns YES if any of dst's bits were changed.
+**********************************************************************/
+__private_extern__ BOOL
+layout_bitmap_or(layout_bitmap dst, layout_bitmap src, const char *msg)
+{
+    if (dst.bitCount < src.bitCount) {
+      _objc_fatal("layout bitmap too short%s%s", msg ? ": " : "", msg ?: "");
+    }
+
+    BOOL changed = NO;
+    
+    // fixme optimize for byte/word at a time
+    size_t bit;
+    for (bit = 0; bit < src.bitCount; bit++) {
+        int dstset = dst.bits[bit/8] & (1 << (bit % 8));
+        int srcset = src.bits[bit/8] & (1 << (bit % 8));
+        if (srcset  &&  !dstset) {
+            changed = YES;
+            dst.bits[bit/8] |= 1 << (bit % 8);
+        }
+    }
+
+    return changed;
+}
+
+
 __private_extern__ void
 layout_bitmap_set_ivar(layout_bitmap bits, const char *type, size_t offset)
 {

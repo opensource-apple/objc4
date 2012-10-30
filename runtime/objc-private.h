@@ -576,6 +576,8 @@ extern void layout_bitmap_grow(layout_bitmap *bits, size_t newCount);
 extern void layout_bitmap_slide(layout_bitmap *bits, size_t oldPos, size_t newPos);
 extern BOOL layout_bitmap_splat(layout_bitmap dst, layout_bitmap src, 
                                 size_t oldSrcInstanceSize);
+extern BOOL layout_bitmap_or(layout_bitmap dst, layout_bitmap src, const char *msg);
+
 
 // fixme runtime
 extern id look_up_class(const char *aClassName, BOOL includeUnconnected, BOOL includeClassHandler);
