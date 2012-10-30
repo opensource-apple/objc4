@@ -73,7 +73,7 @@
  * (5) is not yet eligible for +load.
  * 
  * Image mapping is NOT CURRENTLY THREAD-SAFE with respect to just about 
- *  *  * anything. Image mapping IS RE-ENTRANT in several places: superclass 
+ * anything. Image mapping IS RE-ENTRANT in several places: superclass 
  * lookup may cause ZeroLink to load another image, and +load calls may 
  * cause dyld to load another image.
  * 
@@ -82,7 +82,6 @@
  * Read all classes in all new images. 
  *   Add them all to unconnected_class_hash. 
  *   Note any +load implementations before categories are attached.
- *   Fix up any pended classrefs referring to them.
  *   Attach any pending categories.
  * Read all categories in all new images. 
  *   Attach categories whose parent class exists (connected or not), 
@@ -95,6 +94,7 @@
  *   If the superclass is connected:
  *     connect the class
  *     mark the class eligible for +load, if implemented
+ *     fix up any pended classrefs referring to the class
  *     connect any pended subclasses of the class
  * Resolve selector refs and class refs in all new images.
  *   Class refs whose classes still do not exist are pended.
@@ -131,6 +131,11 @@
  * are attached. Otherwise, if a category implements +load and its class 
  * has no class methods, the class's +load scan would find the category's 
  * +load method, which would then be called twice.
+ *
+ * Correctness: pended class refs are not fixed up until the class is 
+ * connected. Classes with missing weak superclasses remain unconnected. 
+ * Class refs to classes with missing weak superclasses must be NULL. 
+ * Therefore class refs to unconnected classes must remain un-fixed.
  * 
  **********************************************************************/
 
@@ -933,6 +938,9 @@ static void really_connect_class(struct old_class *cls,
 
     mutex_unlock(&classLock);
  
+    // Fix up pended class refs to this class, if any
+    resolve_references_to_class(cls);
+
     // Connect newly-connectable subclasses
     resolve_subclasses_of_class(cls);
 
@@ -1226,9 +1234,6 @@ static void _objc_read_classes_from_image(header_info *hi)
             mutex_unlock(&classLock);
 
             if (!rejected) {
-                // Fix up pended class refs to this class, if any
-                resolve_references_to_class(newCls);
-
                 // Attach pended categories for this class, if any
                 resolve_categories_for_class(newCls);
             }
@@ -1308,16 +1313,17 @@ static void fix_class_ref(struct old_class **ref, const char *name, BOOL isMeta)
     struct old_class *cls;
 
     // Get pointer to class of this name
-    // YES unconnected, YES class loader
-    cls = _class_asOld((Class)look_up_class(name, YES, YES));
+    // NO unconnected, YES class loader
+    // (real class with weak-missing superclass is unconnected now)
+    cls = _class_asOld((Class)look_up_class(name, NO, YES));
     if (cls) {
         // Referenced class exists. Fix up the reference.
         *ref = isMeta ? cls->isa : cls;
     } else {
-        // Referenced class does not exist yet. Insert a placeholder 
-        // class and fix up the reference later.
+        // Referenced class does not exist yet. Insert NULL for now 
+        // (weak-linking) and fix up the reference if the class arrives later.
         pendClassReference (ref, name, isMeta);
-        *ref = (struct old_class *)_class_getNonexistentObjectClass();
+        *ref = NULL;
     }
 }
 
@@ -1354,7 +1360,7 @@ static void removePendingReferences(struct old_class **refs, size_t count)
     if (!pendingClassRefsMap) return;
 
     // Search the pending class ref table for class refs in this range.
-    // The class refs may have already been stomped with nonexistentClass, 
+    // The class refs may have already been stomped with NULL, 
     // so there's no way to recover the original class name.
 
     {    
@@ -2115,7 +2121,7 @@ static void rependClassReferences(struct old_class **refs, size_t count,
         if ((uintptr_t)(refs[i]) >= start  &&  (uintptr_t)(refs[i]) < end) {
             pendClassReference(&refs[i], refs[i]->name, 
                                (refs[i]->info & CLS_META) ? YES : NO);
-            refs[i] = (struct old_class *)_class_getNonexistentObjectClass();
+            refs[i] = NULL;
         }
     }
 }

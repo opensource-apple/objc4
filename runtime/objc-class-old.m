@@ -47,20 +47,6 @@ static const struct old_class freedObjectClass =
     NULL				// protocols
 };
 
-static const struct old_class nonexistentObjectClass =
-{
-    Nil,				// isa
-    Nil,				// super_class
-    "NONEXISTENT(id)",		// name
-    0,				// version
-    0,				// info
-    0,				// instance_size
-    NULL,				// ivars
-    NULL,				// methodLists
-    (Cache) &_objc_empty_cache,		// cache
-    NULL				// protocols
-};
-
 
 /***********************************************************************
 * _class_getFreedObjectClass.  Return a pointer to the dummy freed
@@ -71,18 +57,6 @@ static const struct old_class nonexistentObjectClass =
 static Class _class_getFreedObjectClass(void)
 {
     return (Class)&freedObjectClass;
-}
-
-
-/***********************************************************************
-* _class_getNonexistentClass.  Return a pointer to the dummy nonexistent
-* object class.  This is used when, for example, mapping the class
-* refs for an image, and the class can not be found, so that we can
-* catch later uses of the non-existent class.
-**********************************************************************/
-__private_extern__ Class _class_getNonexistentObjectClass(void)
-{
-    return (Class)&nonexistentObjectClass;
 }
 
 
@@ -349,15 +323,6 @@ static void _freedHandler(id obj, SEL sel)
                   sel_getName(sel), obj);
 }
 
-/***********************************************************************
-* _nonexistentHandler.
-**********************************************************************/
-static void _nonexistentHandler(id obj, SEL sel)
-{
-    __objc_error (obj, "message %s sent to non-existent object=%p", 
-                  sel_getName(sel), obj);
-}
-
 
 /***********************************************************************
 * ABI-specific lookUpMethod helpers.
@@ -377,10 +342,6 @@ __private_extern__ IMP prepareForMethodLookup(Class cls, SEL sel, BOOL init)
     // Check for freed class
     if (cls == _class_getFreedObjectClass())
         return (IMP) _freedHandler;
-
-    // Check for nonexistent class
-    if (cls == _class_getNonexistentObjectClass())
-        return (IMP) _nonexistentHandler;
 
     if (init  &&  !_class_isInitialized(cls)) {
         _class_initialize (cls);

@@ -831,7 +831,7 @@ static int _collecting_in_critical(void)
     }
 
     // Deallocate the thread list
-    vm_deallocate (mach_task_self (), (vm_address_t) threads, sizeof(threads) * number);
+    vm_deallocate (mach_task_self (), (vm_address_t) threads, sizeof(threads[0]) * number);
 
     // Return our finding
     return result;

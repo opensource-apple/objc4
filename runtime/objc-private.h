@@ -824,7 +824,6 @@ static inline struct old_class *_class_asOld(Class cls) { return (struct old_cla
 static inline struct old_category *_category_asOld(Category cat) { return (struct old_category *)cat; }
 
 extern void unload_class(struct old_class *cls);
-Class _class_getNonexistentObjectClass(void);
 #endif
 
 extern BOOL object_cxxConstruct(id obj);

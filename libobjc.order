@@ -120,7 +120,6 @@ _NXNextHashState
 _objc_msgSend
 __class_lookupMethodAndLoadCache
 __class_getFreedObjectClass
-__class_getNonexistentObjectClass
 __class_isInitialized
 __class_initialize
 __class_isMetaClass

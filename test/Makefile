@@ -24,7 +24,7 @@ COMPLEX_BUILD_TESTS = cacheflush future unload ivarSlide ivarSlidexx \
 
 # a "complex test" has a dedicated testname run rule below
 COMPLEX_RUN_TESTS = gcenforcer_noobjc gcenforcer_nogc gcenforcer_supportsgc \
-	gcenforcer_requiresgc
+	gcenforcer_requiresgc weak-missing weak-not-missing
 
 # `make fail` just fails
 FAIL_TESTS = fail
@@ -172,6 +172,15 @@ future0.out: future0.m future.h test.h Makefile
 future2.out: future2.m future.h future0.out test.h Makefile
 	@ $(CC) -dynamiclib future2.m future0.out -o future2.out $(LIBS)
 
+weak.out: weak.m weak2.m weak.h test.h Makefile
+	@ $(CC) weak2.m -dynamiclib -o libweak.dylib $(LIBS)
+	@ $(CC) weak2.m -DEMPTY= -dynamiclib -o libweak_empty.dylib $(LIBS)
+	@ $(CC) weak.m -L. -weak-lweak -o weak.out $(LIBS)
+
+weak-not-missing: weak.out
+	@ $(RUN) ./weak.out $(ERR_CHECK) weak-not-missing $(EAT_ERR)
+weak-missing: weak.out
+	@ DYLD_IMAGE_SUFFIX=_empty $(RUN) ./weak.out $(ERR_CHECK) weak-missing $(EAT_ERR)
 
 CONCURRENT_IN=cc1 cc2 cc3 cc4 cc5 cc6 cc7 cc8 cc9 cc10 cc11 cc12 cc13 cc14 cc15
 CONCURRENT_DYLIBS=$(addsuffix .out,$(CONCURRENT_IN))
