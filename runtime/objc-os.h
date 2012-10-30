@@ -599,7 +599,7 @@ typedef pthread_mutex_t mutex_t;
 extern int DebuggerMode;
 extern void gdb_objc_debuggerModeFailure(void);
 extern BOOL isManagedDuringDebugger(void *lock);
-extern BOOL isLockedDuringDebugger(mutex_t *lock);
+extern BOOL isLockedDuringDebugger(void *lock);
 
 static inline int _mutex_lock_nodebug(mutex_t *m) { 
     if (DebuggerMode  &&  isManagedDuringDebugger(m)) {

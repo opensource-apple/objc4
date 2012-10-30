@@ -463,7 +463,7 @@ arr_clear_deallocating(weak_table_t *weak_table, id referent) {
 
 
 PRIVATE_EXTERN id weak_register_no_lock(weak_table_t *weak_table, id referent, id *referrer) {
-    if (referent) {
+    if (referent && !OBJC_IS_TAGGED_PTR(referent)) {
         // ensure that the referenced object is viable
         BOOL (*allowsWeakReference)(id, SEL) = (BOOL(*)(id, SEL))
         class_getMethodImplementation(object_getClass(referent), 
@@ -509,6 +509,7 @@ arr_read_weak_reference(weak_table_t *weak_table, id *referrer) {
     // find entry and mark that it needs retaining
     {
         referent = *referrer;
+        if (OBJC_IS_TAGGED_PTR(referent)) return referent;
         weak_entry_t *entry;
         if (referent == NULL || !(entry = weak_entry_for_referent(weak_table, referent))) {
             *referrer = NULL;

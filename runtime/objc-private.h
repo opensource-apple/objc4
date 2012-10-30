@@ -359,6 +359,8 @@ extern void _rwlock_assert_unlocked_debug(rwlock_t *l, const char *name);
 
 #endif
 
+extern bool noSideTableLocksHeld(void);
+
 #define rwlock_unlock(m, s)                           \
     do {                                              \
         if ((s) == RDONLY) rwlock_unlock_read(m);     \
