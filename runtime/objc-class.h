@@ -65,47 +65,12 @@ struct objc_class {
 #define CLS_JAVA_CLASS		0x400L
 // thread-safe +initialize
 #define CLS_INITIALIZING	0x800
-
-/*
- * (true as of 2001-9-24)
- * Thread-safety note: changes to these flags are not atomic, so 
- * the only thing preventing lost updates is the timing of the changes.
- *
- * As long as the following are isolated from each other for any one class, 
- * nearly all flag updates will be safe:
- * - compile-time
- * - loading in one thread (not including +load) without messaging
- * - initializing in one thread with messaging from that thread only
- * - multi-threaded messaging with method caching
- *
- * The current code doesn't protect loading yet.
- *
- * Times when the flags may change:
- * CLS_CLASS: compile-time, hand-built classes
- * CLS_META: compile time, hand-built classes
- * CLS_INITIALIZED: initialize
- * CLS_POSING: unsafe, but posing has other thread-safety problems
- * CLS_MAPPED: compile-time
- * CLS_FLUSH_CACHE: messaging
- * CLS_GROW_CACHE: messaging
- *   FLUSH_CACHE and GROW_CACHE are protected from each other by the 
- *   cacheUpdateLock.
- * CLS_NEED_BIND: load, initialize
- * CLS_METHOD_ARRAY: load
- * CLS_JAVA_HYBRID: hand-built classes
- * CLS_JAVA_CLASS: hand-built classes, initialize
- * CLS_INITIALIZING: initialize
- *
- * The only unsafe updates are:
- * - posing (unsafe anyway)
- * - hand-built classes (including JavaBridge classes)
- *   There is a short time between objc_addClass inserts the new class 
- *   into the class_hash and the builder setting the right flags. 
- *   A thread looking at the class_hash could send a message to the class 
- *   and trigger initialization, and the changes to the initialization 
- *   flags and the hand-adjusted flags could collide. 
- *   Solution: don't do that. 
- */
+// bundle unloading
+#define CLS_FROM_BUNDLE		0x1000L
+// C++ ivar support
+#define CLS_HAS_CXX_STRUCTORS	0x2000L
+// Lazy method list arrays
+#define CLS_NO_METHOD_ARRAY	0x4000L
 
 
 /* 
@@ -169,7 +134,11 @@ struct objc_method_list {
 
 /* Protocol support */
 
+#ifdef __OBJC__
 @class Protocol;
+#else
+typedef struct objc_object Protocol;
+#endif
 
 struct objc_protocol_list {
 	struct objc_protocol_list *next;

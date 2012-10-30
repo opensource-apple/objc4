@@ -31,17 +31,41 @@
  */
 
 #include <objc/objc.h>
-#include <CoreFoundation/CFSet.h>
 #import "objc-private.h"
+#import "objc-auto.h"
+#import "objc-rtp.h"
+#import "objc-sel-set.h"
 
 // NUM_BUILTIN_SELS, LG_NUM_BUILTIN_SELS, _objc_builtin_selectors
 #include "objc-sel-table.h"
 
 #define NUM_NONBUILTIN_SELS 3500
-// Panther CFSet grows at 3571, 5778, 9349. 
+// objc_sel_set grows at 3571, 5778, 9349. 
 // Most apps use 2000..7000 extra sels. Most apps will grow zero to two times.
 
 static const char *_objc_empty_selector = "";
+static OBJC_DECLARE_LOCK(_objc_selector_lock);
+static struct __objc_sel_set *_objc_selectors = NULL;
+
+
+static inline int ignore_selector(const char *sel)
+{
+    // force retain/release/autorelease to be a constant value when GC is on
+    // note that the selectors for "Protocol" are registered before we can
+    // see the executable image header that sets _WantsGC, so we can't cache
+    // this result (sigh).
+    return (UseGC &&
+            (  (sel[0] == 'r' && sel[1] == 'e' &&
+                (_objc_strcmp(&sel[2], "lease") == 0 || 
+                 _objc_strcmp(&sel[2], "tain") == 0 ||
+                 _objc_strcmp(&sel[2], "tainCount") == 0 ))
+               ||
+               (_objc_strcmp(sel, "dealloc") == 0)
+               || 
+               (sel[0] == 'a' && sel[1] == 'u' && 
+                _objc_strcmp(&sel[2], "torelease") == 0)));
+}
+
 
 static SEL _objc_search_builtins(const char *key) {
     int c, idx, lg = LG_NUM_BUILTIN_SELS;
@@ -50,10 +74,12 @@ static SEL _objc_search_builtins(const char *key) {
 #if defined(DUMP_SELECTORS)
     if (NULL != key) printf("\t\"%s\",\n", key);
 #endif
-    /* The builtin table contains only sels starting with '[A-z]', including '_' */
+    /* The builtin table contains only sels starting with '[.A-z]', including '_' */
     if (!key) return (SEL)0;
     if ('\0' == *key) return (SEL)_objc_empty_selector;
-    if (*key < 'A' || 'z' < *key) return (SEL)0;
+    if ((*key < 'A' || 'z' < *key)  &&  *key != '.') return (SEL)0;
+    if (ignore_selector(key)) return (SEL)kIgnore;
+
     s = _objc_builtin_selectors[-1 + (1 << lg)];
     c = _objc_strcmp(s, key);
     if (c == 0) return (SEL)s;
@@ -67,19 +93,6 @@ static SEL _objc_search_builtins(const char *key) {
     return (SEL)0;
 }
 
-static OBJC_DECLARE_LOCK(_objc_selector_lock);
-static CFMutableSetRef _objc_selectors = NULL;
-
-static Boolean _objc_equal_selector(const void *v1, const void *v2) {
-    if (v1 == v2) return TRUE;
-    if ((v1 == NULL) || (v2 == NULL)) return FALSE;
-    return _objc_strcmp((const unsigned char *)v1, (const unsigned char *)v2) == 0;
-}
-
-static CFHashCode _objc_hash_selector(const void *v) {
-    if (!v) return 0;
-    return (CFHashCode)_objc_strhash(v);
-}
 
 const char *sel_getName(SEL sel) {
     return sel ? (const char *)sel : "<null selector>";
@@ -88,56 +101,52 @@ const char *sel_getName(SEL sel) {
 
 BOOL sel_isMapped(SEL name) {
     SEL result;
-    const void *value;
     
     if (NULL == name) return NO;
     result = _objc_search_builtins((const char *)name);
     if ((SEL)0 != result) return YES;
     OBJC_LOCK(&_objc_selector_lock);
-    if (_objc_selectors && CFSetGetValueIfPresent(_objc_selectors, name, &value)) {
-        result = (SEL)value;
+    if (_objc_selectors) {
+        result = __objc_sel_set_get(_objc_selectors, name);
     }
     OBJC_UNLOCK(&_objc_selector_lock);
     return ((SEL)0 != (SEL)result) ? YES : NO;
 }
 
-// CoreFoundation private API
-extern void _CFSetSetCapacity(CFMutableSetRef set, CFIndex cap);
-
-static SEL __sel_registerName(const char *name, int lockAndCopy) {
+static SEL __sel_registerName(const char *name, int lock, int copy) {
     SEL result = 0;
-    const void *value;
+
     if (NULL == name) return (SEL)0;
     result = _objc_search_builtins(name);
-    if ((SEL)0 != result) return result;
+    if (result != NULL) return result;
     
-    if (lockAndCopy) OBJC_LOCK(&_objc_selector_lock);
-    if (!_objc_selectors || !CFSetGetValueIfPresent(_objc_selectors, name, &value)) {
-	if (!_objc_selectors) {
-	    CFSetCallBacks cb = {0, NULL, NULL, NULL,
-		_objc_equal_selector, _objc_hash_selector};
-	    _objc_selectors = CFSetCreateMutable(kCFAllocatorDefault, 0, &cb);
-	    _CFSetSetCapacity(_objc_selectors, NUM_NONBUILTIN_SELS);
-	    CFSetAddValue(_objc_selectors, (void *)NULL);
-	}
-	//if (lockAndCopy > 1) printf("registering %s for sel_getUid\n",name);
-	value = lockAndCopy ? strdup(name) : name;
-	CFSetAddValue(_objc_selectors, (void *)value);
+    if (lock) OBJC_LOCK(&_objc_selector_lock);
+
+    if (_objc_selectors) {
+        result = __objc_sel_set_get(_objc_selectors, (SEL)name);
+    }
+    if (result == NULL) {
+        if (!_objc_selectors) {
+            _objc_selectors = __objc_sel_set_create(NUM_NONBUILTIN_SELS);
+        }
+        result = (SEL)(copy ? _strdup_internal(name) : name);
+        __objc_sel_set_add(_objc_selectors, result);
 #if defined(DUMP_UNKNOWN_SELECTORS)
-	printf("\t\"%s\",\n", value);
+        printf("\t\"%s\",\n", name);
 #endif
     }
-    result = (SEL)value;
-    if (lockAndCopy) OBJC_UNLOCK(&_objc_selector_lock);
+
+    if (lock) OBJC_UNLOCK(&_objc_selector_lock);
     return result;
 }
 
+
 SEL sel_registerName(const char *name) {
-    return __sel_registerName(name, 1);
+    return __sel_registerName(name, 1, 1);     // YES lock, YES copy
 }
 
-__private_extern__ SEL sel_registerNameNoCopyNoLock(const char *name) {
-    return __sel_registerName(name, 0);
+__private_extern__ SEL sel_registerNameNoLock(const char *name, BOOL copy) {
+    return __sel_registerName(name, 0, copy);  // NO lock, maybe copy
 }
 
 __private_extern__ void sel_lock(void)
@@ -156,5 +165,5 @@ __private_extern__ void sel_unlock(void)
 // did not check for NULL, so, in fact, never return NULL
 //
 SEL sel_getUid(const char *name) {
-    return __sel_registerName(name, 2);
+    return __sel_registerName(name, 2, 1);  // YES lock, YES copy
 }

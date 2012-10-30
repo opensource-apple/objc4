@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <pthread.h>
+#include <errno.h>
 #include <AssertMacros.h>
 
 #include "objc-sync.h"
@@ -161,13 +162,17 @@ done:
 int objc_sync_enter(id obj)
 {
     int result = OBJC_SYNC_SUCCESS;
-    
-    SyncData* data = id2data(obj, ACQUIRE);
-    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_INITIALIZED, "id2data failed");
+
+    if (obj) {
+        SyncData* data = id2data(obj, ACQUIRE);
+        require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_INITIALIZED, "id2data failed");
 	
-    result = pthread_mutex_lock(&data->mutex);
-    require_noerr_string(result, done, "pthread_mutex_lock failed");
-            	
+        result = pthread_mutex_lock(&data->mutex);
+        require_noerr_string(result, done, "pthread_mutex_lock failed");
+    } else {
+        // @synchronized(nil) does nothing
+    }
+
 done: 
     return result;
 }
@@ -179,11 +184,15 @@ int objc_sync_exit(id obj)
 {
     int result = OBJC_SYNC_SUCCESS;
     
-    SyncData* data = id2data(obj, RELEASE); 
-    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR, "id2data failed");
-    
-    result = pthread_mutex_unlock(&data->mutex);
-    require_noerr_string(result, done, "pthread_mutex_unlock failed");
+    if (obj) {
+        SyncData* data = id2data(obj, RELEASE); 
+        require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR, "id2data failed");
+        
+        result = pthread_mutex_unlock(&data->mutex);
+        require_noerr_string(result, done, "pthread_mutex_unlock failed");
+    } else {
+        // @synchronized(nil) does nothing
+    }
 	
 done:
     if ( result == EPERM )

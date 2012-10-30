@@ -27,17 +27,12 @@
 #import "objc-private.h"
 #import <mach-o/ldsyms.h>
 #import <mach-o/dyld.h>
+#import <mach-o/getsect.h>
 #include <string.h>
 #include <stdlib.h>
 
 #import <crt_externs.h>
 
-/* prototype coming soon to <mach-o/getsect.h> */
-extern char *getsectdatafromheader(
-    struct mach_header *mhp,
-    char *segname,
-    char *sectname,
-    int *size);
 
 /* Returns an array of all the objc headers in the executable
  * Caller is responsible for freeing.
@@ -51,9 +46,9 @@ headerType **_getObjcHeaders()
   return (headerType**)headers;
 }
 
-Module _getObjcModules(headerType *head, int *nmodules)
+Module _getObjcModules(const headerType *head, int *nmodules)
 {
-  unsigned size;
+  uint32_t size;
   void *mods = getsectdatafromheader((headerType *)head,
                                      SEG_OBJC,
 				     SECT_OBJC_MODULES,
@@ -64,7 +59,7 @@ Module _getObjcModules(headerType *head, int *nmodules)
 
 SEL *_getObjcMessageRefs(headerType *head, int *nmess)
 {
-  unsigned size;
+  uint32_t size;
   void *refs = getsectdatafromheader ((headerType *)head,
 				  SEG_OBJC, "__message_refs", &size);
   *nmess = size / sizeof(SEL);
@@ -73,7 +68,7 @@ SEL *_getObjcMessageRefs(headerType *head, int *nmess)
 
 ProtocolTemplate *_getObjcProtocols(headerType *head, int *nprotos)
 {
-  unsigned size;
+  uint32_t size;
   void *protos = getsectdatafromheader ((headerType *)head,
 				 SEG_OBJC, "__protocol", &size);
   *nprotos = size / sizeof(ProtocolTemplate);
@@ -88,38 +83,36 @@ NXConstantStringTemplate *_getObjcStringObjects(headerType *head, int *nstrs)
 
 Class *_getObjcClassRefs(headerType *head, int *nclasses)
 {
-  unsigned size;
+  uint32_t size;
   void *classes = getsectdatafromheader ((headerType *)head,
 				 SEG_OBJC, "__cls_refs", &size);
   *nclasses = size / sizeof(Class);
   return (Class *)classes;
 }
 
-objc_image_info *_getObjcImageInfo(headerType *head)
+objc_image_info *_getObjcImageInfo(const headerType *head, uint32_t *sizep)
 {
-  unsigned size;
-  void *info = getsectdatafromheader ((headerType *)head,
-                                      SEG_OBJC, "__image_info", &size);
-  return (objc_image_info *)info;
+  objc_image_info *info = (objc_image_info *)
+      getsectdatafromheader(head, SEG_OBJC, "__image_info", sizep);
+  return info;
 }
 
-/* returns start of all objective-c info and the size of the data */
-void *_getObjcHeaderData(const headerType *head, unsigned *size)
+const struct segment_command *getsegbynamefromheader(const headerType *head, 
+                                                     const char *segname)
 {
-  struct segment_command *sgp;
-  unsigned long i;
-  
-  sgp = (struct segment_command *) ((char *)head + sizeof(headerType));
-  for(i = 0; i < ((headerType *)head)->ncmds; i++){
-      if(sgp->cmd == LC_SEGMENT)
-	  if(strncmp(sgp->segname, "__OBJC", sizeof(sgp->segname)) == 0) {
-	    *size = sgp->filesize;
-	    return (void*)sgp;
-	    }
-      sgp = (struct segment_command *)((char *)sgp + sgp->cmdsize);
-  }
-  *size = 0;
-  return nil;
+    const struct segment_command *sgp;
+    unsigned long i;
+    
+    sgp = (const struct segment_command *) ((char *)head + sizeof(headerType));
+    for (i = 0; i < head->ncmds; i++){
+        if (sgp->cmd == LC_SEGMENT) {
+            if (strncmp(sgp->segname, segname, sizeof(sgp->segname)) == 0) {
+                return sgp;
+            }
+        }
+        sgp = (const struct segment_command *)((char *)sgp + sgp->cmdsize);
+    }
+    return NULL;
 }
 
 static const headerType *_getExecHeader (void)
@@ -127,13 +120,10 @@ static const headerType *_getExecHeader (void)
 	return (const struct mach_header *)_NSGetMachExecuteHeader();
 }
 
-const char *_getObjcHeaderName(headerType *header)
+const char *_getObjcHeaderName(const headerType *header)
 {
     const headerType *execHeader;
     const struct fvmlib_command *libCmd, *endOfCmds;
-    char **argv;
-    extern char ***_NSGetArgv();
-    argv = *_NSGetArgv();
        
     if (header && ((headerType *)header)->filetype == MH_FVMLIB) {
 	    execHeader = _getExecHeader();
@@ -153,7 +143,32 @@ const char *_getObjcHeaderName(headerType *header)
          if ( _dyld_get_image_header(i) == header )
             return _dyld_get_image_name(i);
       }
-      return argv[0];
+
+      return (*_NSGetArgv())[0];
    }
 }
 
+
+// 1. Find segment with file offset == 0 and file size != 0. This segment's 
+//    contents span the Mach-O header. (File size of 0 is .bss, for example)
+// 2. Slide is header's address - segment's preferred address
+ptrdiff_t _getImageSlide(const headerType *header)
+{
+    int i;
+    const struct segment_command *sgp = 
+        (const struct segment_command *)(header + 1);
+
+    for (i = 0; i < header->ncmds; i++){
+        if (sgp->cmd == LC_SEGMENT) {
+            if (sgp->fileoff == 0  &&  sgp->filesize != 0) {
+                return (uintptr_t)header - (uintptr_t)sgp->vmaddr;
+            }
+        }
+        sgp = (const struct segment_command *)((char *)sgp + sgp->cmdsize);
+    }
+
+    // uh-oh
+    _objc_fatal("could not calculate VM slide for image '%s'", 
+                _getObjcHeaderName(header));
+    return 0;  // not reached
+}

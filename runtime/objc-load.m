@@ -49,15 +49,6 @@ extern char *	getsectdatafromheader	(const headerType * mhp, const char * segnam
 OBJC_EXPORT void (*callbackFunction)( Class, const char * );
 
 
-struct objc_method_list **get_base_method_list(Class cls) {
-    struct objc_method_list **ptr = ((struct objc_class * )cls)->methodLists;
-    if (!*ptr) return NULL;
-    while ( *ptr != 0 && *ptr != END_OF_METHODS_LIST ) { ptr++; }
-    --ptr;
-    return ptr;
-}
-
-
 /**********************************************************************************
 * objc_loadModule.
 *

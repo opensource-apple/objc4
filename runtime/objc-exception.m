@@ -41,9 +41,6 @@ static objc_exception_functions_t xtab;
 static void set_default_handlers();
 
 
-extern void objc_raise_error(const char *);
-
-
 /*
  * Exported functions
  */

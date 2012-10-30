@@ -61,7 +61,11 @@ struct objc_module {
 
 struct objc_super {
 	id receiver;
+#ifndef __cplusplus
 	Class class;
+#else
+	Class super_class;
+#endif
 };
 
 /*
@@ -142,6 +146,7 @@ OBJC_EXPORT void *objc_getClasses(void);
 #endif
 
 OBJC_EXPORT id objc_lookUpClass(const char *name);
+OBJC_EXPORT id objc_getRequiredClass(const char *name);
 OBJC_EXPORT void objc_addClass(Class myClass);
 
 /* customizing the error handling for objc_getClass/objc_getMetaClass */

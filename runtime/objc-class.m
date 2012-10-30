@@ -54,6 +54,8 @@
  * cacheUpdateLock to prevent interference from concurrent modifications.
  * The function that frees cache garbage must acquire the cacheUpdateLock 
  * and use collecting_in_critical() to flush out cache readers.
+ * The cacheUpdateLock is also used to protect the custom allocator used 
+ * for large method cache blocks.
  *
  * Cache readers (PC-checked by collecting_in_critical())
  * objc_msgSend*
@@ -85,6 +87,130 @@
  * ignore all entries whose implementation is _objc_msgForward, so 
  * _class_lookupMethodAndLoadCache cannot look at a forward:: entry
  * unsafely or place it in multiple caches.
+ ***********************************************************************/
+
+/***********************************************************************
+ * Lazy method list arrays and method list locking  (2004-10-19)
+ * 
+ * cls->methodLists may be in one of three forms:
+ * 1. NULL: The class has no methods.
+ * 2. non-NULL, with CLS_NO_METHOD_ARRAY set: cls->methodLists points 
+ *    to a single method list, which is the class's only method list.
+ * 3. non-NULL, with CLS_NO_METHOD_ARRAY clear: cls->methodLists points to 
+ *    an array of method list pointers. The end of the array's block 
+ *    is set to -1. If the actual number of method lists is smaller 
+ *    than that, the rest of the array is NULL.
+ * 
+ * Attaching categories and adding and removing classes may change 
+ * the form of the class list. In addition, individual method lists 
+ * may be reallocated when fixed up.
+ *
+ * Classes are initially read as #1 or #2. If a category is attached 
+ * or other methods added, the class is changed to #3. Once in form #3, 
+ * the class is never downgraded to #1 or #2, even if methods are removed.
+ * Classes added with objc_addClass are initially either #1 or #3.
+ * 
+ * Accessing and manipulating a class's method lists are synchronized, 
+ * to prevent races when one thread restructures the list. However, 
+ * if the class is not yet in use (i.e. not in class_hash), then the 
+ * thread loading the class may access its method lists without locking.
+ * 
+ * The following functions acquire methodListLock:
+ * class_getInstanceMethod
+ * class_getClassMethod
+ * class_nextMethodList
+ * class_addMethods
+ * class_removeMethods
+ * class_respondsToMethod
+ * _class_lookupMethodAndLoadCache
+ * lookupMethodInClassAndLoadCache
+ * _objc_add_category_flush_caches
+ *
+ * The following functions don't acquire methodListLock because they 
+ * only access method lists during class load and unload:
+ * _objc_register_category
+ * _resolve_categories_for_class (calls _objc_add_category)
+ * add_class_to_loadable_list
+ * _objc_addClass
+ * _objc_remove_classes_in_image
+ *
+ * The following functions use method lists without holding methodListLock.
+ * The caller must either hold methodListLock, or be loading the class.
+ * _getMethod (called by class_getInstanceMethod, class_getClassMethod, 
+ *   and class_respondsToMethod)
+ * _findMethodInClass (called by _class_lookupMethodAndLoadCache, 
+ *   lookupMethodInClassAndLoadCache, _getMethod)
+ * _findMethodInList (called by _findMethodInClass)
+ * nextMethodList (called by _findMethodInClass and class_nextMethodList
+ * fixupSelectorsInMethodList (called by nextMethodList)
+ * _objc_add_category (called by _objc_add_category_flush_caches, 
+ *   resolve_categories_for_class and _objc_register_category)
+ * _objc_insertMethods (called by class_addMethods and _objc_add_category)
+ * _objc_removeMethods (called by class_removeMethods)
+ * _objcTweakMethodListPointerForClass (called by _objc_insertMethods)
+ * get_base_method_list (called by add_class_to_loadable_list)
+ * lookupNamedMethodInMethodList (called by add_class_to_loadable_list)
+ ***********************************************************************/
+
+/***********************************************************************
+ * Thread-safety of class info bits  (2004-10-19)
+ * 
+ * Some class info bits are used to store mutable runtime state. 
+ * Modifications of the info bits at particular times need to be 
+ * synchronized to prevent races.
+ * 
+ * Three thread-safe modification functions are provided:
+ * _class_setInfo()     // atomically sets some bits
+ * _class_clearInfo()   // atomically clears some bits
+ * _class_changeInfo()  // atomically sets some bits and clears others
+ * These replace CLS_SETINFO() for the multithreaded cases.
+ * 
+ * Three modification windows are defined:
+ * - compile time
+ * - class construction or image load (before +load) in one thread
+ * - multi-threaded messaging and method caches
+ * 
+ * Info bit modification at compile time and class construction do not 
+ *   need to be locked, because only one thread is manipulating the class.
+ * Info bit modification during messaging needs to be locked, because 
+ *   there may be other threads simultaneously messaging or otherwise 
+ *   manipulating the class.
+ *   
+ * Modification windows for each flag:
+ * 
+ * CLS_CLASS: compile-time and class load
+ * CLS_META: compile-time and class load
+ * CLS_INITIALIZED: +initialize
+ * CLS_POSING: messaging
+ * CLS_MAPPED: compile-time
+ * CLS_FLUSH_CACHE: messaging
+ * CLS_GROW_CACHE: messaging
+ * CLS_NEED_BIND: unused
+ * CLS_METHOD_ARRAY: unused
+ * CLS_JAVA_HYBRID: JavaBridge only
+ * CLS_JAVA_CLASS: JavaBridge only
+ * CLS_INITIALIZING: messaging
+ * CLS_FROM_BUNDLE: class load
+ * CLS_HAS_CXX_STRUCTORS: compile-time and class load
+ * CLS_NO_METHOD_ARRAY: class load and messaging
+ * 
+ * CLS_INITIALIZED and CLS_INITIALIZING have additional thread-safety 
+ * constraints to support thread-safe +initialize. See "Thread safety 
+ * during class initialization" for details.
+ * 
+ * CLS_JAVA_HYBRID and CLS_JAVA_CLASS are set immediately after JavaBridge 
+ * calls objc_addClass(). The JavaBridge does not use an atomic update, 
+ * but the modification counts as "class construction" unless some other 
+ * thread quickly finds the class via the class list. This race is 
+ * small and unlikely in well-behaved code.
+ *
+ * Most info bits that may be modified during messaging are also never 
+ * read without a lock. There is no general read lock for the info bits.
+ * CLS_INITIALIZED: classInitLock
+ * CLS_FLUSH_CACHE: cacheUpdateLock
+ * CLS_GROW_CACHE: cacheUpdateLock
+ * CLS_NO_METHOD_ARRAY: methodListLock
+ * CLS_INITIALIZING: classInitLock
  ***********************************************************************/
 
 /***********************************************************************
@@ -179,8 +305,6 @@
 
 #include <sys/types.h>
 
-#include <CoreFoundation/CFDictionary.h>
-
 // Needed functions not in any header file
 size_t malloc_size (const void * ptr);
 
@@ -268,6 +392,7 @@ typedef struct CacheInstrumentation	CacheInstrumentation;
 
 static Ivar		class_getVariable		(Class cls, const char * name);
 static void		flush_caches			(Class cls, BOOL flush_meta);
+static struct objc_method_list *nextMethodList(struct objc_class *cls, void **it);
 static void		addClassToOriginalClass	(Class posingClass, Class originalClass);
 static void		_objc_addOrigClass		(Class origClass);
 static void		_freedHandler			(id self, SEL sel);
@@ -278,13 +403,18 @@ static int		LogObjCMessageSend		(BOOL isClassMethod, const char * objectsClass, 
 static BOOL		_cache_fill				(Class cls, Method smt, SEL sel);
 static void _cache_addForwardEntry(Class cls, SEL sel);
 static void		_cache_flush			(Class cls);
+static IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel);
 static int		SubtypeUntil			(const char * type, char end);
 static const char *	SkipFirstType		(const char * type);
 
 static unsigned long	_get_pc_for_thread	(mach_port_t thread);
 static int		_collecting_in_critical	(void);
 static void		_garbage_make_room		(void);
-static void		_cache_collect_free		(void * data, BOOL tryCollect);
+static void		_cache_collect_free		(void * data, size_t size, BOOL tryCollect);
+
+static BOOL cache_allocator_is_block(void *block);
+static void *cache_allocator_calloc(size_t size);
+static void cache_allocator_free(void *block);
 
 static void		_cache_print			(Cache cache);
 static unsigned int	log2				(unsigned int x);
@@ -323,7 +453,10 @@ OBJC_DECLARE_LOCK(classInitLock);
 // Threads that are waiting for a class to finish initializing wait on this.
 pthread_cond_t classInitWaitCond = PTHREAD_COND_INITIALIZER;
 
-CFMutableDictionaryRef _classIMPTables = NULL;
+// Lock for method list access and modification.
+// Protects methodLists fields, method arrays, and CLS_NO_METHOD_ARRAY bits.
+// Classes not yet in use do not need to take this lock.
+OBJC_DECLARE_LOCK(methodListLock);
 
 // When traceDuplicates is non-zero, _cacheFill checks whether the method
 // being encached is already there.  The number of times it finds a match
@@ -332,6 +465,12 @@ CFMutableDictionaryRef _classIMPTables = NULL;
 static int	traceDuplicates		= 0;
 static int	traceDuplicatesVerbose	= 0;
 static int	cacheFillDuplicates	= 0;
+
+// Custom cache allocator parameters
+// CACHE_REGION_SIZE must be a multiple of CACHE_QUANTUM.
+#define CACHE_QUANTUM 520
+#define CACHE_REGION_SIZE 131040  // quantized just under 128KB (131072)
+// #define CACHE_REGION_SIZE 262080  // quantized just under 256KB (262144)
 
 #ifdef OBJC_INSTRUMENTED
 // Instrumentation
@@ -349,7 +488,7 @@ static unsigned int	MaxIdealFlushCachesCount		= 0;
 // Method call logging
 typedef int	(*ObjCLogProc)(BOOL, const char *, const char *, SEL);
 
-static int			totalCacheFills		= 0;
+static int totalCacheFills NOBSS = 0;
 static int			objcMsgLogFD		= (-1);
 static ObjCLogProc	objcMsgLogProc		= &LogObjCMessageSend;
 static int			objcMsgLogEnabled	= 0;
@@ -381,12 +520,24 @@ _errNewVars[]				= "[%s poseAs:%s]: %s defines new instance variables";
 * messenger.
 ***********************************************************************/
 
+#ifndef OBJC_INSTRUMENTED
 const struct objc_cache		emptyCache =
 {
     0,				// mask
     0,				// occupied
     { NULL }			// buckets
 };
+#else
+// OBJC_INSTRUMENTED requires writable data immediately following emptyCache.
+struct objc_cache		emptyCache =
+{
+    0,				// mask
+    0,				// occupied
+    { NULL }			// buckets
+};
+CacheInstrumentation emptyCacheInstrumentation = {0};
+#endif
+
 
 // Freed objects have their isa set to point to this dummy class.
 // This avoids the need to check for Nil classes in the messenger.
@@ -442,10 +593,107 @@ void *		object_getIndexedIvars		   (id		obj)
 
 
 /***********************************************************************
+* object_cxxDestructFromClass.
+* Call C++ destructors on obj, starting with cls's 
+*   dtor method (if any) followed by superclasses' dtors (if any), 
+*   stopping at cls's dtor (if any).
+* Uses methodListLock and cacheUpdateLock. The caller must hold neither.
+**********************************************************************/
+static void object_cxxDestructFromClass(id obj, Class cls)
+{
+    void (*dtor)(id);
+
+    // Call cls's dtor first, then superclasses's dtors.
+
+    for ( ; cls != NULL; cls = cls->super_class) {
+        if (!(cls->info & CLS_HAS_CXX_STRUCTORS)) continue; 
+        dtor = (void(*)(id))
+            lookupMethodInClassAndLoadCache(cls, cxx_destruct_sel);
+        if (dtor != (void(*)(id))&_objc_msgForward) {
+            if (PrintCxxCtors) {
+                _objc_inform("CXX: calling C++ destructors for class %s", 
+                             cls->name);
+            }
+            (*dtor)(obj);
+        }
+    }
+}
+
+
+/***********************************************************************
+* object_cxxDestruct.
+* Call C++ destructors on obj, if any.
+* Uses methodListLock and cacheUpdateLock. The caller must hold neither.
+**********************************************************************/
+void object_cxxDestruct(id obj)
+{
+    if (!obj) return;
+    object_cxxDestructFromClass(obj, obj->isa);
+}
+
+
+/***********************************************************************
+* object_cxxConstructFromClass.
+* Recursively call C++ constructors on obj, starting with base class's 
+*   ctor method (if any) followed by subclasses' ctors (if any), stopping 
+*   at cls's ctor (if any).
+* Returns YES if construction succeeded.
+* Returns NO if some constructor threw an exception. The exception is 
+*   caught and discarded. Any partial construction is destructed.
+* Uses methodListLock and cacheUpdateLock. The caller must hold neither.
+*
+* .cxx_construct returns id. This really means:
+* return self: construction succeeded
+* return nil:  construction failed because a C++ constructor threw an exception
+**********************************************************************/
+static BOOL object_cxxConstructFromClass(id obj, Class cls)
+{
+    id (*ctor)(id);
+
+    // Call superclasses' ctors first, if any.
+    if (cls->super_class) {
+        BOOL ok = object_cxxConstructFromClass(obj, cls->super_class);
+        if (!ok) return NO;  // some superclass's ctor failed - give up
+    }
+
+    // Find this class's ctor, if any.
+    if (!(cls->info & CLS_HAS_CXX_STRUCTORS)) return YES;  // no ctor - ok
+    ctor = (id(*)(id))lookupMethodInClassAndLoadCache(cls, cxx_construct_sel);
+    if (ctor == (id(*)(id))&_objc_msgForward) return YES;  // no ctor - ok
+    
+    // Call this class's ctor.
+    if (PrintCxxCtors) {
+        _objc_inform("CXX: calling C++ constructors for class %s", cls->name);
+    }
+    if ((*ctor)(obj)) return YES;  // ctor called and succeeded - ok
+
+    // This class's ctor was called and failed. 
+    // Call superclasses's dtors to clean up.
+    if (cls->super_class) object_cxxDestructFromClass(obj, cls->super_class);
+    return NO;
+}
+
+
+/***********************************************************************
+* object_cxxConstructFromClass.
+* Call C++ constructors on obj, if any.
+* Returns YES if construction succeeded.
+* Returns NO if some constructor threw an exception. The exception is 
+*   caught and discarded. Any partial construction is destructed.
+* Uses methodListLock and cacheUpdateLock. The caller must hold neither.
+**********************************************************************/
+BOOL object_cxxConstruct(id obj)
+{
+    if (!obj) return YES;
+    return object_cxxConstructFromClass(obj, obj->isa);
+}
+
+
+/***********************************************************************
 * _internal_class_createInstanceFromZone.  Allocate an instance of the
 * specified class with the specified number of bytes for indexed
 * variables, in the specified zone.  The isa field is set to the
-* class, all other fields are zeroed.
+* class, C++ default constructors are called, and all other fields are zeroed.
 **********************************************************************/
 static id	_internal_class_createInstanceFromZone (Class		aClass,
                                                   unsigned	nIvarBytes,
@@ -472,6 +720,14 @@ static id	_internal_class_createInstanceFromZone (Class		aClass,
 
     // Set the isa pointer
     obj->isa = aClass;
+
+    // Call C++ constructors, if any.
+    if (!object_cxxConstruct(obj)) {
+        // Some C++ constructor threw an exception. 
+        malloc_zone_free(z, obj);
+        return nil;
+    }
+
     return obj;
 }
 
@@ -535,60 +791,6 @@ int	class_getVersion	       (Class		aClass)
     return ((struct objc_class *) aClass)->version;
 }
 
-static void _addListIMPsToTable(CFMutableDictionaryRef table, struct objc_method_list *mlist, Class cls, void **iterator) {
-    int i;
-    struct objc_method_list *new_mlist;
-    if (!mlist) return;
-    /* Work from end of list so that categories override */
-    new_mlist = _class_inlinedNextMethodList(cls, iterator);
-    _addListIMPsToTable(table, new_mlist, cls, iterator);
-    for (i = 0; i < mlist->method_count; i++) {
-        CFDictionarySetValue(table, mlist->method_list[i].method_name, mlist->method_list[i].method_imp);
-    }
-}
-
-static void _addClassIMPsToTable(CFMutableDictionaryRef table, Class cls) {
-    struct objc_method_list *mlist;
-    void *iterator = 0;
-#ifdef INCLUDE_SUPER_IMPS_IN_IMP_TABLE
-    if (cls->super_class) {	/* Do superclass first so subclass overrides */
-        CFMutableDictionaryRef super_table = CFDictionaryGetValue(_classIMPTables, cls->super_class);
-        if (super_table) {
-            CFIndex cnt;
-            const void **keys, **values, *buffer1[128], *buffer2[128];
-            cnt = CFDictionaryGetCount(super_table);
-            keys = (cnt <= 128) ? buffer1 : CFAllocatorAllocate(NULL, cnt * sizeof(void *), 0);
-            values = (cnt <= 128) ? buffer2 : CFAllocatorAllocate(NULL, cnt * sizeof(void *), 0);
-            CFDictionaryGetKeysAndValues(super_table, keys, values);
-            while (cnt--) {
-                CFDictionarySetValue(table, keys[cnt], values[cnt]);
-            }
-            if (keys != buffer1) CFAllocatorDeallocate(NULL, keys);
-            if (values != buffer2) CFAllocatorDeallocate(NULL, values);
-        } else {
-            _addClassIMPsToTable(table, cls->super_class);
-        }
-    }
-#endif
-mlist = _class_inlinedNextMethodList(cls, &iterator);
-_addListIMPsToTable(table, mlist, cls, &iterator);
-}
-
-CFMutableDictionaryRef _getClassIMPTable(Class cls) {
-    CFMutableDictionaryRef table;
-    if (NULL == _classIMPTables) {
-        // maps Classes to mutable dictionaries
-        _classIMPTables = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
-    }
-    table = (CFMutableDictionaryRef)CFDictionaryGetValue(_classIMPTables, cls);
-    // IMP table maps SELs to IMPS
-    if (NULL == table) {
-        table = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
-        _addClassIMPsToTable(table, cls);
-        CFDictionaryAddValue(_classIMPTables, cls, table);
-    }
-    return table;
-}
 
 static inline Method _findNamedMethodInList(struct objc_method_list * mlist, const char *meth_name) {
     int i;
@@ -602,7 +804,125 @@ static inline Method _findNamedMethodInList(struct objc_method_list * mlist, con
     return NULL;
 }
 
-/* These next three functions are the heart of ObjC method lookup. */
+
+/***********************************************************************
+* fixupSelectorsInMethodList
+* Uniques selectors in the given method list.
+* The given method list must be non-NULL and not already fixed-up.
+* If the class was loaded from a bundle:
+*   fixes up the given list in place with heap-allocated selector strings
+* If the class was not from a bundle:
+*   allocates a copy of the method list, fixes up the copy, and returns 
+*   the copy. The given list is unmodified.
+*
+* If cls is already in use, methodListLock must be held by the caller.
+**********************************************************************/
+// Fixed-up method lists get mlist->obsolete = _OBJC_FIXED_UP.
+#define _OBJC_FIXED_UP ((void *)1771)
+
+static struct objc_method_list *fixupSelectorsInMethodList(Class cls, struct objc_method_list *mlist)
+{
+    unsigned i, size;
+    Method method;
+    struct objc_method_list *old_mlist; 
+    
+    if ( ! mlist ) return (struct objc_method_list *)0;
+    if ( mlist->obsolete != _OBJC_FIXED_UP ) {
+        BOOL isBundle = CLS_GETINFO(cls, CLS_FROM_BUNDLE) ? YES : NO;
+        if (!isBundle) {
+            old_mlist = mlist;
+            size = sizeof(struct objc_method_list) - sizeof(struct objc_method) + old_mlist->method_count * sizeof(struct objc_method);
+            mlist = _malloc_internal(size);
+            memmove(mlist, old_mlist, size);
+        } else {
+            // Mach-O bundles are fixed up in place. 
+            // This prevents leaks when a bundle is unloaded.
+        }
+        sel_lock();
+        for ( i = 0; i < mlist->method_count; i += 1 ) {
+            method = &mlist->method_list[i];
+            method->method_name =
+                sel_registerNameNoLock((const char *)method->method_name, isBundle);  // Always copy selector data from bundles.
+        }
+        sel_unlock();
+        mlist->obsolete = _OBJC_FIXED_UP;
+    }
+    return mlist;
+}
+
+
+/***********************************************************************
+* nextMethodList
+* Returns successive method lists from the given class.
+* Method lists are returned in method search order (i.e. highest-priority 
+* implementations first).
+* All necessary method list fixups are performed, so the 
+* returned method list is fully-constructed.
+*
+* If cls is already in use, methodListLock must be held by the caller.
+* For full thread-safety, methodListLock must be continuously held by the 
+* caller across all calls to nextMethodList(). If the lock is released, 
+* the bad results listed in class_nextMethodList() may occur.
+*
+* void *iterator = NULL;
+* struct objc_method_list *mlist;
+* OBJC_LOCK(&methodListLock);
+* while ((mlist = nextMethodList(cls, &iterator))) {
+*     // do something with mlist
+* }
+* OBJC_UNLOCK(&methodListLock);
+**********************************************************************/
+static struct objc_method_list *nextMethodList(struct objc_class *cls,
+                                               void **it)
+{
+    uintptr_t index = *(uintptr_t *)it;
+    struct objc_method_list **resultp;
+
+    if (index == 0) {
+        // First call to nextMethodList.
+        if (!cls->methodLists) {
+            resultp = NULL;
+        } else if (cls->info & CLS_NO_METHOD_ARRAY) {
+            resultp = (struct objc_method_list **)&cls->methodLists;
+        } else {
+            resultp = &cls->methodLists[0];
+            if (!*resultp  ||  *resultp == END_OF_METHODS_LIST) {
+                resultp = NULL;
+            }
+        }
+    } else {
+        // Subsequent call to nextMethodList.
+        if (!cls->methodLists) {
+            resultp = NULL;
+        } else if (cls->info & CLS_NO_METHOD_ARRAY) {
+            resultp = NULL;
+        } else {
+            resultp = &cls->methodLists[index];
+            if (!*resultp  ||  *resultp == END_OF_METHODS_LIST) {
+                resultp = NULL;
+            }
+        }
+    }
+
+    // resultp now is NULL, meaning there are no more method lists, 
+    // OR the address of the method list pointer to fix up and return.
+    
+    if (resultp) {
+        if (*resultp  &&  (*resultp)->obsolete != _OBJC_FIXED_UP) {
+            *resultp = fixupSelectorsInMethodList(cls, *resultp);
+        }
+        *it = (void *)(index + 1);
+        return *resultp;
+    } else {
+        *it = 0;
+        return NULL;
+    }
+}
+
+
+/* These next three functions are the heart of ObjC method lookup. 
+ * If the class is currently in use, methodListLock must be held by the caller.
+ */
 static inline Method _findMethodInList(struct objc_method_list * mlist, SEL sel) {
     int i;
     if (!mlist) return NULL;
@@ -615,24 +935,64 @@ static inline Method _findMethodInList(struct objc_method_list * mlist, SEL sel)
     return NULL;
 }
 
+static inline Method _findMethodInClass(Class cls, SEL sel) __attribute__((always_inline));
 static inline Method _findMethodInClass(Class cls, SEL sel) {
-    struct objc_method_list *mlist;
-    void *iterator = 0;
-    while ((mlist = _class_inlinedNextMethodList(cls, &iterator))) {
-        Method m = _findMethodInList(mlist, sel);
-        if (m) return m;
+    // Flattened version of nextMethodList(). The optimizer doesn't 
+    // do a good job with hoisting the conditionals out of the loop.
+    // Conceptually, this looks like:
+    // while ((mlist = nextMethodList(cls, &iterator))) {
+    //     Method m = _findMethodInList(mlist, sel);
+    //     if (m) return m;
+    // }
+
+    if (!cls->methodLists) {
+        // No method lists.
+        return NULL;
     }
-    return NULL;
+    else if (cls->info & CLS_NO_METHOD_ARRAY) {
+        // One method list.
+        struct objc_method_list **mlistp;
+        mlistp = (struct objc_method_list **)&cls->methodLists;
+        if ((*mlistp)->obsolete != _OBJC_FIXED_UP) {
+            *mlistp = fixupSelectorsInMethodList(cls, *mlistp);
+        }
+        return _findMethodInList(*mlistp, sel);
+    }
+    else {
+        // Multiple method lists.
+        struct objc_method_list **mlistp;
+        for (mlistp = cls->methodLists; 
+             *mlistp != NULL  &&  *mlistp != END_OF_METHODS_LIST; 
+             mlistp++) 
+        {
+            Method m;
+            if ((*mlistp)->obsolete != _OBJC_FIXED_UP) {
+                *mlistp = fixupSelectorsInMethodList(cls, *mlistp);
+            }
+            m = _findMethodInList(*mlistp, sel);
+            if (m) return m;
+        }
+        return NULL;
+    }
 }
 
 static inline Method _getMethod(Class cls, SEL sel) {
     for (; cls; cls = cls->super_class) {
-        Method m = _findMethodInClass(cls, sel);
+        Method m;
+        m = _findMethodInClass(cls, sel);
         if (m) return m;
     }
     return NULL;
 }
 
+
+// fixme for gc debugging temporary use
+__private_extern__ IMP findIMPInClass(Class cls, SEL sel)
+{
+    Method m = _findMethodInClass(cls, sel);
+    if (m) return m->method_imp;
+    else return NULL;
+}
 
 /***********************************************************************
 * class_getInstanceMethod.  Return the instance method for the
@@ -641,12 +1001,17 @@ static inline Method _getMethod(Class cls, SEL sel) {
 Method		class_getInstanceMethod	       (Class		aClass,
                                         SEL		aSelector)
 {
+    Method result;
+
     // Need both a class and a selector
     if (!aClass || !aSelector)
         return NULL;
 
     // Go to the class
-    return _getMethod (aClass, aSelector);
+    OBJC_LOCK(&methodListLock);
+    result = _getMethod (aClass, aSelector);
+    OBJC_UNLOCK(&methodListLock);
+    return result;
 }
 
 /***********************************************************************
@@ -656,12 +1021,17 @@ Method		class_getInstanceMethod	       (Class		aClass,
 Method		class_getClassMethod	       (Class		aClass,
                                      SEL		aSelector)
 {
+    Method result;
+
     // Need both a class and a selector
     if (!aClass || !aSelector)
         return NULL;
 
     // Go to the class or isa
-    return _getMethod (GETMETA(aClass), aSelector);
+    OBJC_LOCK(&methodListLock);
+    result = _getMethod (GETMETA(aClass), aSelector);
+    OBJC_UNLOCK(&methodListLock);
+    return result;
 }
 
 /***********************************************************************
@@ -743,7 +1113,7 @@ static void flush_caches(Class cls, BOOL flush_meta)
     newNumClasses = objc_getClassList((Class *)NULL, 0);
     while (numClasses < newNumClasses) {
         numClasses = newNumClasses;
-        classes = realloc(classes, sizeof(Class) * numClasses);
+        classes = _realloc_internal(classes, sizeof(Class) * numClasses);
         newNumClasses = objc_getClassList((Class *)classes, numClasses);
     }
     numClasses = newNumClasses;
@@ -798,7 +1168,7 @@ static void flush_caches(Class cls, BOOL flush_meta)
 #endif
 
         OBJC_UNLOCK(&cacheUpdateLock);
-        free(classes);
+        _free_internal(classes);
         return;
     }
 
@@ -878,7 +1248,7 @@ static void flush_caches(Class cls, BOOL flush_meta)
 #endif
 
     OBJC_UNLOCK(&cacheUpdateLock);
-    free(classes);
+    _free_internal(classes);
 }
 
 /***********************************************************************
@@ -900,17 +1270,28 @@ void		do_not_remove_this_dummy_function	   (void)
     (void) class_nextMethodList (NULL, NULL);
 }
 
+
 /***********************************************************************
 * class_nextMethodList.
+* External version of nextMethodList().
 *
-* usage:
-* void *	iterator = 0;
-* while (class_nextMethodList (cls, &iterator)) {...}
+* This function is not fully thread-safe. A series of calls to 
+* class_nextMethodList() may fail if methods are added to or removed 
+* from the class between calls.
+* If methods are added between calls to class_nextMethodList(), it may 
+* return previously-returned method lists again, and may fail to return 
+* newly-added lists. 
+* If methods are removed between calls to class_nextMethodList(), it may 
+* omit surviving method lists or simply crash.
 **********************************************************************/
 OBJC_EXPORT struct objc_method_list * class_nextMethodList (Class	cls,
                                                             void **	it)
 {
-    return _class_inlinedNextMethodList(cls, it);
+    struct objc_method_list *result;
+    OBJC_LOCK(&methodListLock);
+    result = nextMethodList(cls, it);
+    OBJC_UNLOCK(&methodListLock);
+    return result;
 }
 
 /***********************************************************************
@@ -929,8 +1310,10 @@ void		_dummy		   (void)
 void	class_addMethods       (Class				cls,
                              struct objc_method_list *	meths)
 {
-    // Insert atomically.
-    _objc_insertMethods (meths, &((struct objc_class *) cls)->methodLists);
+    // Add the methods.
+    OBJC_LOCK(&methodListLock);
+    _objc_insertMethods(cls, meths);
+    OBJC_UNLOCK(&methodListLock);
 
     // Must flush when dynamically adding methods.  No need to flush
     // all the class method caches.  If cls is a meta class, though,
@@ -955,8 +1338,10 @@ void	class_addClassMethods  (Class				cls,
 void	class_removeMethods    (Class				cls,
                              struct objc_method_list *	meths)
 {
-    // Remove atomically.
-    _objc_removeMethods (meths, &((struct objc_class *) cls)->methodLists);
+    // Remove the methods
+    OBJC_LOCK(&methodListLock);
+    _objc_removeMethods(cls, meths);
+    OBJC_UNLOCK(&methodListLock);
 
     // Must flush when dynamically removing methods.  No need to flush
     // all the class method caches.  If cls is a meta class, though,
@@ -989,7 +1374,7 @@ static void	addClassToOriginalClass	       (Class	posingClass,
         posed_class_to_original_class_hash =
         NXCreateMapTableFromZone (NXPtrValueMapPrototype,
                                   8,
-                                  _objc_create_zone ());
+                                  _objc_internal_zone ());
     }
 
     // Add pose to hash table
@@ -1045,7 +1430,7 @@ static void	_objc_addOrigClass	   (Class	origClass)
     {
         posed_class_hash = NXCreateMapTableFromZone (NXStrValueMapPrototype,
                                                      8,
-                                                     _objc_create_zone ());
+                                                     _objc_internal_zone ());
     }
 
     // Add the named class iff it is not already there (or collides?)
@@ -1088,7 +1473,7 @@ Class		class_poseAs	       (Class		imposter,
 
     // Build a string to use to replace the name of the original class.
     #define imposterNamePrefix "_%"
-    imposterNamePtr = malloc_zone_malloc(_objc_create_zone(), strlen(((struct objc_class *)original)->name) + strlen(imposterNamePrefix) + 1);
+    imposterNamePtr = _malloc_internal(strlen(((struct objc_class *)original)->name) + strlen(imposterNamePrefix) + 1);
     strcpy(imposterNamePtr, imposterNamePrefix);
     strcat(imposterNamePtr, ((struct objc_class *)original)->name);
     #undef imposterNamePrefix
@@ -1104,6 +1489,13 @@ Class		class_poseAs	       (Class		imposter,
     _objc_addOrigClass (original);
     _objc_addOrigClass (imposter);
 
+    // Copy the imposter, so that the imposter can continue
+    // its normal life in addition to changing the behavior of
+    // the original.  As a hack we don't bother to copy the metaclass.
+    // For some reason we modify the original rather than the copy.
+    copy = (*_zoneAlloc)(imposter->isa, sizeof(struct objc_class), _objc_internal_zone());
+    memmove(copy, imposter, sizeof(struct objc_class));
+
     OBJC_LOCK(&classLock);
 
     class_hash = objc_getClasses ();
@@ -1112,19 +1504,12 @@ Class		class_poseAs	       (Class		imposter,
     NXHashRemove (class_hash, imposter);
     NXHashRemove (class_hash, original);
 
-    // Copy the imposter, so that the imposter can continue
-    // its normal life in addition to changing the behavior of
-    // the original.  As a hack we don't bother to copy the metaclass.
-    // For some reason we modify the original rather than the copy.
-    copy = (*_zoneAlloc)(imposter->isa, sizeof(struct objc_class), _objc_create_zone());
-    memmove(copy, imposter, sizeof(struct objc_class));
-
     NXHashInsert (class_hash, copy);
     addClassToOriginalClass (imposter, copy);
 
     // Mark the imposter as such
-    CLS_SETINFO(((struct objc_class *)imposter), CLS_POSING);
-    CLS_SETINFO(((struct objc_class *)imposter)->isa, CLS_POSING);
+    _class_setInfo(imposter, CLS_POSING);
+    _class_setInfo(imposter->isa, CLS_POSING);
 
     // Change the name of the imposter to that of the original class.
     ((struct objc_class *)imposter)->name		= ((struct objc_class *)original)->name;
@@ -1208,85 +1593,6 @@ static void	_nonexistentHandler    (id		self,
 }
 
 /***********************************************************************
-* _class_install_relationships.  Fill in the class pointers of a class
-* that was loaded before some or all of the classes it needs to point to.
-* The deal here is that the class pointer fields have been usurped to
-* hold the string name of the pertinent class.  Our job is to look up
-* the real thing based on those stored names.
-**********************************************************************/
-void	_class_install_relationships	       (Class	cls,
-                                          long	version)
-{
-    struct objc_class *		meta;
-    struct objc_class *		clstmp;
-
-    // Get easy access to meta class structure
-    meta = ((struct objc_class *)cls)->isa;
-
-    // Set version in meta class strucure
-    meta->version = version;
-
-    // Install superclass based on stored name.  No name iff
-    // cls is a root class.
-    if (((struct objc_class *)cls)->super_class)
-    {
-        clstmp = objc_getClass ((const char *) ((struct objc_class *)cls)->super_class);
-        if (!clstmp)
-        {
-            _objc_inform("failed objc_getClass(%s) for %s->super_class", (const char *)((struct objc_class *)cls)->super_class, ((struct objc_class *)cls)->name);
-            goto Error;
-        }
-
-        ((struct objc_class *)cls)->super_class = clstmp;
-    }
-
-    // Install meta's isa based on stored name.  Meta class isa
-    // pointers always point to the meta class of the root class
-    // (root meta class, too, it points to itself!).
-    clstmp = objc_getClass ((const char *) meta->isa);
-    if (!clstmp)
-    {
-        _objc_inform("failed objc_getClass(%s) for %s->isa->isa", (const char *) meta->isa, ((struct objc_class *)cls)->name);
-        goto Error;
-    }
-
-    meta->isa = clstmp->isa;
-
-    // Install meta's superclass based on stored name.  No name iff
-    // cls is a root class.
-    if (meta->super_class)
-    {
-        // Locate instance class of super class
-        clstmp = objc_getClass ((const char *) meta->super_class);
-        if (!clstmp)
-        {
-            _objc_inform("failed objc_getClass(%s) for %s->isa->super_class", (const char *)meta->super_class, ((struct objc_class *)cls)->name);
-            goto Error;
-        }
-
-        // Store meta class of super class
-        meta->super_class = clstmp->isa;
-    }
-
-    // cls is root, so `tie' the (root) meta class down to its
-    // instance class.  This way, class methods can come from
-    // the root instance class.
-    else
-        ((struct objc_class *)meta)->super_class = cls;
-
-    // Use common static empty cache instead of NULL
-    if (((struct objc_class *)cls)->cache == NULL)
-        ((struct objc_class *)cls)->cache = (Cache) &emptyCache;
-    if (((struct objc_class *)meta)->cache == NULL)
-        ((struct objc_class *)meta)->cache = (Cache) &emptyCache;
-
-    return;
-
-Error:
-        _objc_fatal ("please link appropriate classes in your program");
-}
-
-/***********************************************************************
 * class_respondsToMethod.
 *
 * Called from -[Object respondsTo:] and +[Object instancesRespondTo:]
@@ -1309,7 +1615,9 @@ BOOL	class_respondsToMethod	       (Class		cls,
     }
 
     // Handle cache miss
+    OBJC_LOCK(&methodListLock);
     meth = _getMethod(cls, sel);
+    OBJC_UNLOCK(&methodListLock);
     if (meth) {
         _cache_fill(cls, meth, sel);
         return YES;
@@ -1327,7 +1635,6 @@ BOOL	class_respondsToMethod	       (Class		cls,
 *
 * Called from -[Object methodFor:] and +[Object instanceMethodFor:]
 **********************************************************************/
-// GrP is this used anymore?
 IMP		class_lookupMethod	       (Class		cls,
                                 SEL		sel)
 {
@@ -1346,19 +1653,12 @@ IMP		class_lookupMethod	       (Class		cls,
 }
 
 /***********************************************************************
-* class_lookupMethodInMethodList.
-*
-* Called from objc-load.m and _objc_callLoads ()
+* lookupNamedMethodInMethodList
+* Only called to find +load/-.cxx_construct/-.cxx_destruct methods, 
+* without fixing up the entire method list.
+* The class is not yet in use, so methodListLock is not taken.
 **********************************************************************/
-IMP	class_lookupMethodInMethodList (struct objc_method_list *	mlist,
-                                    SEL				sel)
-{
-    Method m = _findMethodInList(mlist, sel);
-    return (m ? m->method_imp : NULL);
-}
-
-IMP	class_lookupNamedMethodInMethodList(struct objc_method_list *mlist,
-                                        const char *meth_name)
+__private_extern__ IMP lookupNamedMethodInMethodList(struct objc_method_list *mlist, const char *meth_name)
 {
     Method m = meth_name ? _findNamedMethodInList(mlist, meth_name) : NULL;
     return (m ? m->method_imp : NULL);
@@ -1369,6 +1669,7 @@ IMP	class_lookupNamedMethodInMethodList(struct objc_method_list *mlist,
 * _cache_malloc.
 *
 * Called from _cache_create() and cache_expand()
+* Cache locks: cacheUpdateLock must be held by the caller.
 **********************************************************************/
 static Cache _cache_malloc(int slotCount)
 {
@@ -1378,14 +1679,21 @@ static Cache _cache_malloc(int slotCount)
     // Allocate table (why not check for failure?)
     size = sizeof(struct objc_cache) + TABLE_SIZE(slotCount);
 #ifdef OBJC_INSTRUMENTED
+    // Custom cache allocator can't handle instrumentation.
     size += sizeof(CacheInstrumentation);
-#endif
-    new_cache = malloc_zone_calloc (_objc_create_zone(), size, 1);
-
-    // [c|v]allocated memory is zeroed, so all buckets are invalidated 
-    // and occupied == 0 and all instrumentation is zero.
-
+    new_cache = _calloc_internal(size, 1);
     new_cache->mask = slotCount - 1;
+#else
+    if (size < CACHE_QUANTUM  ||  UseInternalZone) {
+        new_cache = _calloc_internal(size, 1);
+        new_cache->mask = slotCount - 1;
+        // occupied and buckets and instrumentation are all zero
+    } else {
+        new_cache = cache_allocator_calloc(size);
+        // mask is already set
+        // occupied and buckets and instrumentation are all zero
+    }
+#endif
 
     return new_cache;
 }
@@ -1412,13 +1720,13 @@ Cache		_cache_create		(Class		cls)
 
     // Clear the cache flush flag so that we will not flush this cache
     // before expanding it for the first time.
-    ((struct objc_class * )cls)->info &= ~(CLS_FLUSH_CACHE);
+    _class_clearInfo(cls, CLS_FLUSH_CACHE);
 
     // Clear the grow flag so that we will re-use the current storage,
     // rather than actually grow the cache, when expanding the cache
     // for the first time
     if (_class_slow_grow)
-        ((struct objc_class * )cls)->info &= ~(CLS_GROW_CACHE);
+        _class_clearInfo(cls, CLS_GROW_CACHE);
 
     // Return our creation
     return new_cache;
@@ -1450,7 +1758,7 @@ static	Cache		_cache_expand	       (Class		cls)
         // is non-zero, let the cache grow this time, but clear the
         // flag so the cache is reused next time
         if ((((struct objc_class * )cls)->info & CLS_GROW_CACHE) != 0)
-            ((struct objc_class * )cls)->info &= ~CLS_GROW_CACHE;
+            _class_clearInfo(cls, CLS_GROW_CACHE);
 
         // Reuse the current cache storage this time
         else
@@ -1474,12 +1782,12 @@ static	Cache		_cache_expand	       (Class		cls)
                 // Deallocate "forward::" entry
                 if (CACHE_BUCKET_IMP(oldEntry) == &_objc_msgForward)
                 {
-                    _cache_collect_free (oldEntry, NO);
+                    _cache_collect_free (oldEntry, sizeof(struct objc_method), NO);
                 }
             }
 
             // Set the slow growth flag so the cache is next grown
-            ((struct objc_class * )cls)->info |= CLS_GROW_CACHE;
+            _class_setInfo(cls, CLS_GROW_CACHE);
 
             // Return the same old cache, freshly emptied
             return old_cache;
@@ -1544,7 +1852,7 @@ static	Cache		_cache_expand	       (Class		cls)
 
         // Set the cache flush flag so that we will flush this cache
         // before expanding it again.
-        ((struct objc_class * )cls)->info |= CLS_FLUSH_CACHE;
+        _class_setInfo(cls, CLS_FLUSH_CACHE);
     }
 
     // Deallocate "forward::" entries from the old cache
@@ -1555,7 +1863,7 @@ static	Cache		_cache_expand	       (Class		cls)
             if (CACHE_BUCKET_VALID(old_cache->buckets[index]) &&
                 CACHE_BUCKET_IMP(old_cache->buckets[index]) == &_objc_msgForward)
             {
-                _cache_collect_free (old_cache->buckets[index], NO);
+                _cache_collect_free (old_cache->buckets[index], sizeof(struct objc_method), NO);
             }
         }
     }
@@ -1564,7 +1872,7 @@ static	Cache		_cache_expand	       (Class		cls)
     ((struct objc_class *)cls)->cache = new_cache;
 
     // Deallocate old cache, try freeing all the garbage
-    _cache_collect_free (old_cache, YES);
+    _cache_collect_free (old_cache, old_cache->mask * sizeof(Method), YES);
     return new_cache;
 }
 
@@ -1582,7 +1890,13 @@ static int	LogObjCMessageSend (BOOL			isClassMethod,
     if (objcMsgLogFD == (-1))
     {
         snprintf (buf, sizeof(buf), "/tmp/msgSends-%d", (int) getpid ());
-        objcMsgLogFD = open (buf, O_WRONLY | O_CREAT, 0666);
+        objcMsgLogFD = secure_open (buf, O_WRONLY | O_CREAT, geteuid());
+        if (objcMsgLogFD < 0) {
+            // no log file - disable logging
+            objcMsgLogEnabled = 0;
+            objcMsgLogFD = -1;
+            return 1;
+        }
     }
 
     // Make the log entry
@@ -1771,13 +2085,13 @@ static void _cache_addForwardEntry(Class cls, SEL sel)
 {
     Method smt;
   
-    smt = malloc_zone_malloc(_objc_create_zone(), sizeof(struct objc_method));
+    smt = _malloc_internal(sizeof(struct objc_method));
     smt->method_name = sel;
     smt->method_types = "";
     smt->method_imp = &_objc_msgForward;
     if (! _cache_fill(cls, smt, sel)) {
         // Entry not added to cache. Don't leak the method struct.
-        malloc_zone_free(_objc_create_zone(), smt);
+        _free_internal(smt);
     }
 }
 
@@ -1824,7 +2138,7 @@ static void	_cache_flush		(Class		cls)
 
         // Deallocate "forward::" entry
         if (oldEntry && oldEntry->method_imp == &_objc_msgForward)
-            _cache_collect_free (oldEntry, NO);
+            _cache_collect_free (oldEntry, sizeof(struct objc_method), NO);
     }
 
     // Clear the valid-entry counter
@@ -1832,7 +2146,7 @@ static void	_cache_flush		(Class		cls)
 
     // Clear the cache flush flag so that we will not flush this cache
     // before expanding it again.
-    ((struct objc_class * )cls)->info &= ~CLS_FLUSH_CACHE;
+    _class_clearInfo(cls, CLS_FLUSH_CACHE);
 }
 
 /***********************************************************************
@@ -1889,7 +2203,7 @@ static _objc_initializing_classes *_fetchInitializingClassList(BOOL create)
         if (!create) {
             return NULL;
         } else {
-            data = calloc(1, sizeof(_objc_pthread_data));
+            data = _calloc_internal(1, sizeof(_objc_pthread_data));
             pthread_setspecific(_objc_pthread_key, data);
         }
     }
@@ -1899,7 +2213,7 @@ static _objc_initializing_classes *_fetchInitializingClassList(BOOL create)
         if (!create) {
             return NULL;
         } else {
-            list = calloc(1, sizeof(_objc_initializing_classes));
+            list = _calloc_internal(1, sizeof(_objc_initializing_classes));
             data->initializingClasses = list;
         }
     }
@@ -1910,7 +2224,7 @@ static _objc_initializing_classes *_fetchInitializingClassList(BOOL create)
         // even if create == NO.
         // Allow 4 simultaneous class inits on this thread before realloc.
         list->classesAllocated = 4;
-        classes = calloc(list->classesAllocated, sizeof(struct objc_class *));
+        classes = _calloc_internal(list->classesAllocated, sizeof(struct objc_class *));
         list->metaclasses = classes;
     }
     return list;
@@ -1927,9 +2241,9 @@ void _destroyInitializingClassList(_objc_initializing_classes *list)
 {
     if (list != NULL) {
         if (list->metaclasses != NULL) {
-            free(list->metaclasses);
+            _free_internal(list->metaclasses);
         }
-        free(list);
+        _free_internal(list);
     }
 }
 
@@ -1984,7 +2298,7 @@ static void _setThisThreadIsInitializingClass(struct objc_class *cls)
 
     // class list is full - reallocate
     list->classesAllocated = list->classesAllocated * 2 + 1;
-    list->metaclasses = realloc(list->metaclasses, list->classesAllocated * sizeof(struct objc_class *));
+    list->metaclasses = _realloc_internal(list->metaclasses, list->classesAllocated * sizeof(struct objc_class *));
     // zero out the new entries
     list->metaclasses[i++] = cls;
     for ( ; i < list->classesAllocated; i++) {
@@ -2025,11 +2339,12 @@ static void _setThisThreadIsNotInitializingClass(struct objc_class *cls)
 **********************************************************************/
 static void class_initialize(struct objc_class *cls)
 {
-    long *infoP = &GETMETA(cls)->info;
+    struct objc_class *infoCls = GETMETA(cls);
     BOOL reallyInitialize = NO;
 
     // Get the real class from the metaclass. The superclass chain 
     // hangs off the real class only.
+    // fixme ick
     if (ISMETA(cls)) {
         if (strncmp(cls->name, "_%", 2) == 0) {
             // Posee's meta's name is smashed and isn't in the class_hash, 
@@ -2050,7 +2365,7 @@ static void class_initialize(struct objc_class *cls)
     // Try to atomically set CLS_INITIALIZING.
     pthread_mutex_lock(&classInitLock);
     if (!ISINITIALIZED(cls) && !ISINITIALIZING(cls)) {
-        *infoP |= CLS_INITIALIZING;
+        _class_setInfo(infoCls, CLS_INITIALIZING);
         reallyInitialize = YES;
     }
     pthread_mutex_unlock(&classInitLock);
@@ -2061,12 +2376,6 @@ static void class_initialize(struct objc_class *cls)
         // Record that we're initializing this class so we can message it.
         _setThisThreadIsInitializingClass(cls);
         
-        // bind the module in - if it came from a bundle or dynamic library
-        _objc_bindClassIfNeeded(cls);
-        
-        // chain on the categories and bind them if necessary
-        _objc_resolve_categories_for_class(cls);
-        
         // Send the +initialize message.
         // Note that +initialize is sent to the superclass (again) if 
         // this class doesn't implement +initialize. 2157218
@@ -2074,7 +2383,7 @@ static void class_initialize(struct objc_class *cls)
         
         // Done initializing. Update the info bits and notify waiting threads.
         pthread_mutex_lock(&classInitLock);
-        *infoP = (*infoP | CLS_INITIALIZED) & ~CLS_INITIALIZING;
+        _class_changeInfo(infoCls, CLS_INITIALIZED, CLS_INITIALIZING);
         pthread_cond_broadcast(&classInitWaitCond);
         pthread_mutex_unlock(&classInitLock);
         _setThisThreadIsNotInitializingClass(cls);
@@ -2189,7 +2498,9 @@ IMP	_class_lookupMethodAndLoadCache	   (Class	cls,
 
         // Cache scan failed. Search method list.
 
+        OBJC_LOCK(&methodListLock);
         meth = _findMethodInClass(curClass, sel);
+        OBJC_UNLOCK(&methodListLock);
         if (meth) {
             // If logging is enabled, log the message send and let
             // the logger decide whether to encache the method.
@@ -2228,6 +2539,74 @@ IMP	_class_lookupMethodAndLoadCache	   (Class	cls,
     trace(0xb30f, (int)methodPC, 0, 0);
 
     return methodPC;
+}
+
+
+/***********************************************************************
+* lookupMethodInClassAndLoadCache.
+* Like _class_lookupMethodAndLoadCache, but does not search superclasses.
+* Caches and returns objc_msgForward if the method is not found in the class.
+**********************************************************************/
+static IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel)
+{
+    Method meth;
+    IMP imp;
+
+    // Search cache first.
+    imp = _cache_getImp(cls, sel);
+    if (imp) return imp;
+
+    // Cache miss. Search method list.
+
+    OBJC_LOCK(&methodListLock);
+    meth = _findMethodInClass(cls, sel);
+    OBJC_UNLOCK(&methodListLock);
+
+    if (meth) {
+        // Hit in method list. Cache it.
+        _cache_fill(cls, meth, sel);
+        return meth->method_imp;
+    } else {
+        // Miss in method list. Cache objc_msgForward.
+        _cache_addForwardEntry(cls, sel);
+        return &_objc_msgForward;
+    }
+}
+
+
+
+/***********************************************************************
+* _class_changeInfo
+* Atomically sets and clears some bits in cls's info field.
+* set and clear must not overlap.
+**********************************************************************/
+static pthread_mutex_t infoLock = PTHREAD_MUTEX_INITIALIZER;
+__private_extern__ void _class_changeInfo(struct objc_class *cls, 
+                                          long set, long clear)
+{
+    pthread_mutex_lock(&infoLock);
+    cls->info = (cls->info | set) & ~clear;
+    pthread_mutex_unlock(&infoLock);
+}
+
+
+/***********************************************************************
+* _class_setInfo
+* Atomically sets some bits in cls's info field.
+**********************************************************************/
+__private_extern__ void _class_setInfo(struct objc_class *cls, long set)
+{
+    _class_changeInfo(cls, set, 0);
+}
+
+
+/***********************************************************************
+* _class_clearInfo
+* Atomically clears some bits in cls's info field.
+**********************************************************************/
+__private_extern__ void _class_clearInfo(struct objc_class *cls, long clear)
+{
+    _class_changeInfo(cls, 0, clear);
 }
 
 
@@ -2557,21 +2936,68 @@ unsigned	method_getArgumentInfo	       (Method		method,
 
 void *		_objc_create_zone		   (void)
 {
-    static void *_objc_z = (void *)0xffffffff;
-    if ( _objc_z == (void *)0xffffffff ) {
-        char *s = getenv("OBJC_USE_OBJC_ZONE");
-        if ( s ) {
-            if ( (*s == '1') || (*s == 'y') || (*s == 'Y') ) {
-                _objc_z = malloc_create_zone(vm_page_size, 0);
-                malloc_set_zone_name(_objc_z, "ObjC");
-            }
-        }
-        if ( _objc_z == (void *)0xffffffff ) {
-            _objc_z = malloc_default_zone();
+    return malloc_default_zone();
+}
+
+
+/***********************************************************************
+* _objc_internal_zone.
+* Malloc zone for internal runtime data.
+* By default this is the default malloc zone, but a dedicated zone is 
+* used if environment variable OBJC_USE_INTERNAL_ZONE is set.
+**********************************************************************/
+__private_extern__ malloc_zone_t *_objc_internal_zone(void)
+{
+    static malloc_zone_t *z = (malloc_zone_t *)-1;
+    if (z == (malloc_zone_t *)-1) {
+        if (UseInternalZone) {
+            z = malloc_create_zone(vm_page_size, 0);
+            malloc_set_zone_name(z, "ObjC");
+        } else {
+            z = malloc_default_zone();
         }
     }
-    return _objc_z;
+    return z;
 }
+
+
+/***********************************************************************
+* _malloc_internal
+* _calloc_internal
+* _realloc_internal
+* _strdup_internal
+* _free_internal
+* Convenience functions for the internal malloc zone.
+**********************************************************************/
+__private_extern__ void *_malloc_internal(size_t size) 
+{
+    return malloc_zone_malloc(_objc_internal_zone(), size);
+}
+
+__private_extern__ void *_calloc_internal(size_t count, size_t size) 
+{
+    return malloc_zone_calloc(_objc_internal_zone(), count, size);
+}
+
+__private_extern__ void *_realloc_internal(void *ptr, size_t size)
+{
+    return malloc_zone_realloc(_objc_internal_zone(), ptr, size);
+}
+
+__private_extern__ char *_strdup_internal(const char *str)
+{
+    size_t len = strlen(str);
+    char *dup = malloc_zone_malloc(_objc_internal_zone(), len + 1);
+    memcpy(dup, str, len + 1);
+    return dup;
+}
+
+__private_extern__ void _free_internal(void *ptr)
+{
+    malloc_zone_free(_objc_internal_zone(), ptr);
+}
+
+
 
 /***********************************************************************
 * cache collection.
@@ -2726,17 +3152,14 @@ static void	_garbage_make_room		(void)
     if (first)
     {
         first		= 0;
-        garbage_refs	= malloc_zone_malloc (_objc_create_zone(),
-                                           INIT_GARBAGE_COUNT * sizeof(void *));
+        garbage_refs	= _malloc_internal(INIT_GARBAGE_COUNT * sizeof(void *));
         garbage_max	= INIT_GARBAGE_COUNT;
     }
 
     // Double the table if it is full
     else if (garbage_count == garbage_max)
     {
-        tempGarbage	= malloc_zone_realloc ((void *) _objc_create_zone(),
-                                           (void *) garbage_refs,
-                                           (size_t) garbage_max * 2 * sizeof(void *));
+        tempGarbage	= _realloc_internal(garbage_refs, garbage_max * 2 * sizeof(void *));
         garbage_refs	= (void **) tempGarbage;
         garbage_max	*= 2;
     }
@@ -2745,10 +3168,11 @@ static void	_garbage_make_room		(void)
 /***********************************************************************
 * _cache_collect_free.  Add the specified malloc'd memory to the list
 * of them to free at some later point.
+* size is used for the collection threshold. It does not have to be 
+* precisely the block's size.
 * Cache locks: cacheUpdateLock must be held by the caller.
 **********************************************************************/
-static void	_cache_collect_free    (void *		data,
-                                    BOOL		tryCollect)
+static void _cache_collect_free(void *data, size_t size, BOOL tryCollect)
 {
     static char *report_garbage = (char *)0xffffffff;
 
@@ -2760,7 +3184,7 @@ static void	_cache_collect_free    (void *		data,
     // Insert new element in garbage list
     // Note that we do this even if we end up free'ing everything
     _garbage_make_room ();
-    garbage_byte_size += malloc_size (data);
+    garbage_byte_size += size;
     garbage_refs[garbage_count++] = data;
 
     // Log our progress
@@ -2787,10 +3211,16 @@ static void	_cache_collect_free    (void *		data,
             _objc_inform ("collecting!\n");
         
         // Dispose all refs now in the garbage
-        while (garbage_count)
-            free (garbage_refs[--garbage_count]);
-        
-        // Clear the total size indicator
+        while (garbage_count--) {
+            if (cache_allocator_is_block(garbage_refs[garbage_count])) {
+                cache_allocator_free(garbage_refs[garbage_count]);
+            } else {
+                free(garbage_refs[garbage_count]);
+            }
+        }
+
+        // Clear the garbage count and total size indicator
+        garbage_count = 0;
         garbage_byte_size = 0;
     }
     else {     
@@ -2800,6 +3230,279 @@ static void	_cache_collect_free    (void *		data,
             _objc_inform ("couldn't collect cache garbage: objc_msgSend in progress\n");
         }
     }
+}
+
+
+
+/***********************************************************************
+* Custom method cache allocator.
+* Method cache block sizes are 2^slots+2 words, which is a pessimal 
+* case for the system allocator. It wastes 504 bytes per cache block 
+* with 128 or more slots, which adds up to tens of KB for an AppKit process.
+* To save memory, the custom cache allocator below is used.
+* 
+* The cache allocator uses 128 KB allocation regions. Few processes will 
+* require a second region. Within a region, allocation is address-ordered 
+* first fit.
+* 
+* The cache allocator uses a quantum of 520.
+* Cache block ideal sizes: 520, 1032, 2056, 4104
+* Cache allocator sizes:   520, 1040, 2080, 4160
+*
+* Because all blocks are known to be genuine method caches, the ordinary 
+* cache->mask and cache->occupied fields are used as block headers. 
+* No out-of-band headers are maintained. The number of blocks will 
+* almost always be fewer than 200, so for simplicity there is no free 
+* list or other optimization.
+* 
+* Block in use: mask != 0, occupied != -1 (mask indicates block size)
+* Block free:   mask != 0, occupied == -1 (mask is precisely block size)
+* 
+* No cache allocator functions take any locks. Instead, the caller 
+* must hold the cacheUpdateLock.
+**********************************************************************/
+
+typedef struct cache_allocator_block {
+    unsigned int size;
+    unsigned int state;
+    struct cache_allocator_block *nextFree;
+} cache_allocator_block;
+
+typedef struct cache_allocator_region {
+    cache_allocator_block *start;
+    cache_allocator_block *end;    // first non-block address
+    cache_allocator_block *freeList;
+    struct cache_allocator_region *next;
+} cache_allocator_region;
+
+static cache_allocator_region *cacheRegion = NULL;
+
+
+static unsigned int cache_allocator_mask_for_size(size_t size)
+{
+    return (size - sizeof(struct objc_cache)) / sizeof(Method);
+}
+
+static size_t cache_allocator_size_for_mask(unsigned int mask)
+{
+    size_t requested = sizeof(struct objc_cache) + TABLE_SIZE(mask+1);
+    size_t actual = CACHE_QUANTUM;
+    while (actual < requested) actual += CACHE_QUANTUM;
+    return actual;
+}
+
+/***********************************************************************
+* cache_allocator_add_region
+* Allocates and returns a new region that can hold at least size 
+*   bytes of large method caches. 
+* The actual size will be rounded up to a CACHE_QUANTUM boundary, 
+*   with a minimum of CACHE_REGION_SIZE. 
+* The new region is lowest-priority for new allocations. Callers that 
+*   know the other regions are already full should allocate directly 
+*   into the returned region.
+**********************************************************************/
+static cache_allocator_region *cache_allocator_add_region(size_t size)
+{
+    vm_address_t addr;
+    cache_allocator_block *b;
+    cache_allocator_region **rgnP;
+    cache_allocator_region *newRegion = 
+        _calloc_internal(1, sizeof(cache_allocator_region));
+
+    // Round size up to quantum boundary, and apply the minimum size.
+    size += CACHE_QUANTUM - (size % CACHE_QUANTUM);
+    if (size < CACHE_REGION_SIZE) size = CACHE_REGION_SIZE;
+
+    // Allocate the region
+    addr = 0;
+    vm_allocate(mach_task_self(), &addr, size, 1);
+    newRegion->start = (cache_allocator_block *)addr;
+    newRegion->end = (cache_allocator_block *)(addr + size);
+
+    // Mark the first block: free and covers the entire region
+    b = newRegion->start;
+    b->size = size;
+    b->state = (unsigned int)-1;
+    b->nextFree = NULL;
+    newRegion->freeList = b;
+
+    // Add to end of the linked list of regions.
+    // Other regions should be re-used before this one is touched.
+    newRegion->next = NULL;
+    rgnP = &cacheRegion;
+    while (*rgnP) {
+        rgnP = &(**rgnP).next;
+    }
+    *rgnP = newRegion;
+
+    return newRegion;
+}
+
+
+/***********************************************************************
+* cache_allocator_coalesce
+* Attempts to coalesce a free block with the single free block following 
+* it in the free list, if any.
+**********************************************************************/
+static void cache_allocator_coalesce(cache_allocator_block *block)
+{
+    if (block->size + (uintptr_t)block == (uintptr_t)block->nextFree) {
+        block->size += block->nextFree->size;
+        block->nextFree = block->nextFree->nextFree;
+    }
+}
+
+
+/***********************************************************************
+* cache_region_calloc
+* Attempt to allocate a size-byte block in the given region. 
+* Allocation is first-fit. The free list is already fully coalesced.
+* Returns NULL if there is not enough room in the region for the block.
+**********************************************************************/
+static void *cache_region_calloc(cache_allocator_region *rgn, size_t size)
+{
+    cache_allocator_block **blockP;
+    unsigned int mask;
+
+    // Save mask for allocated block, then round size 
+    // up to CACHE_QUANTUM boundary
+    mask = cache_allocator_mask_for_size(size);
+    size = cache_allocator_size_for_mask(mask);
+
+    // Search the free list for a sufficiently large free block.
+
+    for (blockP = &rgn->freeList; 
+         *blockP != NULL; 
+         blockP = &(**blockP).nextFree) 
+    {
+        cache_allocator_block *block = *blockP;
+        if (block->size < size) continue;  // not big enough
+
+        // block is now big enough. Allocate from it.
+
+        // Slice off unneeded fragment of block, if any, 
+        // and reconnect the free list around block.
+        if (block->size - size >= CACHE_QUANTUM) {
+            cache_allocator_block *leftover = 
+                (cache_allocator_block *)(size + (uintptr_t)block);
+            leftover->size = block->size - size;
+            leftover->state = (unsigned int)-1;
+            leftover->nextFree = block->nextFree;
+            *blockP = leftover;
+        } else {
+            *blockP = block->nextFree;
+        }
+            
+        // block is now exactly the right size.
+
+        bzero(block, size);
+        block->size = mask;  // Cache->mask
+        block->state = 0;    // Cache->occupied
+
+        return block;
+    }
+
+    // No room in this region.
+    return NULL;
+}
+
+
+/***********************************************************************
+* cache_allocator_calloc
+* Custom allocator for large method caches (128+ slots)
+* The returned cache block already has cache->mask set. 
+* cache->occupied and the cache contents are zero.
+* Cache locks: cacheUpdateLock must be held by the caller
+**********************************************************************/
+static void *cache_allocator_calloc(size_t size)
+{
+    cache_allocator_region *rgn;
+
+    for (rgn = cacheRegion; rgn != NULL; rgn = rgn->next) {
+        void *p = cache_region_calloc(rgn, size);
+        if (p) {
+            return p;
+        }
+    }
+
+    // No regions or all regions full - make a region and try one more time
+    // In the unlikely case of a cache over 256KB, it will get its own region.
+    return cache_region_calloc(cache_allocator_add_region(size), size);
+}
+
+
+/***********************************************************************
+* cache_allocator_region_for_block
+* Returns the cache allocator region that ptr points into, or NULL.
+**********************************************************************/
+static cache_allocator_region *cache_allocator_region_for_block(cache_allocator_block *block) 
+{
+    cache_allocator_region *rgn;
+    for (rgn = cacheRegion; rgn != NULL; rgn = rgn->next) {
+        if (block >= rgn->start  &&  block < rgn->end) return rgn;
+    }
+    return NULL;
+}
+
+
+/***********************************************************************
+* cache_allocator_is_block
+* If ptr is a live block from the cache allocator, return YES
+* If ptr is a block from some other allocator, return NO.
+* If ptr is a dead block from the cache allocator, result is undefined.
+* Cache locks: cacheUpdateLock must be held by the caller
+**********************************************************************/
+static BOOL cache_allocator_is_block(void *ptr)
+{
+    return (cache_allocator_region_for_block((cache_allocator_block *)ptr) != NULL);
+}
+
+/***********************************************************************
+* cache_allocator_free
+* Frees a block allocated by the cache allocator.
+* Cache locks: cacheUpdateLock must be held by the caller.
+**********************************************************************/
+static void cache_allocator_free(void *ptr)
+{
+    cache_allocator_block *dead = (cache_allocator_block *)ptr;
+    cache_allocator_block *cur;
+    cache_allocator_region *rgn;
+
+    if (! (rgn = cache_allocator_region_for_block(ptr))) {
+        // free of non-pointer
+        _objc_inform("cache_allocator_free of non-pointer %p", ptr);
+        return;
+    }    
+
+    dead->size = cache_allocator_size_for_mask(dead->size);
+    dead->state = (unsigned int)-1;
+
+    if (!rgn->freeList  ||  rgn->freeList > dead) {
+        // dead block belongs at front of free list
+        dead->nextFree = rgn->freeList;
+        rgn->freeList = dead;
+        cache_allocator_coalesce(dead);
+        return;
+    }
+
+    // dead block belongs in the middle or end of free list
+    for (cur = rgn->freeList; cur != NULL; cur = cur->nextFree) {
+        cache_allocator_block *ahead = cur->nextFree;
+        
+        if (!ahead  ||  ahead > dead) {
+            // cur and ahead straddle dead, OR dead belongs at end of free list
+            cur->nextFree = dead;
+            dead->nextFree = ahead;
+            
+            // coalesce into dead first in case both succeed
+            cache_allocator_coalesce(dead);
+            cache_allocator_coalesce(cur);
+            return;
+        }
+    }
+
+    // uh-oh
+    _objc_inform("cache_allocator_free of non-pointer %p", ptr);
 }
 
 

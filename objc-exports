@@ -21,6 +21,25 @@ _method_getNumberOfArguments
 _method_getSizeOfArguments
 _method_getArgumentInfo
 _class_nextMethodList
+# objc-auto.h - actually, everything possible for now
+_objc_collect
+_objc_collect_generation
+_objc_numberAllocated
+_objc_isAuto
+_objc_collecting_enabled
+_objc_allocate_object
+_objc_assign_strongCast
+_objc_assign_global
+_objc_assign_ivar
+_objc_assign_strongCast_generic
+_objc_assign_global_generic
+_objc_assign_ivar_generic
+_objc_assign_strongCast_CF
+_objc_assign_ivar_address_CF
+_objc_collect_init
+_objc_is_finalized
+_objc_memmove_collectable
+_objc_collect_if_needed
 # objc-exception.h
 _objc_exception_throw
 _objc_exception_try_enter
@@ -54,6 +73,7 @@ _objc_msgSendv_stret
 _objc_getClassList
 _objc_getClasses
 _objc_lookUpClass
+_objc_getRequiredClass
 _objc_addClass
 _objc_setClassHandler
 _objc_setMultithreaded

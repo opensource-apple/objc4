@@ -56,6 +56,9 @@ typedef signed char		BOOL;
 #define nil 0		/* id of Nil instance */
 #endif
 
+#ifndef __OBJC_GC__
+# define __strong
+#endif
 
 #if !defined(STRICT_OPENSTEP)
 

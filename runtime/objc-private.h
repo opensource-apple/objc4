@@ -37,6 +37,9 @@
     #import "objc-config.h"
 
     #import <pthread.h>
+    #import <errno.h>
+    #import <limits.h>
+    #import <unistd.h>
     #define	mutex_alloc()	(pthread_mutex_t*)calloc(1, sizeof(pthread_mutex_t))
     #define	mutex_init(m)	pthread_mutex_init(m, NULL)
     #define	mutex_lock(m)	pthread_mutex_lock(m)
@@ -88,6 +91,9 @@ typedef struct {
 
 // masks for objc_image_info.flags
 #define OBJC_IMAGE_IS_REPLACEMENT (1<<0)
+#define OBJC_IMAGE_SUPPORTS_GC (1<<1)
+
+
 #define _objcHeaderIsReplacement(h)  ((h)->info  &&  ((h)->info->flags & OBJC_IMAGE_IS_REPLACEMENT))
 
 /* OBJC_IMAGE_IS_REPLACEMENT:
@@ -96,25 +102,32 @@ typedef struct {
    Do fix up selector refs (@selector points to them)
    Do fix up class refs (@class and objc_msgSend points to them)
    Do fix up protocols (@protocol points to them)
+   Do fix up super_class pointers in classes ([super ...] points to them)
    Future: do load new classes?
    Future: do load new categories?
    Future: do insert new methods on existing classes?
    Future: do insert new methods on existing categories?
 */
 
+#define _objcHeaderSupportsGC(h) ((h)->info  &&  ((h)->info->flags & OBJC_IMAGE_SUPPORTS_GC))
+
+/* OBJC_IMAGE_SUPPORTS_GC:
+    was compiled with -fobjc-gc flag, regardless of whether write-barriers were issued
+    if executable image compiled this way, then all subsequent libraries etc. must also be this way
+*/
 
 // both
 OBJC_EXPORT headerType **	_getObjcHeaders();
-OBJC_EXPORT Module		_getObjcModules(headerType *head, int *nmodules);
+OBJC_EXPORT Module		_getObjcModules(const headerType *head, int *nmodules);
 OBJC_EXPORT Class *		_getObjcClassRefs(headerType *head, int *nclasses);
-OBJC_EXPORT void *		_getObjcHeaderData(const headerType *head, unsigned *size);
-OBJC_EXPORT const char *	_getObjcHeaderName(headerType *head);
-OBJC_EXPORT objc_image_info *	_getObjcImageInfo(headerType *head);
+OBJC_EXPORT const struct segment_command *getsegbynamefromheader(const headerType *head, const char *segname);
+OBJC_EXPORT const char *	_getObjcHeaderName(const headerType *head);
+OBJC_EXPORT objc_image_info *	_getObjcImageInfo(const headerType *head, uint32_t *size);
+OBJC_EXPORT ptrdiff_t 		_getImageSlide(const headerType *header);
+
 
 // internal routines for delaying binding
 void _objc_resolve_categories_for_class	(struct objc_class * cls);
-void _objc_bindClassIfNeeded(struct objc_class *cls);
-void _objc_bindModuleContainingClass(struct objc_class * cls);
 
 // someday a logging facility
 // ObjC is assigned the range 0xb000 - 0xbfff for first parameter
@@ -131,12 +144,11 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
     typedef struct _header_info
     {
       const headerType *	mhdr;
-      Module			mod_ptr; // NOT adjusted by image_slide
+      Module			mod_ptr;                    // already slid
       unsigned int		mod_count;
       unsigned long		image_slide;
-      void *			objcData;     // getObjcHeaderData result
-      unsigned 			objcDataSize; // getObjcHeaderData result
-      objc_image_info *		info;    // IS adjusted by image_slide
+      const struct segment_command *	objcSegmentHeader;  // already slid
+      objc_image_info *		info;                       // already slid
       struct _header_info *	next;
     } header_info;
     OBJC_EXPORT header_info *_objc_headerStart ();
@@ -145,78 +157,25 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
     OBJC_EXPORT const char *_objcModuleNameAtIndex(int i);
     OBJC_EXPORT Class objc_getOrigClass (const char *name);
 
-    extern struct objc_method_list **get_base_method_list(Class cls);
-
-
     OBJC_EXPORT const char *__S(_nameForHeader) (const headerType*);
 
-    /* initialize */
-    OBJC_EXPORT void _sel_resolve_conflicts(headerType * header, unsigned long slide);
-    OBJC_EXPORT void _class_install_relationships(Class, long);
-    OBJC_EXPORT void *_objc_create_zone(void);
-
-    OBJC_EXPORT SEL sel_registerNameNoCopyNoLock(const char *str);
+    OBJC_EXPORT SEL sel_registerNameNoLock(const char *str, BOOL copy);
     OBJC_EXPORT void sel_lock(void);
     OBJC_EXPORT void sel_unlock(void);
 
-    /* selector fixup in method lists */
-
-    #define _OBJC_FIXED_UP ((void *)1771)
-
-    static inline struct objc_method_list *_objc_inlined_fixup_selectors_in_method_list(struct objc_method_list *mlist)
-    {
-        unsigned i, size;
-        Method method;
-        struct objc_method_list *old_mlist; 
-        
-        if ( ! mlist ) return (struct objc_method_list *)0;
-        if ( mlist->obsolete != _OBJC_FIXED_UP ) {
-            old_mlist = mlist;
-            size = sizeof(struct objc_method_list) - sizeof(struct objc_method) + old_mlist->method_count * sizeof(struct objc_method);
-            mlist = malloc_zone_malloc(_objc_create_zone(), size);
-            memmove(mlist, old_mlist, size);
-            sel_lock();
-            for ( i = 0; i < mlist->method_count; i += 1 ) {
-                method = &mlist->method_list[i];
-                method->method_name =
-                    sel_registerNameNoCopyNoLock((const char *)method->method_name);
-            }
-            sel_unlock();
-            mlist->obsolete = _OBJC_FIXED_UP;
-        }
-        return mlist;
-    }
-
-    /* method lookup */
-    /* --  inline version of class_nextMethodList(Class, void **)  -- */
-
-    static inline struct objc_method_list *_class_inlinedNextMethodList(Class cls, void **it)
-    {
-        struct objc_method_list ***iterator;
-
-        iterator = (struct objc_method_list***)it;
-        if (*iterator == NULL) {
-            *iterator = &((((struct objc_class *) cls)->methodLists)[0]);
-        }
-        else (*iterator) += 1;
-        // Check for list end
-        if ((**iterator == NULL) || (**iterator == END_OF_METHODS_LIST)) {
-            *it = nil;
-            return NULL;
-        }
-        
-        **iterator = _objc_inlined_fixup_selectors_in_method_list(**iterator);
-        
-        // Return method list pointer
-        return **iterator;
-    }
+    /* optional malloc zone for runtime data */
+    OBJC_EXPORT malloc_zone_t *_objc_internal_zone(void);
+    OBJC_EXPORT void *_malloc_internal(size_t size);
+    OBJC_EXPORT void *_calloc_internal(size_t count, size_t size);
+    OBJC_EXPORT void *_realloc_internal(void *ptr, size_t size);
+    OBJC_EXPORT char *_strdup_internal(const char *str);
+    OBJC_EXPORT void _free_internal(void *ptr);
 
     OBJC_EXPORT BOOL class_respondsToMethod(Class, SEL);
     OBJC_EXPORT IMP class_lookupMethod(Class, SEL);
-    OBJC_EXPORT IMP class_lookupMethodInMethodList(struct objc_method_list *mlist, SEL sel);
-    OBJC_EXPORT IMP class_lookupNamedMethodInMethodList(struct objc_method_list *mlist, const char *meth_name);
-    OBJC_EXPORT void _objc_insertMethods( struct objc_method_list *mlist, struct objc_method_list ***list );
-    OBJC_EXPORT void _objc_removeMethods( struct objc_method_list *mlist, struct objc_method_list ***list );
+    OBJC_EXPORT IMP lookupNamedMethodInMethodList(struct objc_method_list *mlist, const char *meth_name);
+    OBJC_EXPORT void _objc_insertMethods(struct objc_class *cls, struct objc_method_list *mlist);
+    OBJC_EXPORT void _objc_removeMethods(struct objc_class *cls, struct objc_method_list *mlist);
 
     OBJC_EXPORT IMP _cache_getImp(Class cls, SEL sel);
     OBJC_EXPORT Method _cache_getMethod(Class cls, SEL sel, IMP objc_msgForward_imp);
@@ -234,19 +193,56 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
 
     /* magic */
     OBJC_EXPORT Class _objc_getFreedObjectClass (void);
+#ifndef OBJC_INSTRUMENTED
     OBJC_EXPORT const struct objc_cache emptyCache;
+#else
+    OBJC_EXPORT struct objc_cache emptyCache;
+#endif
     OBJC_EXPORT void _objc_flush_caches (Class cls);
     
     /* locking */
     #define MUTEX_TYPE pthread_mutex_t*
     #define OBJC_DECLARE_LOCK(MTX) pthread_mutex_t MTX = PTHREAD_MUTEX_INITIALIZER
     OBJC_EXPORT pthread_mutex_t classLock;
+    OBJC_EXPORT pthread_mutex_t methodListLock;
 
     /* nil handler object */
     OBJC_EXPORT id _objc_nilReceiver;
     OBJC_EXPORT id _objc_setNilReceiver(id newNilReceiver);
     OBJC_EXPORT id _objc_getNilReceiver(void);
 
+    /* C++ interoperability */
+    OBJC_EXPORT SEL cxx_construct_sel;
+    OBJC_EXPORT SEL cxx_destruct_sel;
+    OBJC_EXPORT const char *cxx_construct_name;
+    OBJC_EXPORT const char *cxx_destruct_name;
+    OBJC_EXPORT BOOL object_cxxConstruct(id obj);
+    OBJC_EXPORT void object_cxxDestruct(id obj);
+
+    /* GC and RTP startup */
+    OBJC_EXPORT void gc_init(BOOL on);
+    OBJC_EXPORT void rtp_init(void);
+
+    /* Write barrier implementations */
+    OBJC_EXPORT id objc_assign_strongCast_gc(id val, id *dest);
+    OBJC_EXPORT id objc_assign_global_gc(id val, id *dest);
+    OBJC_EXPORT id objc_assign_ivar_gc(id value, id dest, unsigned int offset);
+    OBJC_EXPORT id objc_assign_strongCast_non_gc(id value, id *dest);
+    OBJC_EXPORT id objc_assign_global_non_gc(id value, id *dest);
+    OBJC_EXPORT id objc_assign_ivar_non_gc(id value, id dest, unsigned int offset);
+
+    /* Code modification */
+#if defined(__ppc__)
+    OBJC_EXPORT size_t objc_write_branch(void *entry, void *target);
+#endif
+
+    /* Thread-safe info field */
+    OBJC_EXPORT void _class_setInfo(struct objc_class *cls, long set);
+    OBJC_EXPORT void _class_clearInfo(struct objc_class *cls, long clear);
+    OBJC_EXPORT void _class_changeInfo(struct objc_class *cls, long set, long clear);
+
+    /* Secure /tmp usage */
+    OBJC_EXPORT int secure_open(const char *filename, int flags, uid_t euid);
 
     typedef struct {
        long addressOffset;
@@ -266,7 +262,26 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
 #endif
 
 
+// Settings from environment variables
+OBJC_EXPORT int PrintImages;     // env OBJC_PRINT_IMAGES
+OBJC_EXPORT int PrintLoading;    // env OBJC_PRINT_LOAD_METHODS
+OBJC_EXPORT int PrintConnecting; // env OBJC_PRINT_CLASS_CONNECTION
+OBJC_EXPORT int PrintRTP;        // env OBJC_PRINT_RTP
+OBJC_EXPORT int PrintGC;         // env OBJC_PRINT_GC
+OBJC_EXPORT int PrintSharing;    // env OBJC_PRINT_SHARING
+OBJC_EXPORT int PrintCxxCtors;   // env OBJC_PRINT_CXX_CTORS
 
+OBJC_EXPORT int UseInternalZone; // env OBJC_USE_INTERNAL_ZONE
+OBJC_EXPORT int AllowInterposing;// env OBJC_ALLOW_INTERPOSING
+
+OBJC_EXPORT int DebugUnload;     // env OBJC_DEBUG_UNLOAD
+OBJC_EXPORT int DebugFragileSuperclasses; // env OBJC_DEBUG_FRAGILE_SUPERCLASSES
+
+OBJC_EXPORT int ForceGC;         // env OBJC_FORCE_GC
+OBJC_EXPORT int ForceNoGC;       // env OBJC_FORCE_NO_GC
+OBJC_EXPORT int CheckFinalizers; // env OBJC_CHECK_FINALIZERS
+
+OBJC_EXPORT BOOL UseGC;          // equivalent to calling objc_collecting_enabled()
 
 static __inline__ int _objc_strcmp(const unsigned char *s1, const unsigned char *s2) {
     unsigned char c1, c2;
@@ -305,6 +320,13 @@ typedef struct {
 #define ISINITIALIZED(cls)	((((volatile long)GETMETA(cls)->info) & CLS_INITIALIZED) != 0)
 #define ISINITIALIZING(cls)	((((volatile long)GETMETA(cls)->info) & CLS_INITIALIZING) != 0)
 
+
+// Attribute for global variables to keep them out of bss storage
+// To save one page per non-Objective-C process, variables used in 
+// the "Objective-C not used" case should not be in bss storage.
+// On Tiger, this reduces the number of touched pages for each 
+// CoreFoundation-only process from three to two. See #3857126 and #3857136.
+#define NOBSS __attribute__((section("__DATA,__data")))
 
 #endif /* _OBJC_PRIVATE_H_ */
 

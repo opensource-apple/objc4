@@ -99,7 +99,7 @@ static NXHashTablePrototype protoPrototype = {
     hashPrototype, isEqualPrototype, NXNoEffectFree, 0
     };
 
-static NXHashTable *prototypes = NULL;
+static NXHashTable *prototypes NOBSS = NULL;
 	/* table of all prototypes */
 
 static void bootstrap (void) {
@@ -289,7 +289,11 @@ void *NXHashGet (NXHashTable *table, const void *data) {
     return NULL;
     }
 
-static void _NXHashRehash (NXHashTable *table) {
+__private_extern__ unsigned _NXHashCapacity (NXHashTable *table) {
+    return table->nbBuckets;
+    }
+
+__private_extern__ void _NXHashRehashToCapacity (NXHashTable *table, unsigned newCapacity) {
     /* Rehash: we create a pseudo table pointing really to the old guys,
     extend self, copy the old pairs, and free the pseudo table */
     NXHashTable	*old;
@@ -300,7 +304,7 @@ static void _NXHashRehash (NXHashTable *table) {
     old = ALLOCTABLE(z);
     old->prototype = table->prototype; old->count = table->count; 
     old->nbBuckets = table->nbBuckets; old->buckets = table->buckets;
-    table->nbBuckets += table->nbBuckets + 1; /* 2 times + 1 */
+    table->nbBuckets = newCapacity;
     table->count = 0; table->buckets = ALLOCBUCKETS(z, table->nbBuckets);
     state = NXInitHashState (old);
     while (NXNextHashState (old, &state, &aux))
@@ -310,7 +314,11 @@ static void _NXHashRehash (NXHashTable *table) {
 	_objc_syslog("*** hashtable: count differs after rehashing; probably indicates a broken invariant: there are x and y such as isEqual(x, y) is TRUE but hash(x) != hash (y)\n");
     free (old->buckets); 
     free (old);
-    };
+    }
+
+static void _NXHashRehash (NXHashTable *table) {
+    _NXHashRehashToCapacity (table, table->nbBuckets*2 + 1);
+    }
 
 void *NXHashInsert (NXHashTable *table, const void *data) {
     HashBucket	*bucket = BUCKETOF(table, data);

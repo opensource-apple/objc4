@@ -58,6 +58,10 @@
  *  31-Dec-96	Umesh Vaishampayan  (umeshv@NeXT.com)
  *		Created from m98k.
  ********************************************************************/
+ 
+#undef  OBJC_ASM
+#define OBJC_ASM
+#include "objc-rtp.h"
 
 /********************************************************************
  * Data used by the ObjC runtime.
@@ -84,6 +88,7 @@ _objc_entryPoints:
 	.long   _objc_msgSend_stret
 	.long   _objc_msgSendSuper
 	.long   _objc_msgSendSuper_stret
+	.long   _objc_msgSend_rtp
 	.long   0
 
 .globl _objc_exitPoints
@@ -94,6 +99,7 @@ _objc_exitPoints:
 	.long   LMsgSendStretExit
 	.long   LMsgSendSuperExit
 	.long   LMsgSendSuperStretExit
+	.long   _objc_msgSend_rtp_exit
 	.long   0
 
 /*
@@ -198,6 +204,7 @@ LAZY_PIC_FUNCTION_STUB(mcount)
 
 #define kFwdMsgSend          1
 #define kFwdMsgSendStret     0
+
 
 /********************************************************************
  *
@@ -362,40 +369,19 @@ $0:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-; CacheLookup WORD_RETURN | STRUCT_RETURN, MSG_SEND | MSG_SENDSUPER | CACHE_GET, cacheMissLabel
+; CacheLookup selectorRegister, cacheMissLabel
 ;
 ; Locate the implementation for a selector in a class method cache.
 ;
-; Takes: WORD_RETURN    (r3 is first parameter)
-;        STRUCT_RETURN  (r3 is structure return address, r4 is first parameter)
-;        MSG_SEND       (first parameter is receiver)
-;        MSG_SENDSUPER  (first parameter is address of objc_super structure)
-;        CACHE_GET      (first parameter is class; return method triplet)
+; Takes: 
+;	 $0 = register containing selector (r4 or r5 ONLY);
+;	 cacheMissLabel = label to branch to iff method is not cached
+;	 r12 = class whose cache is to be searched
 ;
-;        cacheMissLabel = label to branch to iff method is not cached
-;
-; Eats: r0, r11, r12
-; On exit: (found) MSG_SEND and MSG_SENDSUPER: return imp in r12 and ctr
-;          (found) CACHE_GET: return method triplet in r12
+; On exit: (found) method triplet in r2, imp in r12, r11 is non-zero
 ;          (not found) jumps to cacheMissLabel
 ;
-; For MSG_SEND and MSG_SENDSUPER, the messenger jumps to the imp 
-; in ctr. The same imp in r12 is used by the method itself for its
-; relative addressing. This saves the usual "jump to next line and 
-; fetch link register" construct inside the method.
-;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-; Values to specify to method lookup macros whether the return type of
-; the method is an integer or structure.
-#define WORD_RETURN   0
-#define STRUCT_RETURN 1
-
-; Values to specify to method lookup macros whether the return type of
-; the method is an integer or structure.
-#define MSG_SEND      0
-#define MSG_SENDSUPER 1
-#define CACHE_GET     2
 
 .macro CacheLookup
 
@@ -406,55 +392,22 @@ $0:
 	li      r7,0			; no probes so far!
 #endif
 
-.if $1 == CACHE_GET         ; Only WORD_RETURN applies
-	lwz     r12,CACHE(r3)	; cache = class->cache (class = 1st parameter)
-.else
-
-.if $0 == WORD_RETURN		; WORD_RETURN
-
-.if $1 == MSG_SEND				; MSG_SEND
-	lwz     r12,ISA(r3)				; class = receiver->isa
-.elseif $1 == MSG_SENDSUPER		; MSG_SENDSUPER
-	lwz     r12,CLASS(r3)			; class = super->class
-.else
-	trap						; Should not happen
-.endif
-
-.else						; STRUCT_RETURN
-
-.if $1 == MSG_SEND				; MSG_SEND
-	lwz     r12,ISA(r4)				; class = receiver->isa
-.elseif $1 == MSG_SENDSUPER		; MSG_SENDSUPER
-	lwz     r12,CLASS(r4)			; class = super->class
-.else
-	trap						; Should not happen
-.endif
-
-.endif
-
-	lwz     r12,CACHE(r12)		; cache = class->cache
-
-.endif ; CACHE_GET
-
+	lwz     r2,CACHE(r12)		; cache = class->cache
 	stw     r9,48(r1)		; save r9
 
 #if defined(OBJC_INSTRUMENTED)
-	mr      r6,r12			; save cache pointer
+	mr      r6,r2			; save cache pointer
 #endif
-	lwz     r11,MASK(r12)	; mask = cache->mask
 
-	addi    r9,r12,BUCKETS	; buckets = cache->buckets
+	lwz     r11,MASK(r2)		; mask = cache->mask
+	addi    r0,r2,BUCKETS		; buckets = cache->buckets
 	slwi    r11,r11,2		; r11 = mask << 2 
-.if $0 == WORD_RETURN		; WORD_RETURN
-	and     r12,r4,r11			; bytes = sel & (mask<<2)
-.else						; STRUCT_RETURN
-	and     r12,r5,r11			; bytes = sel & (mask<<2)
-.endif
+	and     r9,$0,r11		; bytes = sel & (mask<<2)
 
 #if defined(OBJC_INSTRUMENTED)
-	b       LLoop_$0_$1_$2
+	b       LLoop_$0_$1
 
-LMiss_$0_$1_$2:
+LMiss_$0_$1:
 	; r6 = cache, r7 = probeCount
 	lwz     r9,MASK(r6)		; entryCount = mask + 1
 	addi    r9,r9,1			;
@@ -475,43 +428,32 @@ LMiss_$0_$1_$2:
 	lwz     r6,36(r1)		; restore r6
 	lwz     r7,40(r1)		; restore r7
 
-	b       $2				; goto cacheMissLabel
+	b       $1			; goto cacheMissLabel
 #endif
 
 ; search the cache
-LLoop_$0_$1_$2:
+LLoop_$0_$1:
 #if defined(OBJC_INSTRUMENTED)
 	addi    r7,r7,1			; probeCount += 1
 #endif
 
-	lwzx    r2,r9,r12		; method = buckets[bytes/4]
-	addi    r12,r12,4		; bytes += 4
+	lwzx    r2,r9,r0		; method = buckets[bytes/4]
+	addi    r9,r9,4			; bytes += 4
 	cmplwi  r2,0			; if (method == NULL)
 #if defined(OBJC_INSTRUMENTED)
-	beq     LMiss_$0_$1_$2
+	beq-    LMiss_$0_$1
 #else
-	beq     $2			; goto cacheMissLabel
+	beq-    $1			; goto cacheMissLabel
 #endif
 
-	lwz     r0,METHOD_NAME(r2)	; name  = method->method_name
-	and     r12,r12,r11		; bytes &= (mask<<2)
-.if $0 == WORD_RETURN				; WORD_RETURN
-	cmplw   r0,r4			; if (name != selector)
-.else						; STRUCT_RETURN
-	cmplw   r0,r5			; if (name != selector)
-.endif
-	bne     LLoop_$0_$1_$2		; goto loop
+	lwz     r12,METHOD_NAME(r2)	; name  = method->method_name
+	and     r9,r9,r11		; bytes &= (mask<<2)
+	cmplw   r12,$0			; if (name != selector)
+	bne-    LLoop_$0_$1		; goto loop
 
 ; cache hit, r2 == method triplet address
-.if $1 == CACHE_GET
-	; return method triplet in r12
-	; N.B. A better way to do this is have CACHE_GET swap the use of r12 and r2.
-	mr      r12,r2
-.else
-	; return method imp in ctr and r12
-	lwz     r12,METHOD_IMP(r2)	; imp = method->method_imp (in r12)
-	mtctr   r12					; ctr = imp
-.endif
+; Return triplet in r2 and imp in r12
+	lwz     r12,METHOD_IMP(r2)	; imp = method->method_imp
 
 #if defined(OBJC_INSTRUMENTED)
 	; r6 = cache, r7 = probeCount
@@ -591,6 +533,16 @@ LLoop_$0_$1_$2:
 ; On exit: restores r9 saved by CacheLookup
 ;          imp in ctr
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Values to specify to method lookup macros whether the return type of
+; the method is an integer or structure.
+#define WORD_RETURN   0
+#define STRUCT_RETURN 1
+
+; Values to specify to method lookup macros whether the return type of
+; the method is an integer or structure.
+#define MSG_SEND      0
+#define MSG_SENDSUPER 1
 
 .macro MethodTableLookup
 	mflr    r0              ; save lr
@@ -803,12 +755,12 @@ LLoop_$0_$1_$2:
     CALL_MCOUNT
 
 ; do lookup
-    CacheLookup WORD_RETURN, CACHE_GET, LGetMethodMiss
+    mr     r12,r3	; move class to r12 for CacheLookup
+    CacheLookup r4, LGetMethodMiss
 
-; cache hit, method triplet in r12
-    lwz     r11, METHOD_IMP(r12)    ; get the imp
-    cmplw   r11, r5                 ; check for _objc_msgForward
-    mr      r3, r12                 ; optimistically get the return value
+; cache hit, method triplet in r2 and imp in r12
+    cmplw   r12, r5                 ; check for _objc_msgForward
+    mr      r3, r2                  ; optimistically get the return value
     bnelr                           ; Not _objc_msgForward, return the triplet address
 
 LGetMethodMiss:
@@ -834,10 +786,11 @@ LGetMethodExit:
     CALL_MCOUNT
 
 ; do lookup
-    CacheLookup WORD_RETURN, CACHE_GET, LGetImpMiss
+    mr     r12,r3	; move class to r12 for CacheLookup
+    CacheLookup r4, LGetImpMiss
 
-; cache hit, method triplet in r12
-    lwz     r3, METHOD_IMP(r12)    ; return method imp address
+; cache hit, method triplet in r2 and imp in r12
+    mr      r3, r12    ; return method imp address
     blr
 
 LGetImpMiss:
@@ -858,10 +811,25 @@ LGetImpExit:
  *           r4 is the selector
  ********************************************************************/
 
+; WARNING - This code may be copied as is to the Objective-C runtime pages.
+;           The code is copied by rtp_set_up_objc_msgSend() from the 
+;           beginning to the blr marker just prior to the cache miss code.  
+;           Do not add callouts, global variable accesses, or rearrange
+;           the code without updating rtp_set_up_objc_msgSend. 
+
+; Absolute symbols bounding the runtime page version of objc_msgSend.
+_objc_msgSend_rtp = 0xfffeff00
+_objc_msgSend_rtp_exit = 0xfffeff00+0x100
+
+	
 	ENTRY _objc_msgSend
-; check whether receiver is nil
-	cmplwi  r3,0				; receiver nil?
-	beq-    LMsgSendNilSelf		; if so, call handler or return nil
+; check whether receiver is nil or selector is to be ignored
+	cmplwi  r3,0            ; receiver nil?
+	xoris   r11,r4,((kIgnore>>16) & 0xffff) ; clear hi if equal to ignored
+	cmplwi  cr1,r11,(kIgnore & 0xffff)      ; selector is to be ignored?
+	beq-    LMsgSendNilSelf ; if nil receiver, call handler or return nil
+	lwz     r12,ISA(r3)     ; class = receiver->isa
+	beqlr-  cr1             ; if ignored selector, return self immediately
 
 ; guaranteed non-nil entry point (disabled for now)
 ; .globl _objc_msgSendNonNil
@@ -872,31 +840,50 @@ LGetImpExit:
 
 ; receiver is non-nil: search the cache
 LMsgSendReceiverOk:
-	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendCacheMiss
+	; class is already in r12
+	CacheLookup r4, LMsgSendCacheMiss
+	; CacheLookup placed imp in r12
+	mtctr   r12
 	; r11 guaranteed non-zero on exit from CacheLookup with a hit
 	// li      r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
 	bctr						; goto *imp;
+
+; WARNING - The first six instructions of LMsgSendNilSelf are
+;       rewritten when objc_msgSend is copied to the runtime pages.
+;       These instructions must be maintained AS IS unless the code in
+;       rtp_set_up_objc_msgSend is also updated.
+;       * `mflr r0` must not be changed (not even to use a different register)
+;       * the load of _objc_nilReceiver value must remain six insns long
+;       * the value of _objc_nilReceiver must continue to be loaded into r11
+
+; message sent to nil: redirect to nil receiver, if any
+LMsgSendNilSelf:
+	; DO NOT CHANGE THE NEXT SIX INSTRUCTIONS - see note above
+	mflr    r0			; save return address
+	bcl     20,31,1f		; 31 is cr7[so]
+1:	mflr    r11
+	addis   r11,r11,ha16(__objc_nilReceiver-1b)
+	lwz     r11,lo16(__objc_nilReceiver-1b)(r11)
+	mtlr    r0			; restore return address
+	; DO NOT CHANGE THE PREVIOUS SIX INSTRUCTIONS - see note above
+
+	cmplwi  r11,0			; return nil if no new receiver
+	beqlr
+
+	mr	r3,r11			; send to new receiver
+	lwz	r12,ISA(r11)		; class = receiver->isa
+	b	LMsgSendReceiverOk
+
+; WARNING - This blr marks the end of the copy to the ObjC runtime pages and
+;           also marks the beginning of the cache miss code.  Do not move
+;           around without checking the ObjC runtime pages initialization code.
+	blr
 
 ; cache miss: go search the method lists
 LMsgSendCacheMiss:
 	MethodTableLookup WORD_RETURN, MSG_SEND
 	li      r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
 	bctr					; goto *imp;
-
-; message sent to nil: redirect to nil receiver, if any
-LMsgSendNilSelf:
-	mflr    r0			; load new receiver
-	bcl     20,31,1f		; 31 is cr7[so]
-1:	mflr    r11
-	addis   r11,r11,ha16(__objc_nilReceiver-1b)
-	lwz     r11,lo16(__objc_nilReceiver-1b)(r11)
-	mtlr    r0
-
-	cmplwi  r11,0			; return nil if no new receiver
-	beqlr
-
-	mr	r3,r11			; send to new receiver
-	b	LMsgSendReceiverOk
 
 LMsgSendExit:
 	END_ENTRY _objc_msgSend
@@ -930,7 +917,10 @@ LMsgSendExit:
 
 ; receiver is non-nil: search the cache
 LMsgSendStretReceiverOk:
-	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendStretCacheMiss
+	lwz     r12, ISA(r4)		; class = receiver->isa
+	CacheLookup r5, LMsgSendStretCacheMiss
+	; CacheLookup placed imp in r12
+	mtctr   r12
 	li      r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
 	bctr    				; goto *imp;
 
@@ -974,8 +964,17 @@ LMsgSendStretExit:
 ; do profiling when enabled
 	CALL_MCOUNT
 
+; check whether selector is to be ignored
+	xoris	r11,r4,((kIgnore>>16) & 0xffff) ; clear hi if to be ignored
+	cmplwi	r11,(kIgnore & 0xffff)          ; selector is to be ignored?
+	lwz     r12,CLASS(r3)			;     class = super->class
+	beq-	LMsgSendSuperIgnored            ; if ignored, return self
+
 ; search the cache
-	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperCacheMiss
+	; class is already in r12
+	CacheLookup r4, LMsgSendSuperCacheMiss
+	; CacheLookup placed imp in r12
+	mtctr   r12
 	lwz     r3,RECEIVER(r3)		; receiver is the first arg
 	; r11 guaranteed non-zero after cache hit
 	; li      r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
@@ -987,6 +986,11 @@ LMsgSendSuperCacheMiss:
 	lwz     r3,RECEIVER(r3)		; receiver is the first arg
 	li      r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
 	bctr    				; goto *imp;
+
+; ignored selector: return self
+LMsgSendSuperIgnored:
+	lwz	r3,RECEIVER(r3)
+	blr
 
 LMsgSendSuperExit:
 	END_ENTRY _objc_msgSendSuper
@@ -1017,7 +1021,10 @@ LMsgSendSuperExit:
 	CALL_MCOUNT
 
 ; search the cache
-	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperStretCacheMiss
+	lwz     r12,CLASS(r4)			; class = super->class
+	CacheLookup r5, LMsgSendSuperStretCacheMiss
+	; CacheLookup placed imp in r12
+	mtctr   r12
 	lwz     r4,RECEIVER(r4)		; receiver is the first arg
 	li      r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
 	bctr    				; goto *imp;
@@ -1385,3 +1392,11 @@ LMsgSendvStretSendIt:
 #endif /* !KERNEL */
 
 	END_ENTRY _objc_msgSendv_stret
+
+
+// Special section containing a function pointer that dyld will call
+// when it loads new images.
+LAZY_PIC_FUNCTION_STUB(__objc_notify_images)
+.data
+.section __DATA,__image_notify
+.long L__objc_notify_images$stub

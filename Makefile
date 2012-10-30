@@ -1,10 +1,9 @@
 # use LDFLAGS not LFLAGS
-# seg-addr-table, sect-order
 #
 # Simple makefile for building objc4 on Darwin
 #
 # These make variables (or environment variables) are used
-# if defined:
+# when defined:
 #	SRCROOT		path location of root of source hierarchy;
 #			defaults to ".", but must be set to a
 #			destination path for installsrc target.
@@ -77,6 +76,7 @@ CHOWN = /usr/sbin/chown
 TAR = /usr/bin/tar
 STRIP = /usr/bin/strip
 NMEDIT = /usr/bin/nmedit
+LIPO = /usr/bin/lipo
 
 ifeq "$(PLATFORM)" "Darwin"
 WARNING_FLAGS = -Wmost -Wno-precomp -Wno-four-char-constants
@@ -100,13 +100,21 @@ ARCH_FLAGS = $(foreach A, $(ARCH_LIST), $(addprefix -arch , $(A)))
 endif
 
 
+ifeq "$(ORDERFILE)" ""
+ORDERFILE = $(wildcard /usr/local/lib/OrderFiles/libobjc.order)
+endif
+ifneq "$(ORDERFILE)" ""
+ORDER = -sectorder __TEXT __text $(ORDERFILE)
+else 
+ORDER = 
+endif
 
 ifeq "$(USER)" ""
 USER = unknown
 endif
 
-CFLAGS = -g -fno-common -pipe $(PLATFORM_CFLAGS) $(WARNING_FLAGS) -I$(SYMROOT) -I. -I$(SYMROOT)/ProjectHeaders
-LDFLAGS = -framework CoreFoundation
+CFLAGS = -g -fno-common -fobjc-exceptions -pipe $(PLATFORM_CFLAGS) $(WARNING_FLAGS) -I$(SYMROOT) -I. -I$(SYMROOT)/ProjectHeaders
+LDFLAGS = 
 
 LIBRARY_EXT = .dylib
 
@@ -115,9 +123,9 @@ OTHER_HEADER_INSTALLDIR = usr/local/include/objc
 INSTALLDIR = usr/lib
 
 ifeq "$(PLATFORM)" "Darwin"
-CFLAGS += $(ARCH_FLAGS)
-LDFLAGS += $(ARCH_FLAGS) -dynamiclib -dynamic -compatibility_version 1 -current_version $(CURRENT_PROJECT_VERSION) 
+LDFLAGS += -dynamiclib -dynamic -compatibility_version 1 -current_version $(CURRENT_PROJECT_VERSION) 
 endif
+
 
 CFLAGS += $(OTHER_CFLAGS) $(RC_CFLAGS)
 LDFLAGS += $(OTHER_LDFLAGS)
@@ -132,18 +140,20 @@ ifndef PROFILE_CFLAGS
 PROFILE_CFLAGS = -DPROFILE -pg -Os
 endif
 
-CFLAGS_OPTIMIZED = $(CFLAGS) $(OPTIMIZATION_CFLAGS)
-CFLAGS_DEBUG     = $(CFLAGS) $(DEBUG_CFLAGS)
-CFLAGS_PROFILE   = $(CFLAGS) $(PROFILE_CFLAGS)
+CFLAGS_OPTIMIZED = $(OPTIMIZATION_CFLAGS) $(CFLAGS)
+CFLAGS_DEBUG     = $(DEBUG_CFLAGS) $(CFLAGS)
+CFLAGS_PROFILE   = $(PROFILE_CFLAGS) $(CFLAGS)
 
 LDFLAGS_OPTIMIZED = $(LDFLAGS) -g
 LDFLAGS_DEBUG     = $(LDFLAGS) -g
 LDFLAGS_PROFILE   = $(LDFLAGS) -g -pg
 
-SUBDIRS = . runtime runtime/OldClasses.subproj runtime/Messengers.subproj
+SUBDIRS = . runtime runtime/OldClasses.subproj runtime/Messengers.subproj runtime/Auto.subproj
 
 # files to compile
 SOURCES=
+# files to compile into separate linker modules
+MODULE_SOURCES=
 # files to not compile
 OTHER_SOURCES=
 # headers to install in /usr/include/objc
@@ -155,17 +165,17 @@ OTHER_HEADERS=
 
 # runtime
 SOURCES += $(addprefix runtime/, \
-        Object.m Protocol.m hashtable2.m maptable.m objc-class.m objc-errors.m \
-        objc-file.m objc-load.m objc-moninit.c objc-runtime.m objc-sel.m \
-	objc-sync.m objc-exception.m \
-        )
+	Object.m Protocol.m hashtable2.m maptable.m objc-class.m objc-errors.m \
+	objc-file.m objc-load.m objc-moninit.c objc-runtime.m objc-sel.m \
+	objc-sync.m objc-exception.m objc-auto.m objc-sel-set.m objc-rtp.m \
+	)
 PUBLIC_HEADERS += $(addprefix runtime/, \
-        objc-class.h objc-api.h objc-load.h objc-runtime.h objc.h Object.h \
-	objc-sync.h objc-exception.h \
-        Protocol.h error.h hashtable2.h \
-        )
-PRIVATE_HEADERS += runtime/objc-private.h runtime/objc-config.h runtime/objc-sel-table.h
-OTHER_HEADERS += runtime/maptable.h 
+	objc-class.h objc-api.h objc-load.h objc-runtime.h objc.h Object.h \
+	objc-sync.h objc-exception.h objc-auto.h \
+	Protocol.h error.h hashtable2.h \
+	)
+PRIVATE_HEADERS += runtime/objc-private.h runtime/objc-config.h runtime/objc-sel-table.h runtime/objc-sel-set.h runtime/objc-rtp.h
+OTHER_HEADERS += runtime/maptable.h runtime/objc-auto.h
 
 # OldClasses
 SOURCES += runtime/OldClasses.subproj/List.m
@@ -175,13 +185,32 @@ PUBLIC_HEADERS += runtime/OldClasses.subproj/List.h
 SOURCES += runtime/Messengers.subproj/objc-msg.s
 OTHER_SOURCES += runtime/Messengers.subproj/objc-msg-ppc.s runtime/Messengers.subproj/objc-msg-i386.s
 
+# Auto support
+SOURCES += runtime/Auto.subproj/objc-auto.s
+OTHER_SOURCES += runtime/Auto.subproj/objc-auto-ppc.s runtime/Auto.subproj/objc-auto-i386.s
+
+# RTP symbols for gdb
+# See also $(OBJROOT)/runtime/objc-rtp-sym.ppc.o rule below.
+OTHER_SOURCES += runtime/objc-rtp-sym.s
+
+# Interposing support.
+# This code is built into a second module so dyld's function interposing 
+# can manipulate the calls.
+MODULE_SOURCES += runtime/Messengers.subproj/objc-msg-stub.s
+OTHER_SOURCES += runtime/Messengers.subproj/objc-msg-stub-ppc.s runtime/Messengers.subproj/objc-msg-stub-i386.s
+
 # project root
-OTHER_SOURCES += Makefile APPLE_LICENSE objc-exports libobjc.order
+OTHER_SOURCES += Makefile APPLE_LICENSE objc-exports
 
 OBJECTS = $(addprefix $(OBJROOT)/, $(addsuffix .o, $(basename $(SOURCES) ) ) )
 OBJECTS_OPTIMIZED = $(OBJECTS:.o=.opt.o)
 OBJECTS_DEBUG = $(OBJECTS:.o=.debug.o)
 OBJECTS_PROFILE = $(OBJECTS:.o=.profile.o)
+
+MODULE_OBJECTS = $(addprefix $(OBJROOT)/, $(addsuffix .o, $(basename $(MODULE_SOURCES) ) ) )
+MODULE_OBJECTS_OPTIMIZED = $(MODULE_OBJECTS:.o=.opt.o)
+MODULE_OBJECTS_DEBUG = $(MODULE_OBJECTS:.o=.debug.o)
+MODULE_OBJECTS_PROFILE = $(MODULE_OBJECTS:.o=.profile.o)
 
 # For simplicity, each object target depends on all objc headers. Most of 
 # them come close to requiring this anyway, and rebuild from scratch is fast.
@@ -232,6 +261,36 @@ $(OBJROOT)/runtime/Messengers.subproj/objc-msg.profile.o : \
 	$(SRCROOT)/runtime/Messengers.subproj/objc-msg-ppc.s \
 	$(SRCROOT)/runtime/Messengers.subproj/objc-msg-i386.s
 
+# Additional dependency: objc-msg-sutb.s depends on objc-msg-stub-ppc.s and 
+# objc-msg-stub-i386.s, which it includes.
+$(OBJROOT)/runtime/Messengers.subproj/objc-msg-stub.opt.o \
+$(OBJROOT)/runtime/Messengers.subproj/objc-msg-stub.debug.o \
+$(OBJROOT)/runtime/Messengers.subproj/objc-msg-stub.profile.o : \
+	$(SRCROOT)/runtime/Messengers.subproj/objc-msg-stub-ppc.s \
+	$(SRCROOT)/runtime/Messengers.subproj/objc-msg-stub-i386.s
+
+# Additional dependency: objc-auto.s depends on objc-auto-ppc.s and 
+# objc-auto-i386.s, which it includes.
+$(OBJROOT)/runtime/Auto.subproj/objc-auto.opt.o \
+$(OBJROOT)/runtime/Auto.subproj/objc-auto.debug.o \
+$(OBJROOT)/runtime/Auto.subproj/objc-auto.profile.o : \
+	$(SRCROOT)/runtime/Auto.subproj/objc-auto-ppc.s \
+	$(SRCROOT)/runtime/Auto.subproj/objc-auto-i386.s
+
+# Additional rules: objc-rtp-sym.s needs to be built with a per-arch seg1addr, 
+# and need to be stripped here because stripping the dylib does not remove 
+# debug info from the magic sections.
+# objc-rtp-sym.s is not in SOURCES, and objc-rtp-sym.o is not in OBJECTS
+$(OBJROOT)/runtime/objc-rtp-sym.ppc.o: $(SRCROOT)/runtime/objc-rtp-sym.s
+	$(SILENT) $(CC) $(CFLAGS_OPTIMIZED) -arch ppc "$<" -c -o "$@.temp"
+	$(SILENT) $(STRIP) -S "$@.temp"
+	$(SILENT) $(LD) -arch ppc -seg1addr 0xfffec000 "$@.temp" -r -o "$@"
+
+$(OBJROOT)/runtime/objc-rtp-sym.i386.o: $(SRCROOT)/runtime/objc-rtp-sym.s
+	$(SILENT) $(CC) $(CFLAGS_OPTIMIZED) -arch i386 "$<" -c -o "$@.temp"
+	$(SILENT) $(STRIP) -S "$@.temp"
+	$(SILENT) $(LD) -arch i386 -seg1addr 0xfffe8000 "$@.temp" -r -o "$@"
+
 
 # These are the main targets:
 #    build		builds the library to OBJROOT and SYMROOT
@@ -257,7 +316,7 @@ ifeq "$(SRCROOT)" "."
 	$(SILENT) $(ECHO) "SRCROOT must be defined to be the destination directory; it cannot be '.'"
 	exit 1
 endif
-	$(SILENT) $(TAR) -cf $(SRCROOT)/objc4.sources.tar $(SOURCES) $(PUBLIC_HEADERS) $(PRIVATE_HEADERS) $(OTHER_HEADERS) $(OTHER_SOURCES)
+	$(SILENT) $(TAR) -cf $(SRCROOT)/objc4.sources.tar $(SOURCES) $(PUBLIC_HEADERS) $(PRIVATE_HEADERS) $(OTHER_HEADERS) $(OTHER_SOURCES) $(MODULE_SOURCES)
 	$(SILENT) $(CD) $(SRCROOT) && $(TAR) -xf $(SRCROOT)/objc4.sources.tar 
 	$(SILENT) $(REMOVE) -f $(SRCROOT)/objc4.sources.tar
 
@@ -325,8 +384,14 @@ install: build installhdrs
 
 clean:
 	$(SILENT) $(ECHO) "Deleting build products..."
-	$(foreach A, $(ARCH_LIST), \
-		$(SILENT) $(REMOVE) -f $(OBJROOT)/libobjc_debug.$A.o $(OBJROOT)/libobjc_profile.$A.o $(OBJROOT)/libobjc.$A.o ; )
+	$(SILENT) $(REMOVE) -f \
+	  $(foreach A, $(ARCH_LIST), \
+	    $(OBJROOT)/libobjc_debug.$A.$(VERSION_NAME)$(LIBRARY_EXT) \
+	    $(OBJROOT)/libobjc_profile.$A.$(VERSION_NAME)$(LIBRARY_EXT) \
+	    $(OBJROOT)/libobjc.$A.$(VERSION_NAME)$(LIBRARY_EXT) \
+	    $(OBJROOT)/runtime/objc-rtp-sym.$A.o \
+	    $(OBJROOT)/runtime/objc-rtp-sym.$A.o.temp \
+	  )
 
 	$(SILENT) $(REMOVE) -f $(SYMROOT)/libobjc.optimized.o
 	$(SILENT) $(REMOVE) -f $(SYMROOT)/libobjc.debug.o
@@ -339,6 +404,10 @@ clean:
 	$(SILENT) $(REMOVE) -f $(OBJECTS_OPTIMIZED)
 	$(SILENT) $(REMOVE) -f $(OBJECTS_DEBUG)
 	$(SILENT) $(REMOVE) -f $(OBJECTS_PROFILE)
+
+	$(SILENT) $(REMOVE) -f $(MODULE_OBJECTS_OPTIMIZED)
+	$(SILENT) $(REMOVE) -f $(MODULE_OBJECTS_DEBUG)
+	$(SILENT) $(REMOVE) -f $(MODULE_OBJECTS_PROFILE)
 
 	$(SILENT) $(REMOVE) -rf $(SYMROOT)/ProjectHeaders
 
@@ -376,24 +445,33 @@ prebuild-profile:
 	$(SILENT) $(MKDIRS) $(foreach S, $(SUBDIRS), $(OBJROOT)/$(S) )
 
 
-compile-optimized: $(OBJECTS_OPTIMIZED)
-compile-debug: $(OBJECTS_DEBUG)
-compile-profile: $(OBJECTS_PROFILE)
+compile-optimized: $(OBJECTS_OPTIMIZED) $(MODULE_OBJECTS_OPTIMIZED) $(foreach A, $(ARCH_LIST), $(OBJROOT)/runtime/objc-rtp-sym.$A.o )
+compile-debug: $(OBJECTS_DEBUG) $(MODULE_OBJECTS_DEBUG) $(foreach A, $(ARCH_LIST), $(OBJROOT)/runtime/objc-rtp-sym.$A.o )
+compile-profile: $(OBJECTS_PROFILE) $(MODULE_OBJECTS_PROFILE) $(foreach A, $(ARCH_LIST), $(OBJROOT)/runtime/objc-rtp-sym.$A.o )
 
 
-# link lib-suffix, LDFLAGS, OBJECTS
+# link lib-suffix, LDFLAGS, OBJECTS, MODULE_OBJECTS
 #  libsuffix should be "" or _debug or _profile
 ifeq "$(PLATFORM)" "Darwin"
 
 define link
-	$(SILENT) $(CC) $2 \
-          -Wl,-init,__objcInit \
-          -Wl,-single_module \
-          -Wl,-exported_symbols_list,$(SRCROOT)/objc-exports \
-          -Wl,-sectorder,__TEXT,__text,$(SRCROOT)/libobjc.order \
-          -install_name /$(INSTALLDIR)/libobjc$1.$(VERSION_NAME)$(LIBRARY_EXT) \
-          -o $(SYMROOT)/libobjc$1.$(VERSION_NAME)$(LIBRARY_EXT) \
-          $3
+	$(foreach A, $(ARCH_LIST), \
+	  $(SILENT) $(LD) -r \
+	    -arch $A \
+	    -o $(OBJROOT)/libobjc$1.$A.o \
+	    $3 ; \
+	  $(SILENT) $(CC) $2 \
+	    -arch $A \
+	    -Wl,-exported_symbols_list,$(SRCROOT)/objc-exports \
+	    $(ORDER) \
+	    -sectcreate __DATA __commpage $(OBJROOT)/runtime/objc-rtp-sym.$A.o \
+	    -install_name /$(INSTALLDIR)/libobjc$1.$(VERSION_NAME)$(LIBRARY_EXT) \
+	    -o $(OBJROOT)/libobjc$1.$A.$(VERSION_NAME)$(LIBRARY_EXT) \
+	    $(OBJROOT)/libobjc$1.$A.o $4 ; \
+	  )
+	$(SILENT) $(LIPO) \
+	  -create -output $(SYMROOT)/libobjc$1.$(VERSION_NAME)$(LIBRARY_EXT) \
+	  $(foreach A, $(ARCH_LIST), -arch $A $(OBJROOT)/libobjc$1.$A.$(VERSION_NAME)$(LIBRARY_EXT) )
 endef
 
 else
@@ -407,15 +485,15 @@ endif
 
 link-optimized:
 	$(SILENT) $(ECHO) "Linking (optimized)..."
-	$(call link,,$(LDFLAGS_OPTIMIZED),$(OBJECTS_OPTIMIZED) )
+	$(call link,,$(LDFLAGS_OPTIMIZED),$(OBJECTS_OPTIMIZED),$(MODULE_OBJECTS_OPTIMIZED) )
 
 link-debug:
 	$(SILENT) $(ECHO) "Linking (debug)..."
-	$(call link,_debug,$(LDFLAGS_DEBUG),$(OBJECTS_DEBUG) )
+	$(call link,_debug,$(LDFLAGS_DEBUG),$(OBJECTS_DEBUG),$(MODULE_OBJECTS_DEBUG) )
 
 link-profile:
 	$(SILENT) $(ECHO) "Linking (profile)..."
-	$(call link,_profile,$(LDFLAGS_PROFILE),$(OBJECTS_PROFILE))
+	$(call link,_profile,$(LDFLAGS_PROFILE),$(OBJECTS_PROFILE),$(MODULE_OBJECTS_PROFILE) )
 
 
 postbuild:

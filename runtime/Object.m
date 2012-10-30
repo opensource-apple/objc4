@@ -29,6 +29,7 @@
 
 #import <objc/Object.h>
 #import "objc-private.h"
+#import <objc/objc-auto.h>
 #import <objc/objc-runtime.h>
 #import <objc/Protocol.h>
 #import <stdarg.h> 
@@ -801,7 +802,7 @@ typedef struct {
         void *iterator = 0;
 	int i;
         struct objc_method_list *mlist;
-        while ( (mlist = _class_inlinedNextMethodList( cls, &iterator )) ) {
+        while ( (mlist = class_nextMethodList( cls, &iterator )) ) {
             for (i = 0; i < mlist->method_count; i++)
                 if (mlist->method_list[i].method_name == aSelector) {
 		    struct objc_method_description *m;
@@ -851,7 +852,7 @@ typedef struct {
         void *iterator = 0;
 	int i;
         struct objc_method_list *mlist;
-        while ( (mlist = _class_inlinedNextMethodList( cls, &iterator )) ) {
+        while ( (mlist = class_nextMethodList( cls, &iterator )) ) {
             for (i = 0; i < mlist->method_count; i++)
                 if (mlist->method_list[i].method_name == aSelector) {
 		    struct objc_method_description *m;
@@ -934,6 +935,7 @@ static id _internal_object_copy(Object *anObject, unsigned nBytes)
 static id _internal_object_dispose(Object *anObject) 
 {
 	if (anObject==nil) return nil;
+	object_cxxDestruct((id)anObject);
 	anObject->isa = _objc_getFreedObjectClass (); 
 	free(anObject);
 	return nil;
@@ -1010,11 +1012,8 @@ Ivar object_setInstanceVariable(id obj, const char *name, void *value)
 	Ivar ivar = 0;
 
 	if (obj && name) {
-		void **ivaridx;
-
 		if ((ivar = class_getInstanceVariable(((Object*)obj)->isa, name))) {
-		       ivaridx = (void **)((char *)obj + ivar->ivar_offset);
-		       *ivaridx = value;
+			objc_assign_ivar((id)value, obj, ivar->ivar_offset);
 		}
 	}
 	return ivar;
