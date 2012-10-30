@@ -119,19 +119,6 @@ CFLAGS += $(ARCH_FLAGS)
 LDFLAGS += $(ARCH_FLAGS) -dynamiclib -dynamic -compatibility_version 1 -current_version $(CURRENT_PROJECT_VERSION) 
 endif
 
-ifeq "$(PLATFORM)" "Darwin"
-# Determine Mac OS X version
-# 6.x = Jaguar, 7.x = Panther
-ifeq "$(OS_VERSION)" ""
-  OS_VERSION = $(shell uname -r)
-endif
-DARWIN_MAJOR_VERSION = $(word 1, $(subst ., ,$(OS_VERSION)))
-DARWIN_MINOR_VERSION = $(word 2, $(subst ., ,$(OS_VERSION)))
-ifeq "$(DARWIN_MAJOR_VERSION)" "7"
-CFLAGS += -DMACOSX_PANTHER
-endif
-endif
-
 CFLAGS += $(OTHER_CFLAGS) $(RC_CFLAGS)
 LDFLAGS += $(OTHER_LDFLAGS)
 

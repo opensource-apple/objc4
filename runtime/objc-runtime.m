@@ -1760,7 +1760,6 @@ static void	_objc_map_image(headerType *mh, unsigned long	vmaddr_slide)
 
     trace(0xb101, 0, 0, 0);
 
-#ifdef MACOSX_PANTHER
     // Check if all loaded libraries up to and including this one are prebound
     // SPI introduced in Panther (Mac OS X 10.3)
     all_modules_prebound = _dyld_all_twolevel_modules_prebound();
@@ -1772,7 +1771,6 @@ static void	_objc_map_image(headerType *mh, unsigned long	vmaddr_slide)
             warned = all_modules_prebound;
         }
     }
-#endif
 
     // Register any categories and/or classes and/or selectors this image contains
     _objc_add_categories_from_image (hInfo);

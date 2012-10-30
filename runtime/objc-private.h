@@ -55,12 +55,7 @@
 
     #import <objc/objc-runtime.h>
 
-#ifdef MACOSX_PANTHER
     #import <malloc/malloc.h>
-#else
-    // pre-Panther
-    #import <objc/malloc.h>
-#endif
 
 
 /* Opaque cookie used in _getObjc... routines.  File format independant.

@@ -23,7 +23,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 //
-//  objc_sync.h
+//  objc_sync.m
 //
 //  Copyright (c) 2002 Apple Computer, Inc. All rights reserved.
 //
@@ -32,8 +32,6 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <pthread.h>
-#define PTHREAD_MUTEX_RECURSIVE          2
-#include <CoreFoundation/CFDictionary.h>
 #include <AssertMacros.h>
 
 #include "objc-sync.h"
@@ -71,18 +69,21 @@ done:
 
 struct SyncData
 {
-	struct SyncData*	nextData;
-	id			object;
-	unsigned int		lockCount;
+	struct SyncData*	nextData;       // only accessed while holding sTableLock
+	id			object;         // only accessed while holding sTableLock
+	unsigned int		lockCount;      // only accessed while holding sTableLock
 	pthread_mutex_t 	mutex;
 	pthread_cond_t		conditionVariable;
 };
 typedef struct SyncData SyncData;
 
+
 static pthread_mutex_t		sTableLock = PTHREAD_MUTEX_INITIALIZER;
 static SyncData*		sDataList = NULL;
 
-static SyncData* id2data(id object)
+enum usage { ACQUIRE, RELEASE, CHECK };
+
+static SyncData* id2data(id object, enum usage why)
 {
     SyncData* result = NULL;
     int err;
@@ -106,7 +107,11 @@ static SyncData* id2data(id object)
             firstUnused = p;
     }
     
-    // if no corresponding SyncData found, but an unused one was found, use it
+    // no SyncData currently associated with object
+    if ( (why == RELEASE) || (why == CHECK) )
+	goto done;
+    
+    // an unused one was found, use it
     if ( firstUnused != NULL ) {
         result = firstUnused;
         result->object = object;
@@ -129,6 +134,21 @@ static SyncData* id2data(id object)
     sDataList = result;
     
 done:
+    if ( result != NULL ) {
+        switch ( why ) {
+            case ACQUIRE:
+                result->lockCount++;
+                break;
+            case RELEASE:
+                result->lockCount--;
+                if ( result->lockCount == 0 )
+                    result->object = NULL;  // now recycled
+                break;
+            case CHECK:
+                // do nothing
+                break;
+        }
+    }
     pthread_mutex_unlock(&sTableLock);
     return result;
 }
@@ -142,14 +162,12 @@ int objc_sync_enter(id obj)
 {
     int result = OBJC_SYNC_SUCCESS;
     
-    SyncData* data = id2data(obj);
+    SyncData* data = id2data(obj, ACQUIRE);
     require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_INITIALIZED, "id2data failed");
 	
     result = pthread_mutex_lock(&data->mutex);
     require_noerr_string(result, done, "pthread_mutex_lock failed");
-	
-    data->lockCount++;	// note: lockCount is only modified when corresponding mutex is held
-	
+            	
 done: 
     return result;
 }
@@ -161,15 +179,8 @@ int objc_sync_exit(id obj)
 {
     int result = OBJC_SYNC_SUCCESS;
     
-    SyncData* data;
-    data = id2data(obj); // XXX should assert that we didn't create it
-    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_INITIALIZED, "id2data failed");
-
-    int oldLockCount = data->lockCount--;
-    if ( oldLockCount == 1 ) {
-        // XXX should move off the main chain to speed id2data searches
-        data->object = NULL;	// recycle data
-    }
+    SyncData* data = id2data(obj, RELEASE); 
+    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR, "id2data failed");
     
     result = pthread_mutex_unlock(&data->mutex);
     require_noerr_string(result, done, "pthread_mutex_unlock failed");
@@ -188,8 +199,8 @@ int objc_sync_wait(id obj, long long milliSecondsMaxWait)
 {
     int result = OBJC_SYNC_SUCCESS;
             
-    SyncData* data = id2data(obj);
-    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_INITIALIZED, "id2data failed");
+    SyncData* data = id2data(obj, CHECK);
+    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR, "id2data failed");
     
     
     // XXX need to retry cond_wait under out-of-our-control failures
@@ -223,8 +234,8 @@ int objc_sync_notify(id obj)
 {
     int result = OBJC_SYNC_SUCCESS;
         
-    SyncData* data = id2data(obj);
-    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_INITIALIZED, "id2data failed");
+    SyncData* data = id2data(obj, CHECK);
+    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR, "id2data failed");
 
     result = pthread_cond_signal(&data->conditionVariable);
     require_noerr_string(result, done, "pthread_cond_signal failed");
@@ -243,8 +254,8 @@ int objc_sync_notifyAll(id obj)
 {
     int result = OBJC_SYNC_SUCCESS;
         
-    SyncData* data = id2data(obj);
-    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_INITIALIZED, "id2data failed");
+    SyncData* data = id2data(obj, CHECK);
+    require_action_string(data != NULL, done, result = OBJC_SYNC_NOT_OWNING_THREAD_ERROR, "id2data failed");
 
     result = pthread_cond_broadcast(&data->conditionVariable);
     require_noerr_string(result, done, "pthread_cond_broadcast failed");
