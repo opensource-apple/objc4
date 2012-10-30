@@ -141,8 +141,8 @@
 
 #if !__OBJC2__
 
-#define OLD 1
 #include "objc-private.h"
+#include "objc-runtime-old.h"
 #include "objc-loadmethod.h"
 
 /* NXHashTable SPI */
@@ -193,10 +193,10 @@ static BOOL _objc_register_category(struct old_category *cat, int version);
 
 
 // Function called when a class is loaded from an image
-__private_extern__ void (*callbackFunction)(Class, const char *) = 0;
+PRIVATE_EXTERN void (*callbackFunction)(Class, Category) = 0;
 
 // Hash table of classes
-__private_extern__ NXHashTable *		class_hash NOBSS = 0;
+PRIVATE_EXTERN NXHashTable *		class_hash = 0;
 static NXHashTablePrototype	classHashPrototype =
 {
     (uintptr_t (*) (const void *, const void *))			classHash,
@@ -205,7 +205,7 @@ static NXHashTablePrototype	classHashPrototype =
 };
 
 // Hash table of unconnected classes
-static NXHashTable *unconnected_class_hash NOBSS = NULL;
+static NXHashTable *unconnected_class_hash = NULL;
 
 // Exported copy of class_hash variable (hook for debugging tools)
 NXHashTable *_objc_debug_class_hash = NULL;
@@ -235,7 +235,7 @@ static BOOL (*_objc_classLoader)(const char *) = NULL;
 /***********************************************************************
 * objc_dump_class_hash.  Log names of all known classes.
 **********************************************************************/
-__private_extern__ void objc_dump_class_hash(void)
+PRIVATE_EXTERN void objc_dump_class_hash(void)
 {
     NXHashTable *table;
     unsigned count;
@@ -254,7 +254,7 @@ __private_extern__ void objc_dump_class_hash(void)
 * _objc_init_class_hash.  Return the class lookup table, create it if
 * necessary.
 **********************************************************************/
-__private_extern__ void _objc_init_class_hash(void)
+PRIVATE_EXTERN void _objc_init_class_hash(void)
 {
     // Do nothing if class hash table already exists
     if (class_hash)
@@ -307,11 +307,48 @@ int objc_getClassList(Class *buffer, int bufferLen)
 
 
 /***********************************************************************
+* objc_copyClassList
+* Returns pointers to all classes.
+* This requires all classes be realized, which is regretfully non-lazy.
+* 
+* outCount may be NULL. *outCount is the number of classes returned. 
+* If the returned array is not NULL, it is NULL-terminated and must be 
+* freed with free().
+* Locking: acquires classLock
+**********************************************************************/
+Class *
+objc_copyClassList(unsigned int *outCount)
+{
+    Class *result;
+    unsigned int count;
+
+    mutex_lock(&classLock);
+    result = NULL;
+    count = class_hash ? NXCountHashTable(class_hash) : 0;
+
+    if (count > 0) {
+        Class cls;
+        NXHashState state = NXInitHashState(class_hash);
+        result = malloc((1+count) * sizeof(Class));
+        count = 0;
+        while (NXNextHashState(class_hash, &state, (void **)&cls)) {
+            result[count++] = cls;
+        }
+        result[count] = NULL;
+    }
+    mutex_unlock(&classLock);
+        
+    if (outCount) *outCount = count;
+    return result;
+}
+
+
+/***********************************************************************
 * objc_copyProtocolList
 * Returns pointers to all protocols.
 * Locking: acquires classLock
 **********************************************************************/
-Protocol **
+Protocol * __unsafe_unretained *
 objc_copyProtocolList(unsigned int *outCount) 
 {
     int count, i;
@@ -385,9 +422,7 @@ static uintptr_t classHash(void *info, Class data)
 static int classIsEqual(void *info, Class name, Class cls)
 {
     // Standard string comparison
-    // Our local inlined version is significantly shorter on PPC and avoids the
-    // mflr/mtlr and dyld_stub overhead when calling strcmp.
-    return _objc_strcmp(_class_getName(name), _class_getName(cls)) == 0;
+    return strcmp(_class_getName(name), _class_getName(cls)) == 0;
 }
 
 
@@ -481,7 +516,7 @@ static void makeFutureClass(struct old_class *cls, const char *name)
 * Assumes the named class doesn't exist yet.
 * Not thread safe.
 **********************************************************************/
-__private_extern__ Class _objc_allocateFutureClass(const char *name)
+PRIVATE_EXTERN Class _objc_allocateFutureClass(const char *name)
 {
     struct old_class *cls;
 
@@ -511,7 +546,7 @@ void objc_setFutureClass(Class cls, const char *name)
     struct old_class *oldcls;
     struct old_class *newcls = (struct old_class *)cls;  // Not a real class!
 
-    if ((oldcls = _class_asOld((Class)look_up_class(name, NO/*unconnected*/, NO/*classhandler*/)))) {
+    if ((oldcls = oldcls((Class)look_up_class(name, NO/*unconnected*/, NO/*classhandler*/)))) {
         setOriginalClassForFutureClass(newcls, oldcls);
         // fixme hack
         memcpy(newcls, oldcls, sizeof(struct objc_class));
@@ -593,7 +628,7 @@ Protocol *objc_getProtocol(const char *name)
 * 3. classLoader callback
 * 4. classHandler callback (optional)
 **********************************************************************/
-__private_extern__ id look_up_class(const char *aClassName, BOOL includeUnconnected, BOOL includeClassHandler)
+PRIVATE_EXTERN id look_up_class(const char *aClassName, BOOL includeUnconnected, BOOL includeClassHandler)
 {
     BOOL includeClassLoader = YES; // class loader cannot be skipped
     id result = nil;
@@ -661,9 +696,9 @@ static BOOL class_is_connected(struct old_class *cls)
 * Returns TRUE if class cls is ready for its +load method to be called. 
 * A class is ready for +load if it is connected.
 **********************************************************************/
-__private_extern__ BOOL _class_isLoadable(Class cls)
+PRIVATE_EXTERN BOOL _class_isLoadable(Class cls)
 {
-    return class_is_connected(_class_asOld(cls));
+    return class_is_connected(oldcls(cls));
 }
 
 
@@ -853,7 +888,7 @@ static void really_connect_class(struct old_class *cls,
     struct old_class *oldCls;
 
     // Connect superclass pointers.
-    set_superclass(cls, supercls);
+    set_superclass(cls, supercls, YES);
 
     // Update GC layouts
     // For paranoia, this is a conservative update: 
@@ -1026,7 +1061,7 @@ static BOOL connect_class(struct old_class *cls)
         struct old_class *supercls;
 
         // YES unconnected, YES class handler
-        if (NULL == (supercls = _class_asOld((Class)look_up_class(supercls_name, YES, YES)))) {
+        if (NULL == (supercls = oldcls((Class)look_up_class(supercls_name, YES, YES)))) {
             // Superclass does not exist yet.
             // pendClassInstallation will handle duplicate pends of this class
             pendClassInstallation(cls, supercls_name);
@@ -1275,7 +1310,7 @@ static void _objc_connect_classes_from_image(header_info *hi)
                     // field for [super ...] use, but otherwise perform 
                     // fixups on the new class struct only.
                     const char *super_name = (const char *) cls->super_class;
-                    if (super_name) cls->super_class = _class_asOld((Class)objc_getClass(super_name));
+                    if (super_name) cls->super_class = oldcls((Class)objc_getClass(super_name));
                     cls = futureCls;
                 }
                 connected = connect_class(cls);
@@ -1287,7 +1322,7 @@ static void _objc_connect_classes_from_image(header_info *hi)
                 // And metaclass's super_class (#5351107)
                 const char *super_name = (const char *) cls->super_class;
                 if (super_name) {
-                    cls->super_class = _class_asOld((Class)objc_getClass(super_name));
+                    cls->super_class = oldcls((Class)objc_getClass(super_name));
                     // metaclass's superclass is superclass's metaclass
                     cls->isa->super_class = cls->super_class->isa;
                 } else {
@@ -1315,7 +1350,7 @@ static void fix_class_ref(struct old_class **ref, const char *name, BOOL isMeta)
     // Get pointer to class of this name
     // NO unconnected, YES class loader
     // (real class with weak-missing superclass is unconnected now)
-    cls = _class_asOld((Class)look_up_class(name, NO, YES));
+    cls = oldcls((Class)look_up_class(name, NO, YES));
     if (cls) {
         // Referenced class exists. Fix up the reference.
         *ref = isMeta ? cls->isa : cls;
@@ -1499,7 +1534,7 @@ lookup_method(struct objc_method_description_list *mlist, SEL aSel)
 * Recursively search for a selector in a protocol 
 * (and all incorporated protocols)
 **********************************************************************/
-__private_extern__ struct objc_method_description *
+PRIVATE_EXTERN struct objc_method_description *
 lookup_protocol_method(struct old_protocol *proto, SEL aSel, 
                        BOOL isRequiredMethod, BOOL isInstanceMethod)
 {
@@ -1620,7 +1655,7 @@ protocol_copyMethodDescriptionList(Protocol *p,
 }
 
 
-Property protocol_getProperty(Protocol *p, const char *name, 
+objc_property_t protocol_getProperty(Protocol *p, const char *name, 
                               BOOL isRequiredProperty, BOOL isInstanceProperty)
 {
     struct old_protocol *proto = oldprotocol(p);
@@ -1635,13 +1670,13 @@ Property protocol_getProperty(Protocol *p, const char *name,
     }
 
     if ((ext = ext_for_protocol(proto))) {
-        struct objc_property_list *plist;
+        struct old_property_list *plist;
         if ((plist = ext->instance_properties)) {
             uint32_t i;
             for (i = 0; i < plist->count; i++) {
-                Property prop = property_list_nth(plist, i);
+                struct old_property *prop = property_list_nth(plist, i);
                 if (0 == strcmp(name, prop->name)) {
-                    return prop;
+                    return (objc_property_t)prop;
                 }
             }
         }
@@ -1650,7 +1685,7 @@ Property protocol_getProperty(Protocol *p, const char *name,
     if ((plist = proto->protocol_list)) {
         int i;
         for (i = 0; i < plist->count; i++) {
-            Property prop = 
+            objc_property_t prop = 
                 protocol_getProperty((Protocol *)plist->list[i], name, 
                                      isRequiredProperty, isInstanceProperty);
             if (prop) return prop;
@@ -1661,11 +1696,11 @@ Property protocol_getProperty(Protocol *p, const char *name,
 }
 
 
-Property *protocol_copyPropertyList(Protocol *p, unsigned int *outCount)
+objc_property_t *protocol_copyPropertyList(Protocol *p, unsigned int *outCount)
 {
-    Property *result = NULL;
+    struct old_property **result = NULL;
     struct old_protocol_ext *ext;
-    struct objc_property_list *plist;
+    struct old_property_list *plist;
     
     struct old_protocol *proto = oldprotocol(p);
     if (! (ext = ext_for_protocol(proto))) {
@@ -1676,7 +1711,7 @@ Property *protocol_copyPropertyList(Protocol *p, unsigned int *outCount)
     plist = ext->instance_properties;
     result = copyPropertyList(plist, outCount);
     
-    return result;
+    return (objc_property_t *)result;
 }
 
 
@@ -1685,7 +1720,8 @@ Property *protocol_copyPropertyList(Protocol *p, unsigned int *outCount)
 * Copies this protocol's incorporated protocols. 
 * Does not copy those protocol's incorporated protocols in turn.
 **********************************************************************/
-Protocol **protocol_copyProtocolList(Protocol *p, unsigned int *outCount)
+Protocol * __unsafe_unretained *
+protocol_copyProtocolList(Protocol *p, unsigned int *outCount)
 {
     unsigned int count = 0;
     Protocol **result = NULL;
@@ -1753,6 +1789,253 @@ BOOL protocol_isEqual(Protocol *self, Protocol *other)
     if (!protocol_conformsToProtocol(other, self)) return NO;
 
     return YES;
+}
+
+
+/***********************************************************************
+* objc_allocateProtocol
+* Creates a new protocol. The protocol may not be used until 
+* objc_registerProtocol() is called.
+* Returns NULL if a protocol with the same name already exists.
+* Locking: acquires classLock
+**********************************************************************/
+Protocol *
+objc_allocateProtocol(const char *name)
+{
+    Class cls = (Class)objc_getClass("__IncompleteProtocol");
+
+    mutex_lock(&classLock);
+
+    if (NXMapGet(protocol_map, name)) {
+        mutex_unlock(&classLock);
+        return NULL;
+    }
+
+    struct old_protocol *result = (struct old_protocol *)
+        _calloc_internal(1, sizeof(struct old_protocol) 
+                         + sizeof(struct old_protocol_ext));
+    struct old_protocol_ext *ext = (struct old_protocol_ext *)(result+1);
+    
+    result->isa = cls;
+    result->protocol_name = _strdup_internal(name);
+    ext->size = sizeof(*ext);
+
+    // fixme reserve name without installing
+
+    NXMapInsert(protocol_ext_map, result, result+1);
+
+    mutex_unlock(&classLock);
+
+    return (Protocol *)result;
+}
+
+
+/***********************************************************************
+* objc_registerProtocol
+* Registers a newly-constructed protocol. The protocol is now 
+* ready for use and immutable.
+* Locking: acquires classLock
+**********************************************************************/
+void objc_registerProtocol(Protocol *proto_gen) 
+{
+    struct old_protocol *proto = oldprotocol(proto_gen);
+
+    Class oldcls = (Class)objc_getClass("__IncompleteProtocol");
+    Class cls = (Class)objc_getClass("Protocol");
+
+    mutex_lock(&classLock);
+
+    if (proto->isa == cls) {
+        _objc_inform("objc_registerProtocol: protocol '%s' was already "
+                     "registered!", proto->protocol_name);
+        mutex_unlock(&classLock);
+        return;
+    }
+    if (proto->isa != oldcls) {
+        _objc_inform("objc_registerProtocol: protocol '%s' was not allocated "
+                     "with objc_allocateProtocol!", proto->protocol_name);
+        mutex_unlock(&classLock);
+        return;
+    }
+
+    proto->isa = cls;
+
+    NXMapKeyCopyingInsert(protocol_map, proto->protocol_name, proto);
+
+    mutex_unlock(&classLock);
+}
+
+
+/***********************************************************************
+* protocol_addProtocol
+* Adds an incorporated protocol to another protocol.
+* No method enforcement is performed.
+* `proto` must be under construction. `addition` must not.
+* Locking: acquires classLock
+**********************************************************************/
+void 
+protocol_addProtocol(Protocol *proto_gen, Protocol *addition_gen) 
+{
+    struct old_protocol *proto = oldprotocol(proto_gen);
+    struct old_protocol *addition = oldprotocol(addition_gen);
+
+    Class cls = (Class)objc_getClass("__IncompleteProtocol");
+
+    if (!proto_gen) return;
+    if (!addition_gen) return;
+
+    mutex_lock(&classLock);
+
+    if (proto->isa != cls) {
+        _objc_inform("protocol_addProtocol: modified protocol '%s' is not "
+                     "under construction!", proto->protocol_name);
+        mutex_unlock(&classLock);
+        return;
+    }
+    if (addition->isa == cls) {
+        _objc_inform("protocol_addProtocol: added protocol '%s' is still "
+                     "under construction!", addition->protocol_name);
+        mutex_unlock(&classLock);
+        return;        
+    }
+    
+    struct old_protocol_list *protolist = proto->protocol_list;
+    if (protolist) {
+        size_t size = sizeof(*protolist) 
+            + protolist->count * sizeof(protolist->list[0]);
+        protolist = (struct old_protocol_list *)
+            _realloc_internal(protolist, size);
+    } else {
+        protolist = (struct old_protocol_list *)
+            _calloc_internal(1, sizeof(struct old_protocol_list));
+    }
+
+    protolist->list[protolist->count++] = addition;
+    proto->protocol_list = protolist;
+
+    mutex_unlock(&classLock);
+}
+
+
+/***********************************************************************
+* protocol_addMethodDescription
+* Adds a method to a protocol. The protocol must be under construction.
+* Locking: acquires classLock
+**********************************************************************/
+static void
+_protocol_addMethod(struct objc_method_description_list **list, SEL name, const char *types)
+{
+    if (!*list) {
+        *list = (struct objc_method_description_list *)
+            _calloc_internal(sizeof(struct objc_method_description_list), 1);
+    } else {
+        size_t size = sizeof(struct objc_method_description_list) 
+            + (*list)->count * sizeof(struct objc_method_description);
+        *list = (struct objc_method_description_list *)
+            _realloc_internal(*list, size);
+    }
+
+    struct objc_method_description *desc = &(*list)->list[(*list)->count++];
+    desc->name = name;
+    desc->types = _strdup_internal(types ?: "");
+}
+
+void 
+protocol_addMethodDescription(Protocol *proto_gen, SEL name, const char *types,
+                              BOOL isRequiredMethod, BOOL isInstanceMethod) 
+{
+    struct old_protocol *proto = oldprotocol(proto_gen);
+
+    Class cls = (Class)objc_getClass("__IncompleteProtocol");
+
+    if (!proto_gen) return;
+
+    mutex_lock(&classLock);
+
+    if (proto->isa != cls) {
+        _objc_inform("protocol_addMethodDescription: protocol '%s' is not "
+                     "under construction!", proto->protocol_name);
+        mutex_unlock(&classLock);
+        return;
+    }
+
+    if (isRequiredMethod  &&  isInstanceMethod) {
+        _protocol_addMethod(&proto->instance_methods, name, types);
+    } else if (isRequiredMethod  &&  !isInstanceMethod) {
+        _protocol_addMethod(&proto->class_methods, name, types);
+    } else if (!isRequiredMethod  &&  isInstanceMethod) {
+        struct old_protocol_ext *ext = (struct old_protocol_ext *)(proto+1);
+        _protocol_addMethod(&ext->optional_instance_methods, name, types);
+    } else /*  !isRequiredMethod  &&  !isInstanceMethod) */ {
+        struct old_protocol_ext *ext = (struct old_protocol_ext *)(proto+1);
+        _protocol_addMethod(&ext->optional_class_methods, name, types);
+    }
+
+    mutex_unlock(&classLock);
+}
+
+
+/***********************************************************************
+* protocol_addProperty
+* Adds a property to a protocol. The protocol must be under construction.
+* Locking: acquires classLock
+**********************************************************************/
+static void 
+_protocol_addProperty(struct old_property_list **plist, const char *name, 
+                      const objc_property_attribute_t *attrs, 
+                      unsigned int count)
+{
+    if (!*plist) {
+        *plist = (struct old_property_list *)
+            _calloc_internal(sizeof(struct old_property_list), 1);
+        (*plist)->entsize = sizeof(struct old_property);
+    } else {
+        *plist = (struct old_property_list *)
+            _realloc_internal(*plist, sizeof(struct old_property_list) 
+                              + (*plist)->count * (*plist)->entsize);
+    }
+
+    struct old_property *prop = property_list_nth(*plist, (*plist)->count++);
+    prop->name = _strdup_internal(name);
+    prop->attributes = copyPropertyAttributeString(attrs, count);
+}
+
+void 
+protocol_addProperty(Protocol *proto_gen, const char *name, 
+                     const objc_property_attribute_t *attrs, 
+                     unsigned int count,
+                     BOOL isRequiredProperty, BOOL isInstanceProperty)
+{
+    struct old_protocol *proto = oldprotocol(proto_gen);
+
+    Class cls = (Class)objc_getClass("__IncompleteProtocol");
+
+    if (!proto) return;
+    if (!name) return;
+
+    mutex_lock(&classLock);
+    
+    if (proto->isa != cls) {
+        _objc_inform("protocol_addProperty: protocol '%s' is not "
+                     "under construction!", proto->protocol_name);
+        mutex_unlock(&classLock);
+        return;
+    }
+
+    struct old_protocol_ext *ext = ext_for_protocol(proto);
+
+    if (isRequiredProperty  &&  isInstanceProperty) {
+        _protocol_addProperty(&ext->instance_properties, name, attrs, count);
+    }
+    //else if (isRequiredProperty  &&  !isInstanceProperty) {
+    //    _protocol_addProperty(&ext->class_properties, name, attrs, count);
+    //} else if (!isRequiredProperty  &&  isInstanceProperty) {
+    //    _protocol_addProperty(&ext->optional_instance_properties, name, attrs, count);
+    //} else /*  !isRequiredProperty  &&  !isInstanceProperty) */ {
+    //    _protocol_addProperty(&ext->optional_class_properties, name, attrs, count);
+    //}
+
+    mutex_unlock(&classLock);
 }
 
 
@@ -1890,17 +2173,18 @@ static inline BOOL _is_threaded() {
 #endif
 }
 
+#if !TARGET_OS_WIN32
 /***********************************************************************
 * unmap_image
 * Process the given image which is about to be unmapped by dyld.
 * mh is mach_header instead of headerType because that's what 
 *   dyld_priv.h says even for 64-bit.
 **********************************************************************/
-__private_extern__ void 
+PRIVATE_EXTERN void 
 unmap_image(const struct mach_header *mh, intptr_t vmaddr_slide)
 {
     recursive_mutex_lock(&loadMethodLock);
-    unmap_image_nolock(mh, vmaddr_slide);
+    unmap_image_nolock(mh);
     recursive_mutex_unlock(&loadMethodLock);
 }
 
@@ -1910,7 +2194,7 @@ unmap_image(const struct mach_header *mh, intptr_t vmaddr_slide)
 * Process the given images which are being mapped in by dyld.
 * Calls ABI-agnostic code after taking ABI-specific locks.
 **********************************************************************/
-__private_extern__ const char *
+PRIVATE_EXTERN const char *
 map_images(enum dyld_image_states state, uint32_t infoCount,
            const struct dyld_image_info infoList[])
 {
@@ -1931,7 +2215,7 @@ map_images(enum dyld_image_states state, uint32_t infoCount,
 *
 * Locking: acquires classLock and loadMethodLock
 **********************************************************************/
-__private_extern__ const char *
+PRIVATE_EXTERN const char *
 load_images(enum dyld_image_states state, uint32_t infoCount,
            const struct dyld_image_info infoList[])
 {
@@ -1951,13 +2235,14 @@ load_images(enum dyld_image_states state, uint32_t infoCount,
 
     return NULL;
 }
+#endif
 
 
 /***********************************************************************
 * _read_images
 * Perform metadata processing for hCount images starting with firstNewHeader
 **********************************************************************/
-__private_extern__ void _read_images(header_info **hList, uint32_t hCount)
+PRIVATE_EXTERN void _read_images(header_info **hList, uint32_t hCount)
 {
     uint32_t i;
     BOOL categoriesLoaded = NO;
@@ -2025,7 +2310,7 @@ static void schedule_class_load(struct old_class *cls)
     cls->info |= CLS_LOADED;
 }
 
-__private_extern__ void prepare_load_methods(header_info *hi)
+PRIVATE_EXTERN void prepare_load_methods(header_info *hi)
 {
     Module mods;
     unsigned int midx;
@@ -2090,7 +2375,7 @@ __private_extern__ void prepare_load_methods(header_info *hi)
 
 #if TARGET_OS_WIN32
 
-__private_extern__ void unload_class(struct old_class *cls)
+PRIVATE_EXTERN void unload_class(struct old_class *cls)
 {
 }
 
@@ -2127,7 +2412,7 @@ static void rependClassReferences(struct old_class **refs, size_t count,
 }
 
 
-static void try_free(const void *p)
+PRIVATE_EXTERN void try_free(const void *p)
 {
     if (p  &&  malloc_size(p)) free((void *)p);
 }
@@ -2142,8 +2427,23 @@ static void unload_mlist(struct old_method_list *mlist)
     try_free(mlist);
 }
 
+static void unload_property_list(struct old_property_list *proplist)
+{
+    uint32_t i;
+
+    if (!proplist) return;
+
+    for (i = 0; i < proplist->count; i++) {
+        struct old_property *prop = property_list_nth(proplist, i);
+        try_free(prop->name);
+        try_free(prop->attributes);
+    }
+    try_free(proplist);
+}
+
+
 // Deallocate all memory in a class. 
-__private_extern__ void unload_class(struct old_class *cls)
+PRIVATE_EXTERN void unload_class(struct old_class *cls)
 {
     // Free method cache
     // This dereferences the cache contents; do this before freeing methods
@@ -2196,15 +2496,17 @@ __private_extern__ void unload_class(struct old_class *cls)
                 // more than zero property lists
                 if (cls->info & CLS_NO_PROPERTY_ARRAY) {
                     // one property list
-                    try_free(cls->ext->propertyLists);
+                    struct old_property_list *proplist = 
+                        (struct old_property_list *)cls->ext->propertyLists;
+                    unload_property_list(proplist);
                 } else {
                     // more than one property list
-                    struct objc_property_list **plistp;
+                    struct old_property_list **plistp;
                     for (plistp = cls->ext->propertyLists; 
                          *plistp != NULL; 
                          plistp++) 
                     {
-                        try_free(*plistp);
+                        unload_property_list(*plistp);
                     }
                     try_free(cls->ext->propertyLists);
                 }
@@ -2288,8 +2590,9 @@ static void _objc_remove_classes_in_image(header_info *hi)
     // Un-fix and re-pend any such class refs.
 
     // Get the location of the dying image's __OBJC segment
-    uintptr_t seg = hi->os.objcSegmentHeader->vmaddr + hi->os.image_slide;
-    size_t seg_size = hi->os.objcSegmentHeader->filesize;
+    uintptr_t seg;
+    unsigned long seg_size;
+    seg = (uintptr_t)getsegmentdata(hi->mhdr, "__OBJC", &seg_size);
 
     header_info *other_hi;
     for (other_hi = FirstHeader; other_hi != NULL; other_hi = other_hi->next) {
@@ -2366,8 +2669,9 @@ static void _objc_remove_categories_in_image(header_info *hi)
 static void unload_paranoia(header_info *hi) 
 {
     // Get the location of the dying image's __OBJC segment
-    uintptr_t seg = hi->os.objcSegmentHeader->vmaddr + hi->os.image_slide;
-    size_t seg_size = hi->os.objcSegmentHeader->filesize;
+    uintptr_t seg;
+    unsigned long seg_size;
+    seg = (uintptr_t)getsegmentdata(hi->mhdr, "__OBJC", &seg_size);
 
     _objc_inform("UNLOAD DEBUG: unloading image '%s' [%p..%p]", 
                  _nameForHeader(hi->mhdr), (void *)seg, (void*)(seg+seg_size));
@@ -2439,7 +2743,7 @@ static void unload_paranoia(header_info *hi)
 * Only handles MH_BUNDLE for now.
 * Locking: loadMethodLock acquired by unmap_image
 **********************************************************************/
-__private_extern__ void _unload_image(header_info *hi)
+PRIVATE_EXTERN void _unload_image(header_info *hi)
 {
     recursive_mutex_assert_locked(&loadMethodLock);
 
@@ -2464,7 +2768,7 @@ __private_extern__ void _unload_image(header_info *hi)
 **********************************************************************/
 void		objc_addClass		(Class cls_gen)
 {
-    struct old_class *cls = _class_asOld(cls_gen);
+    struct old_class *cls = oldcls(cls_gen);
 
     OBJC_WARN_DEPRECATED;
 
@@ -2546,7 +2850,7 @@ static void _objcTweakMethodListPointerForClass(struct old_class *cls)
 * Does not take any locks.
 * If the class is already in use, use class_addMethods() instead.
 **********************************************************************/
-__private_extern__ void _objc_insertMethods(struct old_class *cls, 
+PRIVATE_EXTERN void _objc_insertMethods(struct old_class *cls, 
                                             struct old_method_list *mlist, 
                                             struct old_category *cat)
 {
@@ -2626,7 +2930,7 @@ __private_extern__ void _objc_insertMethods(struct old_class *cls,
 * Does not flush any method caches.
 * If the class is currently in use, use class_removeMethods() instead.
 **********************************************************************/
-__private_extern__ void _objc_removeMethods(struct old_class *cls, 
+PRIVATE_EXTERN void _objc_removeMethods(struct old_class *cls, 
                                             struct old_method_list *mlist)
 {
     struct old_method_list ***list;
@@ -2819,7 +3123,7 @@ static void resolve_categories_for_class(struct old_class *cls)
 **********************************************************************/
 void _objc_resolve_categories_for_class(Class cls_gen)
 {
-    struct old_class *cls = _class_asOld(cls_gen);
+    struct old_class *cls = oldcls(cls_gen);
 
     // If cls is a metaclass, get the class. 
     // resolve_categories_for_class() requires a real class to work correctly.
@@ -2828,9 +3132,9 @@ void _objc_resolve_categories_for_class(Class cls_gen)
             // Posee's meta's name is smashed and isn't in the class_hash, 
             // so objc_getClass doesn't work.
             const char *baseName = strchr(cls->name, '%'); // get posee's real name
-            cls = _class_asOld((Class)objc_getClass(baseName));
+            cls = oldcls((Class)objc_getClass(baseName));
         } else {
-            cls = _class_asOld((Class)objc_getClass(cls->name));
+            cls = oldcls((Class)objc_getClass(cls->name));
         }
     }
 
@@ -2855,7 +3159,7 @@ static BOOL _objc_register_category(struct old_category *cat, int version)
     struct old_class *theClass;
 
     // If the category's class exists, attach the category.
-    if ((theClass = _class_asOld((Class)objc_lookUpClass(cat->class_name)))) {
+    if ((theClass = oldcls((Class)objc_lookUpClass(cat->class_name)))) {
         return _objc_add_category_flush_caches(theClass, cat, version);
     }
     
@@ -2863,7 +3167,7 @@ static BOOL _objc_register_category(struct old_category *cat, int version)
     // then attach the category to the class but don't bother 
     // flushing any method caches (because they must be empty).
     // YES unconnected, NO class_handler
-    if ((theClass = _class_asOld((Class)look_up_class(cat->class_name, YES, NO)))) {
+    if ((theClass = oldcls((Class)look_up_class(cat->class_name, YES, NO)))) {
         _objc_add_category(theClass, cat, version);
         return NO;
     }
@@ -2898,7 +3202,7 @@ static BOOL _objc_register_category(struct old_category *cat, int version)
 }
 
 
-__private_extern__ const char **
+PRIVATE_EXTERN const char **
 _objc_copyClassNamesForImage(header_info *hi, unsigned int *outCount)
 {
     Module mods;
@@ -2945,6 +3249,21 @@ _objc_copyClassNamesForImage(header_info *hi, unsigned int *outCount)
     return list;
 }
 
+Class gdb_class_getClass(Class cls)
+{
+    const char *className = cls->name;
+    if(!className || !strlen(className)) return Nil;
+    Class rCls = look_up_class(className, NO, NO);
+    return rCls;
+
+}
+
+Class gdb_object_getClass(id obj)
+{
+    Class cls = _object_getClass(obj);
+    return gdb_class_getClass(cls);
+}
+
 BOOL gdb_objc_isRuntimeLocked()
 {
     if (mutex_try_lock(&methodListLock)) {
@@ -2971,24 +3290,24 @@ BOOL gdb_objc_isRuntimeLocked()
 * Every lock used anywhere must be managed here. 
 * Locks not managed here may cause gdb deadlocks.
 **********************************************************************/
-__private_extern__ rwlock_t selLock = {0};
-__private_extern__ mutex_t classLock = MUTEX_INITIALIZER;
-__private_extern__ mutex_t methodListLock = MUTEX_INITIALIZER;
-__private_extern__ mutex_t cacheUpdateLock = MUTEX_INITIALIZER;
-__private_extern__ recursive_mutex_t loadMethodLock = RECURSIVE_MUTEX_INITIALIZER;
+PRIVATE_EXTERN rwlock_t selLock = {0};
+PRIVATE_EXTERN mutex_t classLock = MUTEX_INITIALIZER;
+PRIVATE_EXTERN mutex_t methodListLock = MUTEX_INITIALIZER;
+PRIVATE_EXTERN mutex_t cacheUpdateLock = MUTEX_INITIALIZER;
+PRIVATE_EXTERN recursive_mutex_t loadMethodLock = RECURSIVE_MUTEX_INITIALIZER;
 static int debugger_selLock;
 static int debugger_loadMethodLock;
 #define RDONLY 1
 #define RDWR 2
 
-__private_extern__ void lock_init(void)
+PRIVATE_EXTERN void lock_init(void)
 {
     rwlock_init(&selLock);
     recursive_mutex_init(&loadMethodLock);
 }
 
 
-#ifndef NO_DEBUGGER_MODE
+#if SUPPORT_DEBUGGER_MODE
 
 /***********************************************************************
 * startDebuggerMode
@@ -3000,7 +3319,7 @@ __private_extern__ void lock_init(void)
 *   attempt to manipulate them will cause a trap.
 * Locks not handled here may cause deadlocks in gdb.
 **********************************************************************/
-__private_extern__ int startDebuggerMode(void)
+PRIVATE_EXTERN int startDebuggerMode(void)
 {
     int result = DEBUGGER_FULL;
 
@@ -3047,7 +3366,7 @@ __private_extern__ int startDebuggerMode(void)
 * endDebuggerMode
 * Relinquish locks acquired in startDebuggerMode().
 **********************************************************************/
-__private_extern__ void endDebuggerMode(void)
+PRIVATE_EXTERN void endDebuggerMode(void)
 {
     if (debugger_loadMethodLock) {
         recursive_mutex_unlock(&loadMethodLock);
@@ -3065,7 +3384,7 @@ __private_extern__ void endDebuggerMode(void)
 * Returns YES if the given lock is handled specially during debugger 
 * mode (i.e. debugger mode tries to acquire it).
 **********************************************************************/
-__private_extern__ BOOL isManagedDuringDebugger(void *lock)
+PRIVATE_EXTERN BOOL isManagedDuringDebugger(void *lock)
 {
     if (lock == &selLock) return YES;
     if (lock == &classLock) return YES;
@@ -3081,7 +3400,7 @@ __private_extern__ BOOL isManagedDuringDebugger(void *lock)
 * Locking a managed mutex during debugger mode causes a trap unless 
 *   this returns YES.
 **********************************************************************/
-__private_extern__ BOOL isLockedDuringDebugger(mutex_t *lock)
+PRIVATE_EXTERN BOOL isLockedDuringDebugger(mutex_t *lock)
 {
     assert(DebuggerMode);
 
@@ -3099,7 +3418,7 @@ __private_extern__ BOOL isLockedDuringDebugger(mutex_t *lock)
 * Read-locking a managed rwlock during debugger mode causes a trap unless
 *   this returns YES.
 **********************************************************************/
-__private_extern__ BOOL isReadingDuringDebugger(rwlock_t *lock)
+PRIVATE_EXTERN BOOL isReadingDuringDebugger(rwlock_t *lock)
 {
     assert(DebuggerMode);
     
@@ -3115,7 +3434,7 @@ __private_extern__ BOOL isReadingDuringDebugger(rwlock_t *lock)
 * Write-locking a managed rwlock during debugger mode causes a trap unless
 *   this returns YES.
 **********************************************************************/
-__private_extern__ BOOL isWritingDuringDebugger(rwlock_t *lock)
+PRIVATE_EXTERN BOOL isWritingDuringDebugger(rwlock_t *lock)
 {
     assert(DebuggerMode);
     
@@ -3124,7 +3443,7 @@ __private_extern__ BOOL isWritingDuringDebugger(rwlock_t *lock)
     return NO;
 }
 
-// !defined(NO_DEBUGGER_MODE)
+// SUPPORT_DEBUGGER_MODE
 #endif
 
 #endif

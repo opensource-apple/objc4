@@ -1,3 +1,5 @@
+// TEST_CFLAGS -Wno-deprecated-declarations
+
 #include "test.h"
 #include <objc/runtime.h>
 #include <objc/message.h>
@@ -63,15 +65,18 @@ void cycle(Class cls)
     id idVal;
     uintptr_t intVal;
 
-    if (objc_collecting_enabled()) {
-        // GC: all ignored selectors are identical
+#if defined(__i386__)
+    if (objc_collectingEnabled()) {
+        // i386 GC: all ignored selectors are identical
         testassert(@selector(retain) == @selector(release)      &&  
                    @selector(retain) == @selector(autorelease)  &&  
                    @selector(retain) == @selector(dealloc)      &&  
                    @selector(retain) == @selector(retainCount)  );
     }
-    else {
-        // no GC: all ignored selectors are distinct
+    else 
+#endif
+    {
+        // x86_64 GC or no GC: all ignored selectors are distinct
         testassert(@selector(retain) != @selector(release)      &&  
                    @selector(retain) != @selector(autorelease)  &&  
                    @selector(retain) != @selector(dealloc)      &&  
@@ -93,7 +98,7 @@ void cycle(Class cls)
     getImp(dealloc);
     getImp(retainCount);
 
-    if (objc_collecting_enabled()) {
+    if (objc_collectingEnabled()) {
         // GC: all ignored selector IMPs are identical
         testassert(retain == release      &&  
                    retain == autorelease  &&  
@@ -123,26 +128,26 @@ void cycle(Class cls)
 
     state = 0;
     idVal =         ((id(*)(id, Method))method_invoke)(cls, retainMethod);
-    testassert(state == (objc_collecting_enabled() ? 0 : 2));
+    testassert(state == (objc_collectingEnabled() ? 0 : 2));
     testassert(idVal == cls);
 
     idVal =         ((id(*)(id, Method))method_invoke)(cls, releaseMethod);
-    testassert(state == (objc_collecting_enabled() ? 0 : 3));
+    testassert(state == (objc_collectingEnabled() ? 0 : 3));
     testassert(idVal == cls);
 
     idVal =         ((id(*)(id, Method))method_invoke)(cls, autoreleaseMethod);
-    testassert(state == (objc_collecting_enabled() ? 0 : 4));
+    testassert(state == (objc_collectingEnabled() ? 0 : 4));
     testassert(idVal == cls);
 
     (void)        ((void(*)(id, Method))method_invoke)(cls, deallocMethod);
-    testassert(state == (objc_collecting_enabled() ? 0 : 5));
+    testassert(state == (objc_collectingEnabled() ? 0 : 5));
 
     intVal = ((uintptr_t(*)(id, Method))method_invoke)(cls, retainCountMethod);
-    testassert(state == (objc_collecting_enabled() ? 0 : 6));
-    testassert(intVal == (objc_collecting_enabled() ? (uintptr_t)cls : 6));
+    testassert(state == (objc_collectingEnabled() ? 0 : 6));
+    testassert(intVal == (objc_collectingEnabled() ? (uintptr_t)cls : 6));
 
 
-    // Test calls via objc_msgSend
+    // Test calls via compiled objc_msgSend
 
     state = 0;
     idVal  = [cls normal];
@@ -151,23 +156,50 @@ void cycle(Class cls)
 
     state = 0;
     idVal  = [cls retain];
-    testassert(state == (objc_collecting_enabled() ? 0 : 2));
+    testassert(state == (objc_collectingEnabled() ? 0 : 2));
     testassert(idVal == cls);
 
     idVal  = [cls release];
-    testassert(state == (objc_collecting_enabled() ? 0 : 3));
+    testassert(state == (objc_collectingEnabled() ? 0 : 3));
     testassert(idVal == cls);
 
     idVal  = [cls autorelease];
-    testassert(state == (objc_collecting_enabled() ? 0 : 4));
+    testassert(state == (objc_collectingEnabled() ? 0 : 4));
     testassert(idVal == cls);
 
     (void)   [cls dealloc];
-    testassert(state == (objc_collecting_enabled() ? 0 : 5));
+    testassert(state == (objc_collectingEnabled() ? 0 : 5));
 
     intVal = [cls retainCount];
-    testassert(state == (objc_collecting_enabled() ? 0 : 6));
-    testassert(intVal == (objc_collecting_enabled() ? (uintptr_t)cls : 6));
+    testassert(state == (objc_collectingEnabled() ? 0 : 6));
+    testassert(intVal == (objc_collectingEnabled() ? (uintptr_t)cls : 6));
+
+    // Test calls via handwritten objc_msgSend
+
+    state = 0;
+    idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(normal));
+    testassert(state == 1);
+    testassert(idVal == cls);
+
+    state = 0;
+    idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(retain));
+    testassert(state == (objc_collectingEnabled() ? 0 : 2));
+    testassert(idVal == cls);
+
+    idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(release));
+    testassert(state == (objc_collectingEnabled() ? 0 : 3));
+    testassert(idVal == cls);
+
+    idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(autorelease));
+    testassert(state == (objc_collectingEnabled() ? 0 : 4));
+    testassert(idVal == cls);
+
+    (void)   ((void(*)(id,SEL))objc_msgSend)(cls, @selector(dealloc));
+    testassert(state == (objc_collectingEnabled() ? 0 : 5));
+
+    intVal = ((uintptr_t(*)(id,SEL))objc_msgSend)(cls, @selector(retainCount));
+    testassert(state == (objc_collectingEnabled() ? 0 : 6));
+    testassert(intVal == (objc_collectingEnabled() ? (uintptr_t)cls : 6));
 }
 
 int main()
@@ -178,9 +210,13 @@ int main()
 
     testassert(sel_registerName("retain") == @selector(retain));
     testassert(sel_getUid("retain") == @selector(retain));
-    if (objc_collecting_enabled()) {
+#if defined(__i386__)
+    if (objc_collectingEnabled()) {
+        // only i386's GC currently remaps these
         testassert(0 == strcmp(sel_getName(@selector(retain)), "<ignored selector>"));
-    } else {
+    } else 
+#endif
+    {
         testassert(0 == strcmp(sel_getName(@selector(retain)), "retain"));
     }
 #if !__OBJC2__
@@ -195,7 +231,7 @@ int main()
     testassert(cls);
     cycle(cls);
 
-    if (objc_collecting_enabled()) {
+    if (objc_collectingEnabled()) {
         // rdar://6200570 Method manipulation shouldn't affect ignored methods.
 
         cls = [Super class];
@@ -251,7 +287,7 @@ int main()
 
     // Test calls via objc_msgSend - ignored selectors are ignored 
     // under GC even if the class provides no implementation for them
-    if (objc_collecting_enabled()) {
+    if (objc_collectingEnabled()) {
         Class cls;
         id idVal;
         uintptr_t intVal;
@@ -279,6 +315,31 @@ int main()
         testassert(intVal == (uintptr_t)cls);
 
         idVal  = [Empty normal];
+        testassert(state == 1);
+        testassert(idVal == nil);
+
+        state = 0;
+
+        idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(retain));
+        testassert(state == 0);
+        testassert(idVal == cls);
+
+        idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(release));
+        testassert(state == 0);
+        testassert(idVal == cls);
+
+        idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(autorelease));
+        testassert(state == 0);
+        testassert(idVal == cls);
+
+        (void)   ((void(*)(id,SEL))objc_msgSend)(cls, @selector(dealloc));
+        testassert(state == 0);
+
+        intVal = ((uintptr_t(*)(id,SEL))objc_msgSend)(cls, @selector(retainCount));
+        testassert(state == 0);
+        testassert(intVal == (uintptr_t)cls);
+
+        idVal  = ((id(*)(id,SEL))objc_msgSend)(cls, @selector(normal));
         testassert(state == 1);
         testassert(idVal == nil);
     }    

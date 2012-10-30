@@ -1,3 +1,12 @@
+/*
+TEST_BUILD
+    $C{COMPILE}   $DIR/unload4.m -o unload4.dylib -dynamiclib
+    $C{COMPILE_C} $DIR/unload3.c -o unload3.dylib -dynamiclib
+    $C{COMPILE}   $DIR/unload2.m -o unload2.bundle -bundle
+    $C{COMPILE}   $DIR/unload.m -o unload.out
+END
+ */
+
 #include "test.h"
 #include <objc/runtime.h>
 #include <dlfcn.h>
@@ -27,13 +36,13 @@ void cycle(void)
     testassert(names);
     free(names);
 
-    void *bundle = dlopen("unload2.out", RTLD_LAZY);
+    void *bundle = dlopen("unload2.bundle", RTLD_LAZY);
     testassert(bundle);
 
     names = objc_copyImageNames(&imageCount);
     testassert(names);
     testassert(imageCount == imageCount0 + 1);
-    testassert(hasName(names, "unload2.out"));
+    testassert(hasName(names, "unload2.bundle"));
     free(names);
 
     Class small = objc_getClass("SmallClass");
@@ -43,10 +52,10 @@ void cycle(void)
 
     name = class_getImageName(small);
     testassert(name);
-    testassert(strstr(name, "unload2.out"));
+    testassert(strstr(name, "unload2.bundle"));
     name = class_getImageName(big);
     testassert(name);
-    testassert(strstr(name, "unload2.out"));
+    testassert(strstr(name, "unload2.bundle"));
 
     id o1 = [small new];
     id o2 = [big new];
@@ -64,7 +73,7 @@ void cycle(void)
     [o1 free];
     [o2 free];
 
-    if (objc_collecting_enabled()) objc_collect(OBJC_EXHAUSTIVE_COLLECTION | OBJC_WAIT_UNTIL_DONE);
+    testcollect();
 
     int err = dlclose(bundle);
     testassert(err == 0);
@@ -77,7 +86,7 @@ void cycle(void)
     names = objc_copyImageNames(&imageCount);
     testassert(names);
     testassert(imageCount == imageCount0);
-    testassert(! hasName(names, "unload2.out"));
+    testassert(! hasName(names, "unload2.bundle"));
     free(names);
 
     // these selectors came from the bundle
@@ -88,9 +97,13 @@ void cycle(void)
 int main()
 {
     // fixme object_dispose() not aggressive enough?
-    if (objc_collecting_enabled()) succeed(__FILE__);
+    if (objc_collectingEnabled()) succeed(__FILE__);
 
-    int count = 100;
+#if defined(__arm__)
+    int count = 10;
+#else
+    int count = is_guardmalloc() ? 10 : 100;
+#endif
     
     cycle();
 #if __LP64__
@@ -105,7 +118,7 @@ int main()
     leak_check(0);
 
     // 5359412 Make sure dylibs with nothing other than image_info can close
-    void *dylib = dlopen("unload3.out", RTLD_LAZY);
+    void *dylib = dlopen("unload3.dylib", RTLD_LAZY);
     testassert(dylib);
     int err = dlclose(dylib);
     testassert(err == 0);
@@ -113,7 +126,7 @@ int main()
     testassert(err == -1);  // already closed
 
     // Make sure dylibs with real objc content cannot close
-    dylib = dlopen("unload4.out", RTLD_LAZY);
+    dylib = dlopen("unload4.dylib", RTLD_LAZY);
     testassert(dylib);
     err = dlclose(dylib);
     testassert(err == 0);

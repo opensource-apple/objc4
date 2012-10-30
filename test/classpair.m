@@ -1,3 +1,5 @@
+// TEST_CFLAGS -Wno-deprecated-declarations
+
 #include "test.h"
 #include <objc/runtime.h>
 #include <string.h>
@@ -30,9 +32,14 @@
 +(void) classMethod2;
 @end
 
-@interface Super { @public id isa; } @end
+static int super_initialize;
+
+@interface Super { @public id isa; } 
+@property int superProp;
+@end
 @implementation Super 
-+(void)initialize { } 
+@dynamic superProp;
++(void)initialize { super_initialize++; } 
 +class { return self; }
 +(id) new { return class_createInstance(self, 0); }
 -(void) free { object_dispose(self); }
@@ -60,10 +67,17 @@ static void class_fn(id self, SEL _cmd __attribute__((unused)))
     state++;
 }
 
+static void fail_fn(id self __attribute__((unused)), SEL _cmd)
+{
+    fail("fail_fn '%s' called", sel_getName(_cmd));
+}
+
 static void cycle(void)
 {    
     Class cls;
     BOOL ok;
+    objc_property_t prop;
+    char namebuf[256];
     
     testassert(!objc_getClass("Sub"));
     testassert([Super class]);
@@ -73,9 +87,9 @@ static void cycle(void)
     cls = objc_allocateClassPair([Super class], "Sub", 0);
     testassert(cls);
 #ifndef OBJC_NO_GC
-    if (objc_collecting_enabled()) {
-        testassert(auto_zone_size(auto_zone(), cls));
-        testassert(auto_zone_size(auto_zone(), cls->isa));
+    if (objc_collectingEnabled()) {
+        testassert(auto_zone_size(objc_collectableZone(), cls));
+        testassert(auto_zone_size(objc_collectableZone(), cls->isa));
     }
 #endif
     
@@ -83,11 +97,41 @@ static void cycle(void)
                     (IMP)&instance_fn, "v@:");
     class_addMethod(cls->isa, @selector(classMethod), 
                     (IMP)&class_fn, "v@:");
+    class_addMethod(cls->isa, @selector(initialize), 
+                    (IMP)&class_fn, "v@:");
+    class_addMethod(cls->isa, @selector(load), 
+                    (IMP)&fail_fn, "v@:");
 
     ok = class_addProtocol(cls, @protocol(Proto));
     testassert(ok);
     ok = class_addProtocol(cls, @protocol(Proto));
     testassert(!ok);
+
+    char attrname[2];
+    char attrvalue[2];
+    objc_property_attribute_t attrs[1];
+    unsigned int attrcount = sizeof(attrs) / sizeof(attrs[0]);
+
+    attrs[0].name = attrname;
+    attrs[0].value = attrvalue;
+    strcpy(attrname, "T");
+    strcpy(attrvalue, "x");
+
+    strcpy(namebuf, "subProp");
+    ok = class_addProperty(cls, namebuf, attrs, attrcount);
+    testassert(ok);
+    strcpy(namebuf, "subProp");
+    ok = class_addProperty(cls, namebuf, attrs, attrcount);
+    testassert(!ok);
+    strcpy(attrvalue, "i");
+    class_replaceProperty(cls, namebuf, attrs, attrcount);
+    strcpy(namebuf, "superProp");
+    ok = class_addProperty(cls, namebuf, attrs, attrcount);
+    testassert(!ok);
+    bzero(namebuf, sizeof(namebuf));
+    bzero(attrs, sizeof(attrs));
+    bzero(attrname, sizeof(attrname));
+    bzero(attrvalue, sizeof(attrvalue));
 
 #ifndef __LP64__
 # define size 4
@@ -97,12 +141,23 @@ static void cycle(void)
 # define align 3
 #endif
 
+    /*
+      {
+        int ivar;
+        id ivarid;
+        id* ivaridstar;
+        Block_t ivarblock;
+      }
+    */
     ok = class_addIvar(cls, "ivar", 4, 2, "i");
     testassert(ok);
     ok = class_addIvar(cls, "ivarid", size, align, "@");
     testassert(ok);
     ok = class_addIvar(cls, "ivaridstar", size, align, "^@");
     testassert(ok);
+    ok = class_addIvar(cls, "ivarblock", size, align, "@?");
+    testassert(ok);
+
     ok = class_addIvar(cls, "ivar", 4, 2, "i");
     testassert(!ok);
     ok = class_addIvar(cls->isa, "classvar", 4, 2, "i");
@@ -110,7 +165,13 @@ static void cycle(void)
 
     objc_registerClassPair(cls);
 
-    
+    // should call cls's +initialize, not super's
+    super_initialize = 0;
+    state = 0;
+    [cls class];
+    testassert(super_initialize == 0);
+    testassert(state == 1);
+
     testassert(cls == [cls class]);
     testassert(cls == objc_getClass("Sub"));
 
@@ -120,11 +181,11 @@ static void cycle(void)
     testassert(class_getSuperclass(cls) == [Super class]);
     testassert(class_getSuperclass(cls->isa) == [Super class]->isa);
 
-    testassert(class_getInstanceSize(cls) >= sizeof(Class) + 4 + 2*size);
+    testassert(class_getInstanceSize(cls) >= sizeof(Class) + 4 + 3*size);
     testassert(class_conformsToProtocol(cls, @protocol(Proto)));
 
-    if (objc_collecting_enabled()) {
-        testassert(0 == strcmp(class_getIvarLayout(cls), "\x01\x12"));
+    if (objc_collectingEnabled()) {
+        testassert(0 == strcmp((char *)class_getIvarLayout(cls), "\x01\x13"));
         testassert(NULL == class_getWeakIvarLayout(cls));
     }
 
@@ -145,6 +206,34 @@ static void cycle(void)
     ok = class_addProtocol(cls, @protocol(Proto));
     testassert(!ok);
 
+    attrs[0].name = attrname;
+    attrs[0].value = attrvalue;
+    strcpy(attrname, "T");
+    strcpy(attrvalue, "i");
+
+    strcpy(namebuf, "subProp2");
+    ok = class_addProperty(cls, namebuf, attrs, attrcount);
+    testassert(ok);
+    strcpy(namebuf, "subProp");
+    ok = class_addProperty(cls, namebuf, attrs, attrcount);
+    testassert(!ok);
+    strcpy(namebuf, "superProp");
+    ok = class_addProperty(cls, namebuf, attrs, attrcount);
+    testassert(!ok);
+    bzero(namebuf, sizeof(namebuf));
+    bzero(attrs, sizeof(attrs));
+    bzero(attrname, sizeof(attrname));
+    bzero(attrvalue, sizeof(attrvalue));
+
+    prop = class_getProperty(cls, "subProp");
+    testassert(prop);
+    testassert(0 == strcmp(property_getName(prop), "subProp"));
+    testassert(0 == strcmp(property_getAttributes(prop), "Ti"));
+    prop = class_getProperty(cls, "subProp2");
+    testassert(prop);
+    testassert(0 == strcmp(property_getName(prop), "subProp2"));
+    testassert(0 == strcmp(property_getAttributes(prop), "Ti"));
+
     // note: adding more methods here causes a false leak check failure
     state = 0;
     [cls classMethod];
@@ -158,24 +247,45 @@ static void cycle(void)
     testassert(state == 2);
     [obj free];
 
-
     // Test ivar layouts of sub-subclass
     Class cls2 = objc_allocateClassPair(cls, "SubSub", 0);
     testassert(cls2);
-    
+
+    /*
+      {
+        id ivarid2;
+        id idarray[16];
+        void* ptrarray[16];
+        char a;
+        char b;
+        char c;
+      }
+    */
     ok = class_addIvar(cls2, "ivarid2", size, align, "@");
     testassert(ok);
     ok = class_addIvar(cls2, "idarray", 16*sizeof(id), align, "[16@]");
     testassert(ok);
-    ok = class_addIvar(cls2, "intarray", 16*sizeof(void*), align, "[16^]");
+    ok = class_addIvar(cls2, "ptrarray", 16*sizeof(void*), align, "[16^]");
+    testassert(ok);
+    ok = class_addIvar(cls2, "a", 1, 0, "c");
+    testassert(ok);    
+    ok = class_addIvar(cls2, "b", 1, 0, "c");
+    testassert(ok);    
+    ok = class_addIvar(cls2, "c", 1, 0, "c");
     testassert(ok);    
 
     objc_registerClassPair(cls2);
 
-    if (objc_collecting_enabled()) {
-        testassert(0 == strcmp((char *)class_getIvarLayout(cls2), "\x01\x1f\x04\xf0\x10"));
+    if (objc_collectingEnabled()) {
+        testassert(0 == strcmp((char *)class_getIvarLayout(cls2), "\x01\x1f\x05\xf0\x10"));
         testassert(NULL == class_getWeakIvarLayout(cls2));
     }
+
+    // 1-byte ivars should be well packed
+    testassert(ivar_getOffset(class_getInstanceVariable(cls2, "b")) == 
+               ivar_getOffset(class_getInstanceVariable(cls2, "a")) + 1);
+    testassert(ivar_getOffset(class_getInstanceVariable(cls2, "c")) == 
+               ivar_getOffset(class_getInstanceVariable(cls2, "b")) + 1);
 
     objc_disposeClassPair(cls2);
     
@@ -189,13 +299,13 @@ static void cycle(void)
     cls = objc_allocateClassPair([Super class], "Sub2", 0);
     testassert(cls);
     objc_registerClassPair(cls);
-    if (objc_collecting_enabled()) {
+    if (objc_collectingEnabled()) {
         const char *l1, *l2;
-        l1 = class_getIvarLayout([Super class]);
-        l2 = class_getIvarLayout(cls);
+        l1 = (char *)class_getIvarLayout([Super class]);
+        l2 = (char *)class_getIvarLayout(cls);
         testassert(l1 == l2  ||  0 == strcmp(l1, l2));
-        l1 = class_getWeakIvarLayout([Super class]);
-        l2 = class_getWeakIvarLayout(cls);
+        l1 = (char *)class_getWeakIvarLayout([Super class]);
+        l2 = (char *)class_getWeakIvarLayout(cls);
         testassert(l1 == l2  ||  0 == strcmp(l1, l2));
     }
     objc_disposeClassPair(cls);
@@ -203,42 +313,42 @@ static void cycle(void)
     cls = objc_allocateClassPair([WeakSuper class], "Sub3", 0);
     testassert(cls);
     objc_registerClassPair(cls);
-    if (objc_collecting_enabled()) {
+    if (objc_collectingEnabled()) {
         const char *l1, *l2;
-        l1 = class_getIvarLayout([WeakSuper class]);
-        l2 = class_getIvarLayout(cls);
+        l1 = (char *)class_getIvarLayout([WeakSuper class]);
+        l2 = (char *)class_getIvarLayout(cls);
         testassert(l1 == l2  ||  0 == strcmp(l1, l2));
-        l1 = class_getWeakIvarLayout([WeakSuper class]);
-        l2 = class_getWeakIvarLayout(cls);
+        l1 = (char *)class_getWeakIvarLayout([WeakSuper class]);
+        l2 = (char *)class_getWeakIvarLayout(cls);
         testassert(l1 == l2  ||  0 == strcmp(l1, l2));
     }
     objc_disposeClassPair(cls);
 
     // Test layout setters
-    if (objc_collecting_enabled()) {
+    if (objc_collectingEnabled()) {
         cls = objc_allocateClassPair([Super class], "Sub4", 0);
         testassert(cls);
-        class_setIvarLayout(cls, "foo");
+        class_setIvarLayout(cls, (uint8_t *)"foo");
         class_setWeakIvarLayout(cls, NULL);
         objc_registerClassPair(cls);
-        testassert(0 == strcmp("foo", class_getIvarLayout(cls)));
+        testassert(0 == strcmp("foo", (char *)class_getIvarLayout(cls)));
         testassert(NULL == class_getWeakIvarLayout(cls));
         objc_disposeClassPair(cls);
 
         cls = objc_allocateClassPair([Super class], "Sub5", 0);
         testassert(cls);
         class_setIvarLayout(cls, NULL);
-        class_setWeakIvarLayout(cls, "bar");
+        class_setWeakIvarLayout(cls, (uint8_t *)"bar");
         objc_registerClassPair(cls);
         testassert(NULL == class_getIvarLayout(cls));
-        testassert(0 == strcmp("bar", class_getWeakIvarLayout(cls)));
+        testassert(0 == strcmp("bar", (char *)class_getWeakIvarLayout(cls)));
         objc_disposeClassPair(cls);
     }
 }
 
 int main()
 {
-    int count = 100;
+    int count = 1000;
     cycle();
     leak_mark();
     while (count--) {

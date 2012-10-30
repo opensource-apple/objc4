@@ -1,12 +1,12 @@
+// rdar://6401639, waiting for rdar://5648998
+// TEST_DISABLED
+
 #include "test.h"
 #include <objc/objc.h>
 #include <mach/mach.h>
 #include <pthread.h>
 #define _OBJC_PRIVATE_H_
 #include <objc/objc-gdb.h>
-
-extern void _objc_flush_caches(Class cls, BOOL flushMeta);
-
 
 @interface Super { id isa; } @end
 
@@ -30,6 +30,8 @@ void *thread(void *arg __unused)
         [Super method];
         _objc_flush_caches(0, YES);
     }
+
+    return NULL;
 }
 
 

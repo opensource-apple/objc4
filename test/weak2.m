@@ -1,3 +1,5 @@
+// See instructions in weak.h
+
 #include "test.h"
 #include "weak.h"
 
@@ -10,6 +12,7 @@ int state = 0;
 +(Class) class { return self; }
 +(id) alloc { return class_createInstance(self, 0); }
 -(id) init { return self; }
+-(void) dealloc { object_dispose(self); }
 +(int) method { return 10; }
 +(void) load { state++; }
 @end
@@ -27,6 +30,7 @@ int state = 0;
 +(Class) class { return self; }
 +(id) alloc { return class_createInstance(self, 0); }
 -(id) init { return self; }
+-(void) dealloc { object_dispose(self); }
 +(int) method { return 20; }
 +(void) load { state++; }
 @end

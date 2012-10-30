@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <mach/mach.h>
 #include <malloc/malloc.h>
@@ -8,6 +10,11 @@
 
 int main()
 {
+    if (is_guardmalloc()) {
+        // guard malloc confuses this test
+        succeed(__FILE__);
+    }
+
     kern_return_t kr;
     vm_address_t *zones;
     unsigned int count, i;

@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <string.h>
 #include <malloc/malloc.h>

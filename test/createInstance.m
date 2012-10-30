@@ -1,7 +1,12 @@
+// TEST_CFLAGS -Wno-deprecated-declarations
+
 #import <objc/runtime.h>
 #import <objc/objc-auto.h>
 #ifndef OBJC_NO_GC
 #include <auto_zone.h>
+#else
+static void* objc_collectableZone(void) { return NULL; }
+static BOOL auto_zone_is_valid_pointer(void *a, void *b) { return a||b; }
 #endif
 #include "test.h"
 
@@ -22,7 +27,7 @@ int main()
     testassert(s);
     testassert(s->isa == [Super class]);
     testassert(malloc_size(s) >= class_getInstanceSize([Super class]));
-    if (objc_collecting_enabled()) testassert(auto_zone_is_valid_pointer(auto_zone(), s));
+    if (objc_collectingEnabled()) testassert(auto_zone_is_valid_pointer(objc_collectableZone(), s));
 
     object_dispose(s);
 
@@ -30,7 +35,7 @@ int main()
     testassert(s);
     testassert(s->isa == [Sub class]);
     testassert(malloc_size(s) >= class_getInstanceSize([Sub class]));
-    if (objc_collecting_enabled()) testassert(auto_zone_is_valid_pointer(auto_zone(), s));
+    if (objc_collectingEnabled()) testassert(auto_zone_is_valid_pointer(objc_collectableZone(), s));
 
     object_dispose(s);
 
@@ -38,7 +43,7 @@ int main()
     testassert(s);
     testassert(s->isa == [Super class]);
     testassert(malloc_size(s) >= class_getInstanceSize([Super class]) + 100);
-    if (objc_collecting_enabled()) testassert(auto_zone_is_valid_pointer(auto_zone(), s));
+    if (objc_collectingEnabled()) testassert(auto_zone_is_valid_pointer(objc_collectableZone(), s));
 
     object_dispose(s);
 
@@ -46,7 +51,7 @@ int main()
     testassert(s);
     testassert(s->isa == [Sub class]);
     testassert(malloc_size(s) >= class_getInstanceSize([Sub class]) + 100);
-    if (objc_collecting_enabled()) testassert(auto_zone_is_valid_pointer(auto_zone(), s));
+    if (objc_collectingEnabled()) testassert(auto_zone_is_valid_pointer(objc_collectableZone(), s));
 
     object_dispose(s);
 

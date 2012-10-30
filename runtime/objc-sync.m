@@ -79,7 +79,7 @@ static SyncCache *fetch_cache(BOOL create)
     _objc_pthread_data *data;
     
     data = _objc_fetch_pthread_data(create);
-    if (!data  &&  !create) return NULL;
+    if (!data) return NULL;
 
     if (!data->syncCache) {
         if (!create) {
@@ -104,7 +104,7 @@ static SyncCache *fetch_cache(BOOL create)
 }
 
 
-__private_extern__ void _destroySyncCache(struct SyncCache *cache)
+PRIVATE_EXTERN void _destroySyncCache(struct SyncCache *cache)
 {
     if (cache) free(cache);
 }
@@ -116,7 +116,7 @@ static SyncData* id2data(id object, enum usage why)
     SyncData **listp = &LIST_FOR_OBJ(object);
     SyncData* result = NULL;
 
-#ifndef NO_DIRECT_THREAD_KEYS
+#if SUPPORT_DIRECT_THREAD_KEYS
     // Check per-thread single-entry fast cache for matching object
     BOOL fastCacheOccupied = NO;
     SyncData *data = tls_get_direct(SYNC_DATA_DIRECT_KEY);
@@ -259,7 +259,7 @@ static SyncData* id2data(id object, enum usage why)
         require_action_string(result->object == object, really_done, 
                               result = NULL, "id2data is buggy");
 
-#ifndef NO_DIRECT_THREAD_KEYS
+#if SUPPORT_DIRECT_THREAD_KEYS
         if (!fastCacheOccupied) {
             // Save in fast thread cache
             tls_set_direct(SYNC_DATA_DIRECT_KEY, result);
@@ -280,11 +280,9 @@ static SyncData* id2data(id object, enum usage why)
 }
 
 
-__private_extern__ __attribute__((noinline))
-int objc_sync_nil(void)
-{
-    return OBJC_SYNC_SUCCESS;  // something to foil the optimizer
-}
+BREAKPOINT_FUNCTION(
+    void objc_sync_nil(void)
+);
 
 
 // Begin synchronizing on 'obj'. 
@@ -305,7 +303,7 @@ int objc_sync_enter(id obj)
         if (DebugNilSync) {
             _objc_inform("NIL SYNC DEBUG: @synchronized(nil); set a breakpoint on objc_sync_nil to debug");
         }
-        result = objc_sync_nil();
+        objc_sync_nil();
     }
 
 done: 
@@ -336,22 +334,3 @@ done:
     return result;
 }
 
-
-#if TARGET_OS_MAC && !TARGET_OS_EMBEDDED
-
-int objc_sync_wait(id obj, long long max)
-{
-    _objc_fatal("Do not call objc_sync_wait.");
-}
-
-int objc_sync_notify(id obj)
-{
-    _objc_fatal("Do not call objc_sync_notify.");
-}
-
-int objc_sync_notifyAll(id obj)
-{
-    _objc_fatal("Do not call objc_sync_notifyAll.");
-}
-
-#endif

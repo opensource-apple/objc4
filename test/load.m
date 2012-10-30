@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 
 int state = 0;

@@ -33,6 +33,10 @@
 
 #if TARGET_OS_MAC
 
+#   ifndef __STDC_LIMIT_MACROS
+#       define __STDC_LIMIT_MACROS
+#   endif
+
 #   include <stdio.h>
 #   include <stdlib.h>
 #   include <stdint.h>
@@ -49,7 +53,7 @@
 #   include <pthread.h>
 #   include <crt_externs.h>
 #   include <AssertMacros.h>
-#   include <Block_private.h>
+#   undef check
 #   include <AvailabilityMacros.h>
 #   include <TargetConditionals.h>
 #   include <sys/mman.h>
@@ -68,6 +72,60 @@
 #   include <System/pthread_machdep.h>
 #   include "objc-probes.h"  // generated dtrace probe definitions.
 
+#define ARR_SPINLOCK_INIT 0
+// XXX -- Careful: OSSpinLock isn't volatile, but should be
+typedef volatile int ARRSpinLock;
+__attribute__((always_inline))
+static inline void ARRSpinLockLock(ARRSpinLock *l)
+{
+    unsigned y;
+again:
+    if (__builtin_expect(__sync_lock_test_and_set(l, 1), 0) == 0) {
+        return;
+    }
+    for (y = 1000; y; y--) {
+#if defined(__i386__) || defined(__x86_64__)
+        asm("pause");
+#endif
+        if (*l == 0) goto again;
+    }
+    thread_switch(THREAD_NULL, SWITCH_OPTION_DEPRESS, 1);
+    goto again;
+}
+__attribute__((always_inline))
+static inline void ARRSpinLockUnlock(ARRSpinLock *l)
+{
+    __sync_lock_release(l);
+}
+
+#define OSSpinLock ARRSpinLock
+#define OSSpinLockTry(l) __sync_bool_compare_and_swap(l, 0, 1)
+#define OSSpinLockLock(l) ARRSpinLockLock(l)
+#define OSSpinLockUnlock(l) ARRSpinLockUnlock(l)
+#undef OS_SPINLOCK_INIT
+#define OS_SPINLOCK_INIT ARR_SPINLOCK_INIT 
+
+#if !TARGET_OS_IPHONE
+#   include <CrashReporterClient.h>
+#else
+    // CrashReporterClient not yet available on iOS
+    __BEGIN_DECLS
+    extern const char *CRSetCrashLogMessage(const char *msg);
+    extern const char *CRGetCrashLogMessage(void);
+    extern const char *CRSetCrashLogMessage2(const char *msg);
+    __END_DECLS
+#endif
+
+#if TARGET_IPHONE_SIMULATOR
+    // getsectiondata() and getsegmentdata() are unavailable
+    __BEGIN_DECLS
+#   define getsectiondata(m, s, n, c) objc_getsectiondata(m, s, n, c)
+#   define getsegmentdata(m, s, c) objc_getsegmentdata(m, s, c)
+    extern uint8_t *objc_getsectiondata(const struct mach_header *mh, const char *segname, const char *sectname, unsigned long *outSize);
+    extern uint8_t * objc_getsegmentdata(const struct mach_header *mh, const char *segname, unsigned long *outSize);
+    __END_DECLS
+#endif
+
 #   if __cplusplus
 #       include <vector>
 #       include <algorithm>
@@ -75,6 +133,19 @@
 #       include <ext/hash_map>
         using namespace __gnu_cxx;
 #   endif
+
+#   define PRIVATE_EXTERN __attribute__((visibility("hidden")))
+#   undef __private_extern__
+#   define __private_extern__ use_PRIVATE_EXTERN_instead
+#   undef private_extern
+#   define private_extern use_PRIVATE_EXTERN_instead
+
+/* Use this for functions that are intended to be breakpoint hooks.
+   If you do not, the compiler may optimize them away.
+   BREAKPOINT_FUNCTION( void stop_on_error(void) ); */
+#   define BREAKPOINT_FUNCTION(prototype)                \
+    __attribute__((noinline, visibility("hidden")))      \
+    prototype { asm(""); }
 
 #elif TARGET_OS_WIN32
 
@@ -108,9 +179,15 @@
 #       define __END_DECLS   /*empty*/
 #   endif
 
-#   define __private_extern__
+#   define PRIVATE_EXTERN
 #   define __attribute__(x)
 #   define inline __inline
+
+/* Use this for functions that are intended to be breakpoint hooks.
+   If you do not, the compiler may optimize them away.
+   BREAKPOINT_FUNCTION( void MyBreakpointFunction(void) ); */
+#   define BREAKPOINT_FUNCTION(prototype) \
+    __declspec(noinline) prototype { __asm { } }
 
 /* stub out dtrace probes */
 #   define OBJC_RUNTIME_OBJC_EXCEPTION_RETHROW() do {} while(0)  
@@ -133,7 +210,7 @@ extern void _objc_fatal(const char *fmt, ...) __attribute__((noreturn, format (p
         if (var) break;                                                 \
         typeof(var) v = create;                                         \
         while (!var) {                                                  \
-            if (OSAtomicCompareAndSwapPtrBarrier(0, v, (void**)&var)) { \
+            if (OSAtomicCompareAndSwapPtrBarrier(0, (void*)v, (void**)&var)){ \
                 goto done;                                              \
             }                                                           \
         }                                                               \
@@ -158,13 +235,16 @@ extern void _objc_fatal(const char *fmt, ...) __attribute__((noreturn, format (p
 // Thread keys reserved by libc for our use.
 // Keys [0..4] are used by autozone.
 #if defined(__PTK_FRAMEWORK_OBJC_KEY5)
+#   define SUPPORT_DIRECT_THREAD_KEYS 1
 #   define TLS_DIRECT_KEY        ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY5)
 #   define SYNC_DATA_DIRECT_KEY  ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY6)
 #   define SYNC_COUNT_DIRECT_KEY ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY7)
-//  define DIRECT_4_KEY          ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY8)
-//  define DIRECT_5_KEY          ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY9)
+#   define AUTORELEASE_POOL_KEY  ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY8)
+# if SUPPORT_RETURN_AUTORELEASE
+#   define AUTORELEASE_POOL_RECLAIM_KEY ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY9)
+# endif
 #else
-#   define NO_DIRECT_THREAD_KEYS 1
+#   define SUPPORT_DIRECT_THREAD_KEYS 0
 #endif
 
 
@@ -249,10 +329,12 @@ typedef struct {
     DWORD key;
     void (*dtor)(void *);
 } tls_key_t;
-static __inline void tls_create(tls_key_t *k, void (*dtor)(void*)) { 
+static __inline tls_key_t tls_create(void (*dtor)(void*)) { 
     // fixme need dtor registry for DllMain to call on thread detach
-    k->key = TlsAlloc();
-    k->dtor = dtor;
+    tls_key_t k;
+    k.key = TlsAlloc();
+    k.dtor = dtor;
+    return k;
 }
 static __inline void *tls_get(tls_key_t k) { 
     return TlsGetValue(k.key); 
@@ -427,6 +509,7 @@ typedef struct {
     size_t selrefCount;
     struct objc_class **clsrefs;
     size_t clsrefCount;    
+    TCHAR *moduleName;
 } os_header_info;
 
 typedef IMAGE_DOS_HEADER headerType;
@@ -442,6 +525,16 @@ OBJC_EXTERN IMAGE_DOS_HEADER __ImageBase;
 
 
 // OS headers
+#include <mach-o/loader.h>
+#ifndef __LP64__
+#   define SEGMENT_CMD LC_SEGMENT
+#else
+#   define SEGMENT_CMD LC_SEGMENT_64
+#endif
+
+#ifndef VM_MEMORY_OBJC_DISPATCHERS
+#   define VM_MEMORY_OBJC_DISPATCHERS 0
+#endif
 
 
 // Compiler compatibility
@@ -462,8 +555,10 @@ static __inline objc_thread_t thread_self(void) {
 
 typedef pthread_key_t tls_key_t;
 
-static inline void tls_create(tls_key_t *k, void (*dtor)(void*)) { 
-    pthread_key_create(k, dtor); 
+static inline tls_key_t tls_create(void (*dtor)(void*)) { 
+    tls_key_t k;
+    pthread_key_create(&k, dtor); 
+    return k;
 }
 static inline void *tls_get(tls_key_t k) { 
     return pthread_getspecific(k); 
@@ -472,7 +567,7 @@ static inline void tls_set(tls_key_t k, void *value) {
     pthread_setspecific(k, value); 
 }
 
-#ifndef NO_DIRECT_THREAD_KEYS
+#if SUPPORT_DIRECT_THREAD_KEYS
 static inline void *tls_get_direct(tls_key_t k) 
 { 
     assert(k == SYNC_DATA_DIRECT_KEY  ||
@@ -816,9 +911,6 @@ typedef struct section_64 sectionType;
 
 typedef struct {
     Dl_info             dl_info;
-    const segmentType * objcSegmentHeader;
-    const segmentType * dataSegmentHeader;
-    ptrdiff_t           image_slide;
 #if !__OBJC2__
     struct old_protocol **proto_refs;
 #endif

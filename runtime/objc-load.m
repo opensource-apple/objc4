@@ -29,10 +29,11 @@
  */
 
 #include "objc-private.h"
+#include "objc-load.h"
 
 #if !__OBJC2__  &&  !TARGET_OS_WIN32
 
-extern void (*callbackFunction)( Class, const char * );
+extern void (*callbackFunction)( Class, Category );
 
 
 /**********************************************************************************
@@ -52,7 +53,7 @@ extern void (*callbackFunction)( Class, const char * );
 * is if one thread loads a module while another thread tries to access the
 * loaded classes (using objc_lookUpClass) before the load is complete.
 **********************************************************************************/
-int objc_loadModule(const char *moduleName, void (*class_callback) (Class, const char *categoryName), int *errorCode)
+int objc_loadModule(char *moduleName, void (*class_callback) (Class, Category), int *errorCode)
 {
     int								successFlag = 1;
     int								locErrorCode;
@@ -107,7 +108,7 @@ int objc_loadModule(const char *moduleName, void (*class_callback) (Class, const
 
 long	objc_loadModules   (char *			modlist[],
                          void *			errStream,
-                         void			(*class_callback) (Class, const char *),
+                         void			(*class_callback) (Class, Category),
                          headerType **	hdr_addr,
                          char *			debug_file)
 {

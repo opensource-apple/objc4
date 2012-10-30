@@ -46,12 +46,15 @@ struct objc_super {
  *
  * On some architectures, use objc_msgSend_stret for some struct return types.
  * On some architectures, use objc_msgSend_fpret for some float return types.
+ * On some architectures, use objc_msgSend_fp2ret for some float return types.
  *
  * These functions must be cast to an appropriate function pointer type 
  * before being called. 
  */
-OBJC_EXPORT id objc_msgSend(id self, SEL op, ...);
-OBJC_EXPORT id objc_msgSendSuper(struct objc_super *super, SEL op, ...);
+OBJC_EXPORT id objc_msgSend(id self, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+OBJC_EXPORT id objc_msgSendSuper(struct objc_super *super, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 
 
 /* Struct-returning Messaging Primitives
@@ -64,16 +67,22 @@ OBJC_EXPORT id objc_msgSendSuper(struct objc_super *super, SEL op, ...);
  * before being called. 
  */
 #if defined(__OBJC2__)
-OBJC_EXPORT void objc_msgSend_stret(id self, SEL op, ...);
-OBJC_EXPORT void objc_msgSendSuper_stret(struct objc_super *super, SEL op, ...);
+OBJC_EXPORT void objc_msgSend_stret(id self, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+OBJC_EXPORT void objc_msgSendSuper_stret(struct objc_super *super, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 #elif defined(__cplusplus)
 /* For compatibility with old objc-runtime.h header */
-OBJC_EXPORT id objc_msgSend_stret(id self, SEL op, ...);
-OBJC_EXPORT id objc_msgSendSuper_stret(struct objc_super *super, SEL op, ...);
+OBJC_EXPORT id objc_msgSend_stret(id self, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+OBJC_EXPORT id objc_msgSendSuper_stret(struct objc_super *super, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 #else
 /* For compatibility with old objc-runtime.h header */
-OBJC_EXPORT void objc_msgSend_stret(void * stretAddr, id self, SEL op, ...);
-OBJC_EXPORT void objc_msgSendSuper_stret(void * stretAddr, struct objc_super *super, SEL op, ...);
+OBJC_EXPORT void objc_msgSend_stret(void * stretAddr, id self, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+OBJC_EXPORT void objc_msgSendSuper_stret(void * stretAddr, struct objc_super *super, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 #endif
 
 
@@ -83,22 +92,41 @@ OBJC_EXPORT void objc_msgSendSuper_stret(void * stretAddr, struct objc_super *su
  * on the stack. 
  * Consult your local function call ABI documentation for details.
  * 
- * ppc:    objc_msgSend_fpret not used
- * ppc64:  objc_msgSend_fpret not used
+ * arm:    objc_msgSend_fpret not used
  * i386:   objc_msgSend_fpret used for `float`, `double`, `long double`.
  * x86-64: objc_msgSend_fpret used for `long double`.
+ *
+ * arm:    objc_msgSend_fp2ret not used
+ * i386:   objc_msgSend_fp2ret not used
+ * x86-64: objc_msgSend_fp2ret used for `_Complex long double`.
  *
  * These functions must be cast to an appropriate function pointer type 
  * before being called. 
  */
 #if defined(__i386__)
-OBJC_EXPORT double objc_msgSend_fpret(id self, SEL op, ...);
+
+OBJC_EXPORT double objc_msgSend_fpret(id self, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_4, __IPHONE_2_0);
+
 /* Use objc_msgSendSuper() for fp-returning messages to super. */
 /* See also objc_msgSendv_fpret() below. */
+
 #elif defined(__x86_64__)
-OBJC_EXPORT long double objc_msgSend_fpret(id self, SEL op, ...);
+
+OBJC_EXPORT long double objc_msgSend_fpret(id self, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+
+# if __STDC_VERSION__ >= 199901L
+OBJC_EXPORT _Complex long double objc_msgSend_fp2ret(id self, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+# else
+OBJC_EXPORT void objc_msgSend_fp2ret(id self, SEL op, ...)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+# endif
+
 /* Use objc_msgSendSuper() for fp-returning messages to super. */
 /* See also objc_msgSendv_fpret() below. */
+
 #endif
 
 
@@ -112,9 +140,9 @@ OBJC_EXPORT long double objc_msgSend_fpret(id self, SEL op, ...);
  * before being called. 
  */
 OBJC_EXPORT id method_invoke(id receiver, Method m, ...) 
-     AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 OBJC_EXPORT void method_invoke_stret(id receiver, Method m, ...) 
-     AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER;
+     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 
 
 /* Message Forwarding Primitives
@@ -133,9 +161,9 @@ OBJC_EXPORT void method_invoke_stret(id receiver, Method m, ...)
  * but may be compared to other IMP values.
  */
 OBJC_EXPORT id _objc_msgForward(id receiver, SEL sel, ...) 
-     AVAILABLE_MAC_OS_X_VERSION_10_0_AND_LATER;
+     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 OBJC_EXPORT void _objc_msgForward_stret(id receiver, SEL sel, ...) 
-     AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER;
+     __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_0);
 
 
 /* Variable-argument Messaging Primitives
@@ -169,11 +197,7 @@ OBJC_EXPORT double objc_msgSendv_fpret(id self, SEL op, unsigned arg_size, marg_
 
 #if !__OBJC2__
 
-#if defined(__ppc__) || defined(ppc)
-#define marg_prearg_size	(13*sizeof(double)+6*sizeof(uintptr_t))
-#else
 #define marg_prearg_size	0
-#endif
 
 #define marg_malloc(margs, method) \
 	do { \

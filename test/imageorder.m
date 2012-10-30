@@ -1,3 +1,12 @@
+/*
+TEST_BUILD
+    $C{COMPILE} $DIR/imageorder1.m -o imageorder1.dylib -dynamiclib
+    $C{COMPILE} $DIR/imageorder2.m -x none imageorder1.dylib -o imageorder2.dylib -dynamiclib
+    $C{COMPILE} $DIR/imageorder3.m -x none imageorder2.dylib imageorder1.dylib -o imageorder3.dylib -dynamiclib
+    $C{COMPILE} $DIR/imageorder.m  -x none imageorder3.dylib imageorder2.dylib imageorder1.dylib -o imageorder.out
+END
+*/
+
 #include "test.h"
 #include "imageorder.h"
 #include <objc/runtime.h>
@@ -23,7 +32,7 @@ int main()
     [Super method3];
     testassert(state == 3);
 
-    // make sure imageorder3.out is the last category to attach
+    // make sure imageorder3.dylib is the last category to attach
     state = 0;
     [Super method];
     testassert(state == 3);

@@ -21,6 +21,8 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+#error not currently used
+
 #ifdef __x86_64__
 
 /*
@@ -37,8 +39,6 @@
 
 .data
 .align 12   // align to page boundary
-
-LNonGCAssigns$Begin:
 
 // id objc_assign_ivar(id value, id dest, ptrdiff_t offset);
 .globl  _objc_assign_ivar
@@ -60,6 +60,16 @@ _objc_assign_global:
     leave
     ret
 
+// id objc_assign_threadlocal(id value, id *dest);
+.globl  _objc_assign_threadlocal
+_objc_assign_threadlocal:
+    pushq   %rbp
+    movq    %rsp,%rbp
+    movq    %rdi,(%rsi)     // *(dest = value);
+    movq    %rdi,%rax       // return value;
+    leave
+    ret
+
 // As of OS X 10.5, objc_assign_strongCast_non_gc is identical to
 // objc_assign_global_non_gc.
 
@@ -73,10 +83,7 @@ _objc_assign_strongCast:
     leave
     ret
 
-LNonGCAssigns$End:
-
 // Claim the remainder of the page.
-.set    L$set$assignsSize,LNonGCAssigns$End-LNonGCAssigns$Begin
-.space  4096-L$set$assignsSize
+.align 12, 0
 
 #endif

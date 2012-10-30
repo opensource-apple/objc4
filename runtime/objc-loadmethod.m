@@ -42,14 +42,14 @@ struct loadable_category {
 
 // List of classes that need +load called (pending superclass +load)
 // This list always has superclasses first because of the way it is constructed
-static struct loadable_class *loadable_classes NOBSS = NULL;
-static int loadable_classes_used NOBSS = 0;
-static int loadable_classes_allocated NOBSS = 0;
+static struct loadable_class *loadable_classes = NULL;
+static int loadable_classes_used = 0;
+static int loadable_classes_allocated = 0;
 
 // List of categories that need +load called (pending parent class +load)
-static struct loadable_category *loadable_categories NOBSS = NULL;
-static int loadable_categories_used NOBSS = 0;
-static int loadable_categories_allocated NOBSS = 0;
+static struct loadable_category *loadable_categories = NULL;
+static int loadable_categories_used = 0;
+static int loadable_categories_allocated = 0;
 
 
 /***********************************************************************
@@ -57,7 +57,7 @@ static int loadable_categories_allocated NOBSS = 0;
 * Class cls has just become connected. Schedule it for +load if
 * it implements a +load method.
 **********************************************************************/
-__private_extern__ void add_class_to_loadable_list(Class cls)
+PRIVATE_EXTERN void add_class_to_loadable_list(Class cls)
 {
     IMP method;
 
@@ -90,7 +90,7 @@ __private_extern__ void add_class_to_loadable_list(Class cls)
 * to its class. Schedule this category for +load after its parent class
 * becomes connected and has its own +load method called.
 **********************************************************************/
-__private_extern__ void add_category_to_loadable_list(Category cat)
+PRIVATE_EXTERN void add_category_to_loadable_list(Category cat)
 {
     IMP method;
 
@@ -125,7 +125,7 @@ __private_extern__ void add_category_to_loadable_list(Category cat)
 * Class cls may have been loadable before, but it is now no longer 
 * loadable (because its image is being unmapped). 
 **********************************************************************/
-__private_extern__ void remove_class_from_loadable_list(Class cls)
+PRIVATE_EXTERN void remove_class_from_loadable_list(Class cls)
 {
     recursive_mutex_assert_locked(&loadMethodLock);
 
@@ -149,7 +149,7 @@ __private_extern__ void remove_class_from_loadable_list(Class cls)
 * Category cat may have been loadable before, but it is now no longer 
 * loadable (because its image is being unmapped). 
 **********************************************************************/
-__private_extern__ void remove_category_from_loadable_list(Category cat)
+PRIVATE_EXTERN void remove_category_from_loadable_list(Category cat)
 {
     recursive_mutex_assert_locked(&loadMethodLock);
 
@@ -329,7 +329,7 @@ static BOOL call_category_loads(void)
 * Locking: loadMethodLock must be held by the caller 
 *   All other locks must not be held.
 **********************************************************************/
-__private_extern__ void call_load_methods(void)
+PRIVATE_EXTERN void call_load_methods(void)
 {
     static BOOL loading = NO;
     BOOL more_categories;

@@ -129,7 +129,7 @@ static _objc_initializing_classes *_fetchInitializingClassList(BOOL create)
     Class *classes;
 
     data = _objc_fetch_pthread_data(create);
-    if (data == NULL  &&  !create) return NULL;
+    if (data == NULL) return NULL;
 
     list = data->initializingClasses;
     if (list == NULL) {
@@ -160,7 +160,7 @@ static _objc_initializing_classes *_fetchInitializingClassList(BOOL create)
 * Any part of the list may be NULL.
 * Called from _objc_pthread_destroyspecific().
 **********************************************************************/
-__private_extern__ 
+PRIVATE_EXTERN 
 void _destroyInitializingClassList(struct _objc_initializing_classes *list)
 {
     if (list != NULL) {
@@ -348,7 +348,7 @@ static void _finishInitializingAfter(Class cls, Class supercls)
 *
 * Called only from _class_lookupMethodAndLoadCache (or itself).
 **********************************************************************/
-__private_extern__ void _class_initialize(Class cls)
+PRIVATE_EXTERN void _class_initialize(Class cls)
 {
     Class supercls;
     BOOL reallyInitialize = NO;

@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 // DO NOT include anything else here
 #include <objc/objc.h>
 // DO NOT include anything else here

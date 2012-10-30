@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <string.h>
 #include <malloc/malloc.h>
@@ -41,8 +43,8 @@ int main()
     props = protocol_copyPropertyList(proto, &count);
     testassert(props);
     testassert(count == 2);
-    testassert(isNamed(props[0], "prop4"));
-    testassert(isNamed(props[1], "prop3"));
+    testassert((isNamed(props[0], "prop4") && isNamed(props[1], "prop3"))  ||  
+               (isNamed(props[0], "prop3") && isNamed(props[1], "prop4")));
     // props[] should be null-terminated
     testassert(props[2] == NULL);
     free(props);
@@ -54,8 +56,8 @@ int main()
     props = protocol_copyPropertyList(proto, &count);
     testassert(props);
     testassert(count == 2);
-    testassert(isNamed(props[0], "prop2"));
-    testassert(isNamed(props[1], "prop1"));
+    testassert((isNamed(props[0], "prop1") && isNamed(props[1], "prop2"))  ||  
+               (isNamed(props[0], "prop2") && isNamed(props[1], "prop1")));
     // props[] should be null-terminated
     testassert(props[2] == NULL);
     free(props);

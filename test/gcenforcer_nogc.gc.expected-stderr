@@ -1,2 +1,0 @@
-objc\[\d+\]: '.*libnogc.dylib' was not compiled with -fobjc-gc or -fobjc-gc-only, but the application requires GC
-objc\[\d+\]: \*\*\* GC capability of application and some libraries did not match

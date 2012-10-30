@@ -103,9 +103,9 @@ typedef struct {
 #if __OBJC2__
 
 #ifndef __LP64__
-#define CACHE_HASH(sel, mask) (((uintptr_t)(sel)>>2) & (mask))
+# define CACHE_HASH(sel, mask) (((uintptr_t)(sel)>>2) & (mask))
 #else
-#define CACHE_HASH(sel, mask) (((unsigned int)((uintptr_t)(sel)>>3)) & (mask))
+# define CACHE_HASH(sel, mask) (((unsigned int)((uintptr_t)(sel)>>0)) & (mask))
 #endif
 
 struct objc_cache {
@@ -190,18 +190,18 @@ typedef struct
 
 /* Cache filling and flushing instrumentation */
 
-static int totalCacheFills NOBSS = 0;
+static int totalCacheFills = 0;
 
 #ifdef OBJC_INSTRUMENTED
-__private_extern__ unsigned int LinearFlushCachesCount              = 0;
-__private_extern__ unsigned int LinearFlushCachesVisitedCount       = 0;
-__private_extern__ unsigned int MaxLinearFlushCachesVisitedCount    = 0;
-__private_extern__ unsigned int NonlinearFlushCachesCount           = 0;
-__private_extern__ unsigned int NonlinearFlushCachesClassCount      = 0;
-__private_extern__ unsigned int NonlinearFlushCachesVisitedCount    = 0;
-__private_extern__ unsigned int MaxNonlinearFlushCachesVisitedCount = 0;
-__private_extern__ unsigned int IdealFlushCachesCount               = 0;
-__private_extern__ unsigned int MaxIdealFlushCachesCount            = 0;
+PRIVATE_EXTERN unsigned int LinearFlushCachesCount              = 0;
+PRIVATE_EXTERN unsigned int LinearFlushCachesVisitedCount       = 0;
+PRIVATE_EXTERN unsigned int MaxLinearFlushCachesVisitedCount    = 0;
+PRIVATE_EXTERN unsigned int NonlinearFlushCachesCount           = 0;
+PRIVATE_EXTERN unsigned int NonlinearFlushCachesClassCount      = 0;
+PRIVATE_EXTERN unsigned int NonlinearFlushCachesVisitedCount    = 0;
+PRIVATE_EXTERN unsigned int MaxNonlinearFlushCachesVisitedCount = 0;
+PRIVATE_EXTERN unsigned int IdealFlushCachesCount               = 0;
+PRIVATE_EXTERN unsigned int MaxIdealFlushCachesCount            = 0;
 #endif
 
 
@@ -213,21 +213,13 @@ __private_extern__ unsigned int MaxIdealFlushCachesCount            = 0;
 * messenger.
 ***********************************************************************/
 
-#ifndef OBJC_INSTRUMENTED
-const struct objc_cache _objc_empty_cache =
-{
-    0,        // mask
-    0,        // occupied
-    { NULL }  // buckets
-};
-#else
-// OBJC_INSTRUMENTED requires writable data immediately following emptyCache.
 struct objc_cache _objc_empty_cache =
 {
     0,        // mask
     0,        // occupied
     { NULL }  // buckets
 };
+#ifdef OBJC_INSTRUMENTED
 CacheInstrumentation emptyCacheInstrumentation = {0};
 #endif
 
@@ -244,7 +236,7 @@ static void _cache_flush(Class cls);
 
 static int _collecting_in_critical(void);
 static void _garbage_make_room(void);
-static void _cache_collect_free(void *data, size_t size, BOOL tryCollect);
+static void _cache_collect_free(void *data, size_t size);
 
 #if defined(CACHE_ALLOCATOR)
 static BOOL cache_allocator_is_block(void *block);
@@ -306,7 +298,7 @@ static Cache _cache_malloc(uintptr_t slotCount)
 #elif !defined(CACHE_ALLOCATOR)
     // fixme cache allocator implementation isn't 64-bit clean
     new_cache = _calloc_internal(size, 1);
-    new_cache->mask = slotCount - 1;
+    new_cache->mask = (unsigned int)(slotCount - 1);
 #else
     if (size < CACHE_ALLOCATOR_MIN  ||  UseInternalZone) {
         new_cache = _calloc_internal(size, 1);
@@ -373,7 +365,7 @@ static void _cache_free_block(void *block)
 * forward:: entries in the cache ARE freed.
 * Cache locks: cacheUpdateLock must NOT be held by the caller.
 **********************************************************************/
-__private_extern__ void _cache_free(Cache cache)
+PRIVATE_EXTERN void _cache_free(Cache cache)
 {
     unsigned int i;
 
@@ -471,7 +463,7 @@ static Cache _cache_expand(Class cls)
 
                 // Deallocate "forward::" entry
                 if (oldEntry->imp == &_objc_msgForward_internal) {
-                    _cache_collect_free (oldEntry, sizeof(cache_entry), NO);
+                    _cache_collect_free (oldEntry, sizeof(cache_entry));
                 }
             }
 
@@ -501,7 +493,7 @@ static Cache _cache_expand(Class cls)
     for (index = 0; index < old_cache->mask + 1; index++) {
         cache_entry *entry = (cache_entry *)old_cache->buckets[index];
         if (entry && entry->imp == &_objc_msgForward_internal) {
-            _cache_collect_free (entry, sizeof(cache_entry), NO);
+            _cache_collect_free (entry, sizeof(cache_entry));
         }
     }
 
@@ -509,7 +501,9 @@ static Cache _cache_expand(Class cls)
     _class_setCache(cls, new_cache);
 
     // Deallocate old cache, try freeing all the garbage
-    _cache_collect_free (old_cache, old_cache->mask * sizeof(cache_entry *), YES);
+    _cache_collect_free (old_cache, old_cache->mask * sizeof(cache_entry *));
+    _cache_collect(false);
+
     return new_cache;
 }
 
@@ -524,7 +518,7 @@ static Cache _cache_expand(Class cls)
 *
 * Cache locks: cacheUpdateLock must not be held.
 **********************************************************************/
-__private_extern__ BOOL _cache_fill(Class cls, Method smt, SEL sel)
+PRIVATE_EXTERN BOOL _cache_fill(Class cls, Method smt, SEL sel)
 {
     uintptr_t newOccupied;
     uintptr_t index;
@@ -561,7 +555,7 @@ __private_extern__ BOOL _cache_fill(Class cls, Method smt, SEL sel)
     newOccupied = cache->occupied + 1;
     if ((newOccupied * 4) <= (cache->mask + 1) * 3) {
         // Cache is less than 3/4 full.
-        cache->occupied = newOccupied;
+        cache->occupied = (unsigned int)newOccupied;
     } else {
         // Cache is too full. Expand it.
         cache = _cache_expand (cls);
@@ -570,41 +564,17 @@ __private_extern__ BOOL _cache_fill(Class cls, Method smt, SEL sel)
         cache->occupied += 1;
     }
 
-    // Insert the new entry.  This can be done by either:
-    //  (a) Scanning for the first unused spot.  Easy!
-    //  (b) Opening up an unused spot by sliding existing
-    //      entries down by one.  The benefit of this
-    //      extra work is that it puts the most recently
-    //      loaded entries closest to where the selector
-    //      hash starts the search.
-    //
-    // The loop is a little more complicated because there
-    // are two kinds of entries, so there have to be two ways
-    // to slide them.
+    // Scan for the first unused slot and insert there.
+    // There is guaranteed to be an empty slot because the 
+    // minimum size is 4 and we resized at 3/4 full.
     buckets = (cache_entry **)cache->buckets;
-    index = CACHE_HASH(sel, cache->mask); 
-    for (;;)
+    for (index = CACHE_HASH(sel, cache->mask); 
+         buckets[index] != NULL; 
+         index = (index+1) & cache->mask)
     {
-        // Slide existing entries down by one
-        cache_entry *saveEntry;
-
-        // Copy current entry to a local
-        saveEntry = buckets[index];
-
-        // Copy previous entry (or new entry) to current slot
-        buckets[index] = entry;
-
-        // Done if current slot had been invalid
-        if (saveEntry == NULL)
-            break;
-
-        // Prepare to copy saved value into next slot
-        entry = saveEntry;
-
-        // Move on to next slot
-        index += 1;
-        index &= cache->mask;
+        // empty
     }
+    buckets[index] = entry;
 
     mutex_unlock(&cacheUpdateLock);
 
@@ -619,7 +589,7 @@ __private_extern__ BOOL _cache_fill(Class cls, Method smt, SEL sel)
 * Called from class_respondsToMethod and _class_lookupMethodAndLoadCache.
 * Cache locks: cacheUpdateLock must not be held.
 **********************************************************************/
-__private_extern__ void _cache_addForwardEntry(Class cls, SEL sel)
+PRIVATE_EXTERN void _cache_addForwardEntry(Class cls, SEL sel)
 {
     cache_entry *smt;
   
@@ -634,6 +604,58 @@ __private_extern__ void _cache_addForwardEntry(Class cls, SEL sel)
 
 
 /***********************************************************************
+* _cache_addIgnoredEntry
+* Add an entry for the ignored selector to cls's method cache.
+* Does nothing if the cache addition fails for any reason.
+* Returns the ignored IMP.
+* Cache locks: cacheUpdateLock must not be held.
+**********************************************************************/
+#if SUPPORT_GC  &&  !SUPPORT_IGNORED_SELECTOR_CONSTANT
+static cache_entry *alloc_ignored_entries(void)
+{
+    cache_entry *e = malloc(5 * sizeof(cache_entry));
+    e[0] = (cache_entry){ @selector(retain),     0,(IMP)&_objc_ignored_method};
+    e[1] = (cache_entry){ @selector(release),    0,(IMP)&_objc_ignored_method};
+    e[2] = (cache_entry){ @selector(autorelease),0,(IMP)&_objc_ignored_method};
+    e[3] = (cache_entry){ @selector(retainCount),0,(IMP)&_objc_ignored_method};
+    e[4] = (cache_entry){ @selector(dealloc),    0,(IMP)&_objc_ignored_method};
+    return e;
+}
+#endif
+
+PRIVATE_EXTERN IMP _cache_addIgnoredEntry(Class cls, SEL sel)
+{
+    cache_entry *entryp = NULL;
+
+#if !SUPPORT_GC
+    _objc_fatal("selector ignored with GC off");
+#elif SUPPORT_IGNORED_SELECTOR_CONSTANT
+    static cache_entry entry = { (SEL)kIgnore, 0, (IMP)&_objc_ignored_method };
+    entryp = &entry;
+    assert(sel == (SEL)kIgnore);
+#else
+    // hack
+    int i;
+    static cache_entry *entries;
+    INIT_ONCE_PTR(entries, alloc_ignored_entries(), free(v));
+
+    assert(ignoreSelector(sel));
+    for (i = 0; i < 5; i++) {
+        if (sel == entries[i].name) { 
+            entryp = &entries[i];
+            break;
+        }
+    }
+    if (!entryp) _objc_fatal("selector %s (%p) is not ignored", 
+                             sel_getName(sel), sel);
+#endif
+
+    _cache_fill(cls, (Method)entryp, sel);
+    return entryp->imp;
+}
+
+
+/***********************************************************************
 * _cache_flush.  Invalidate all valid entries in the given class' cache.
 *
 * Called from flush_caches() and _cache_fill()
@@ -642,7 +664,7 @@ __private_extern__ void _cache_addForwardEntry(Class cls, SEL sel)
 #if __OBJC2__
 static 
 #else
-__private_extern__
+PRIVATE_EXTERN
 #endif
 void _cache_flush(Class cls)
 {
@@ -680,7 +702,7 @@ void _cache_flush(Class cls)
 
         // Deallocate "forward::" entry
         if (oldEntry && oldEntry->imp == &_objc_msgForward_internal)
-            _cache_collect_free (oldEntry, sizeof(cache_entry), NO);
+            _cache_collect_free (oldEntry, sizeof(cache_entry));
     }
 
     // Clear the valid-entry counter
@@ -692,7 +714,7 @@ void _cache_flush(Class cls)
 * flush_cache.  Flushes the instance method cache for class cls only.
 * Use flush_caches() if cls might have in-use subclasses.
 **********************************************************************/
-__private_extern__ void flush_cache(Class cls)
+PRIVATE_EXTERN void flush_cache(Class cls)
 {
     if (cls) {
         mutex_lock(&cacheUpdateLock);
@@ -708,8 +730,10 @@ __private_extern__ void flush_cache(Class cls)
 
 #if !TARGET_OS_WIN32
 
-// A sentinal (magic value) to report bad thread_get_state status
-#define PC_SENTINEL  0
+// A sentinel (magic value) to report bad thread_get_state status.
+// Must not be a valid PC.
+// Must not be zero - thread_get_state() on a new thread returns PC == 0.
+#define PC_SENTINEL  1
 
 // UNIX03 compliance hack (4508809)
 #if !__DARWIN_UNIX03
@@ -724,20 +748,6 @@ static uintptr_t _get_pc_for_thread(thread_t thread)
     unsigned int count = i386_THREAD_STATE_COUNT;
     kern_return_t okay = thread_get_state (thread, i386_THREAD_STATE, (thread_state_t)&state, &count);
     return (okay == KERN_SUCCESS) ? state.__eip : PC_SENTINEL;
-}
-#elif defined(__ppc__)
-{
-    ppc_thread_state_t state;
-    unsigned int count = PPC_THREAD_STATE_COUNT;
-    kern_return_t okay = thread_get_state (thread, PPC_THREAD_STATE, (thread_state_t)&state, &count);
-    return (okay == KERN_SUCCESS) ? state.__srr0 : PC_SENTINEL;
-}
-#elif defined(__ppc64__)
-{
-    ppc_thread_state64_t state;
-    unsigned int count = PPC_THREAD_STATE64_COUNT;
-    kern_return_t okay = thread_get_state (thread, PPC_THREAD_STATE64, (thread_state_t)&state, &count);
-    return (okay == KERN_SUCCESS) ? state.__srr0 : PC_SENTINEL;
 }
 #elif defined(__x86_64__)
 {
@@ -894,53 +904,64 @@ static void _garbage_make_room(void)
 * precisely the block's size.
 * Cache locks: cacheUpdateLock must be held by the caller.
 **********************************************************************/
-static void _cache_collect_free(void *data, size_t size, BOOL tryCollect)
+static void _cache_collect_free(void *data, size_t size)
 {
     mutex_assert_locked(&cacheUpdateLock);
 
-    // Insert new element in garbage list
-    // Note that we do this even if we end up free'ing everything
     _garbage_make_room ();
     garbage_byte_size += size;
     garbage_refs[garbage_count++] = data;
+}
 
-    // Done if caller says not to clean up
-    if (!tryCollect) return;
+
+/***********************************************************************
+* _cache_collect.  Try to free accumulated dead caches.
+* collectALot tries harder to free memory.
+* Cache locks: cacheUpdateLock must be held by the caller.
+**********************************************************************/
+PRIVATE_EXTERN void _cache_collect(bool collectALot)
+{
+    mutex_assert_locked(&cacheUpdateLock);
 
     // Done if the garbage is not full
-    if (garbage_byte_size < garbage_threshold) {
-        // if (PrintCaches) {
-        //     _objc_inform ("CACHES: not collecting; not enough garbage (%zu < %zu)", garbage_byte_size, garbage_threshold);
-        // }
+    if (garbage_byte_size < garbage_threshold  &&  !collectALot) {
         return;
     }
 
-    // Synchronize garbage collection with objc_msgSend and other cache readers
-    if (!_collecting_in_critical ()) {
-        // No cache readers in progress - garbage is now deletable
-
-        // Log our progress
-        if (PrintCaches) {
-            cache_collections++;
-            _objc_inform ("CACHES: COLLECTING %zu bytes (%zu regions, %zu allocations, %zu collections)", garbage_byte_size, cache_allocator_regions, cache_allocations, cache_collections);
+    // Synchronize collection with objc_msgSend and other cache readers
+    if (!collectALot) {
+        if (_collecting_in_critical ()) {
+            // objc_msgSend (or other cache reader) is currently looking in
+            // the cache and might still be using some garbage.
+            if (PrintCaches) {
+                _objc_inform ("CACHES: not collecting; "
+                              "objc_msgSend in progress");
+            }
+            return;
         }
-        
-        // Dispose all refs now in the garbage
-        while (garbage_count--) {
-            _cache_free_block(garbage_refs[garbage_count]);
-        }
-
-        // Clear the garbage count and total size indicator
-        garbage_count = 0;
-        garbage_byte_size = 0;
+    } 
+    else {
+        // No excuses.
+        while (_collecting_in_critical()) 
+            ;
     }
-    else {     
-        // objc_msgSend (or other cache reader) is currently looking in the 
-        // cache and might still be using some garbage.
-        if (PrintCaches) {
-            _objc_inform ("CACHES: not collecting; objc_msgSend in progress");
-        }
+
+    // No cache readers in progress - garbage is now deletable
+
+    // Log our progress
+    if (PrintCaches) {
+        cache_collections++;
+        _objc_inform ("CACHES: COLLECTING %zu bytes (%zu regions, %zu allocations, %zu collections)", garbage_byte_size, cache_allocator_regions, cache_allocations, cache_collections);
     }
+    
+    // Dispose all refs now in the garbage
+    while (garbage_count--) {
+        _cache_free_block(garbage_refs[garbage_count]);
+    }
+    
+    // Clear the garbage count and total size indicator
+    garbage_count = 0;
+    garbage_byte_size = 0;
 
     if (PrintCaches) {
         int i;
@@ -1051,8 +1072,7 @@ static cache_allocator_region *cache_allocator_add_region(size_t size)
     if (size < CACHE_REGION_SIZE) size = CACHE_REGION_SIZE;
 
     // Allocate the region
-    addr = 0;
-    vm_allocate(mach_task_self(), &addr, size, 1);
+    addr = (vm_address_t)calloc(size, 1);
     newRegion->start = (cache_allocator_block *)addr;
     newRegion->end = (cache_allocator_block *)(addr + size);
 
@@ -1289,7 +1309,7 @@ static void _cache_print(Cache cache)
 /***********************************************************************
 * _class_printMethodCaches.
 **********************************************************************/
-__private_extern__ void _class_printMethodCaches(Class cls)
+PRIVATE_EXTERN void _class_printMethodCaches(Class cls)
 {
     if (_cache_isEmpty(_class_getCache(cls))) {
         printf("no instance-method cache for class %s\n", _class_getName(cls));

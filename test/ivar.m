@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <stdint.h>
 #include <string.h>
@@ -43,17 +45,19 @@ int main()
 
     ivar = class_getInstanceVariable([Sub class], "subIvar");
     testassert(ivar);
-    testassert(2*sizeof(intptr_t) == ivar_getOffset(ivar));
+    testassert(2*sizeof(intptr_t) == (size_t)ivar_getOffset(ivar));
     testassert(0 == strcmp(ivar_getName(ivar), "subIvar"));
 #if __LP64__
     testassert(0 == strcmp(ivar_getTypeEncoding(ivar), "Q"));
+#elif __clang__
+    testassert(0 == strcmp(ivar_getTypeEncoding(ivar), "L"));
 #else
     testassert(0 == strcmp(ivar_getTypeEncoding(ivar), "I"));
 #endif
 
     ivar = class_getInstanceVariable([Super class], "superIvar");
     testassert(ivar);
-    testassert(sizeof(intptr_t) == ivar_getOffset(ivar));
+    testassert(sizeof(intptr_t) == (size_t)ivar_getOffset(ivar));
     testassert(0 == strcmp(ivar_getName(ivar), "superIvar"));
     testassert(0 == strcmp(ivar_getTypeEncoding(ivar), "c"));
     testassert(ivar == class_getInstanceVariable([Sub class], "superIvar"));

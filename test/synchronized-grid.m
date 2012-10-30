@@ -1,3 +1,5 @@
+// TEST_CFLAGS -framework Foundation
+
 #include "test.h"
 
 #include <stdlib.h>
@@ -15,11 +17,19 @@
 // * thread increments counter [row][col]
 // * thread unlocks all of the locks
 
+#if defined(__arm__)
+// 16 / 4 / 3 / 1024*8 test takes about 30s on 2nd gen iPod touch
+#define THREADS 16
+#define ROWS 4
+#define COLS 3
+#define COUNT 1024*8
+#else
 // 64 / 4 / 3 / 1024*8 test takes about 20s on 4x2.6GHz Mac Pro
 #define THREADS 64
 #define ROWS 4
 #define COLS 3
 #define COUNT 1024*8
+#endif
 
 static id locks[ROWS][COLS];
 static int counts[ROWS][COLS];

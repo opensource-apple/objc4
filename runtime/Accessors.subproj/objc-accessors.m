@@ -41,12 +41,6 @@
 - (id)mutableCopyWithZone:(void *)zone;
 @end
 
-@interface __NSRetained
-- (id)retain;
-- (oneway void)release;
-- (id)autorelease;
-@end
-
 
 typedef uintptr_t spin_lock_t;
 extern void _spin_lock(spin_lock_t *lockp);
@@ -60,11 +54,11 @@ extern void _spin_unlock(spin_lock_t *lockp);
 #define GOODHASH(x) (((long)x >> 5) & GOODMASK)
 static spin_lock_t PropertyLocks[1 << GOODPOWER] = { 0 };
 
-id objc_getProperty(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
-    if (UseGC) {
-        return *(id*) ((char*)self + offset);
-    }
-    
+PRIVATE_EXTERN id objc_getProperty_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
+    return *(id*) ((char*)self + offset);
+}
+
+PRIVATE_EXTERN id objc_getProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
     // Retain release world
     id *slot = (id*) ((char*)self + offset);
     if (!atomic) return *slot;
@@ -72,24 +66,35 @@ id objc_getProperty(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
     // Atomic retain release world
     spin_lock_t *slotlock = &PropertyLocks[GOODHASH(slot)];
     _spin_lock(slotlock);
-    id value = [*slot retain];
+    id value = objc_retain(*slot);
     _spin_unlock(slotlock);
     
     // for performance, we (safely) issue the autorelease OUTSIDE of the spinlock.
-    return [value autorelease];
+    return objc_autoreleaseReturnValue(value);
+}
+
+id objc_getProperty(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
+    return 
+#if SUPPORT_GC
+        (UseGC ? objc_getProperty_gc : objc_getProperty_non_gc)
+#else
+        objc_getProperty_non_gc
+#endif
+            (self, _cmd, offset, atomic);
 }
 
 enum { OBJC_PROPERTY_RETAIN = 0, OBJC_PROPERTY_COPY = 1, OBJC_PROPERTY_MUTABLECOPY = 2 };
 
-void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy) {
-    if (UseGC) {
-        if (shouldCopy) {
-            newValue = (shouldCopy == OBJC_PROPERTY_MUTABLECOPY ? [newValue mutableCopyWithZone:NULL] : [newValue copyWithZone:NULL]);
-        }
-        objc_assign_ivar_internal(newValue, self, offset);
-        return;
+#if SUPPORT_GC
+PRIVATE_EXTERN void objc_setProperty_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy) {
+    if (shouldCopy) {
+        newValue = (shouldCopy == OBJC_PROPERTY_MUTABLECOPY ? [newValue mutableCopyWithZone:NULL] : [newValue copyWithZone:NULL]);
     }
+    objc_assign_ivar_gc(newValue, self, offset);
+}
+#endif
 
+PRIVATE_EXTERN void objc_setProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy) {
     // Retain release world
     id oldValue, *slot = (id*) ((char*)self + offset);
 
@@ -99,7 +104,7 @@ void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL ato
     if (shouldCopy) {
         newValue = (shouldCopy == OBJC_PROPERTY_MUTABLECOPY ? [newValue mutableCopyWithZone:NULL] : [newValue copyWithZone:NULL]);
     } else {
-        newValue = [newValue retain];
+        newValue = objc_retain(newValue);
     }
 
     if (!atomic) {
@@ -113,7 +118,16 @@ void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL ato
         _spin_unlock(slotlock);        
     }
 
-    [oldValue release];
+    objc_release(oldValue);
+}
+
+void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy) {
+#if SUPPORT_GC
+    (UseGC ? objc_setProperty_gc : objc_setProperty_non_gc)
+#else
+    objc_setProperty_non_gc
+#endif
+        (self, _cmd, offset, newValue, atomic, shouldCopy);
 }
 
 
@@ -139,10 +153,12 @@ void objc_copyStruct(void *dest, const void *src, ptrdiff_t size, BOOL atomic, B
         _spin_lock(lockfirst);
         if (locksecond) _spin_lock(locksecond);
     }
+#if SUPPORT_GC
     if (UseGC && hasStrong) {
         auto_zone_write_barrier_memmove(gc_zone, dest, src, size);
-    }
-    else {
+    } else 
+#endif
+    {
         memmove(dest, src, size);
     }
     if (atomic) {

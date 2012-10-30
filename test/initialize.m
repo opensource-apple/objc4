@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 // initialize.m
 // Test basic +initialize behavior
 // * +initialize before class method

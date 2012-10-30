@@ -1,3 +1,5 @@
+// TEST_CFLAGS -Wno-deprecated-declarations
+
 #include "test.h"
 #include <objc/runtime.h>
 
@@ -21,7 +23,9 @@
 @implementation Sub
 +new { return class_createInstance(self, 0); }
 +(int)classMethod { return [super classMethod] + 100; }
--(int)instanceMethod { return [super instanceMethod] + 1000000; }
+-(int)instanceMethod { 
+    return [super instanceMethod] + 1000000;
+}
 @end
 
 int main()

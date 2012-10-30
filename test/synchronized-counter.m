@@ -1,3 +1,5 @@
+// TEST_CFLAGS -framework Foundation
+
 #include "test.h"
 
 #include <stdlib.h>
@@ -10,9 +12,14 @@
 // synchronized stress test
 // Single locked counter incremented by many threads.
 
+#if defined(__arm__)
+#define THREADS 16
+#define COUNT 1024*24
+#else
 // 64 / 1024*24 test takes about 20s on 4x2.6GHz Mac Pro
 #define THREADS 64
 #define COUNT 1024*24
+#endif
 
 static id lock;
 static int count;
@@ -42,9 +49,10 @@ static void *threadfn(void *arg)
     }
 
     // Verify lack of objc pthread data (should have used sync fast cache)
-    if (_pthread_has_direct_tsd()) {
-        testassert(! pthread_getspecific(__PTK_FRAMEWORK_OBJC_KEY5));
-    }
+#ifdef __PTK_FRAMEWORK_OBJC_KEY5
+    testassert(! pthread_getspecific(__PTK_FRAMEWORK_OBJC_KEY5));
+#endif
+
     return NULL;
 }
 
@@ -58,9 +66,9 @@ int main()
 
     // Verify objc pthread data on this thread (from +initialize)
     // Worker threads shouldn't have any because of sync fast cache.
-    if (_pthread_has_direct_tsd()) {
-        testassert(pthread_getspecific(__PTK_FRAMEWORK_OBJC_KEY5));
-    }
+#ifdef __PTK_FRAMEWORK_OBJC_KEY5
+    testassert(pthread_getspecific(__PTK_FRAMEWORK_OBJC_KEY5));
+#endif
 
     // Start the threads
     for (t = 0; t < THREADS; t++) {

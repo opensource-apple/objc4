@@ -1,3 +1,5 @@
+// See instructions in weak.h
+
 #include "test.h"
 #include "weak.h"
 
@@ -112,6 +114,12 @@
 @end
 
 
+#if WEAK_FRAMEWORK
+#   define TESTIVAR(cond) testassert(cond)
+#else
+#   define TESTIVAR(cond) /* rdar */
+#endif
+
 static BOOL classInList(Class *classes, const char *name)
 {
     Class *cp;
@@ -130,11 +138,16 @@ static BOOL classInNameList(const char **names, const char *name)
     return NO;
 }
 
-int main()
+int main(int argc __unused, char **argv)
 {
-    // DYLD_IMAGE_SUFFIX=_empty loads the weak-missing version
-    BOOL weakMissing = NO;
-    if (getenv("DYLD_IMAGE_SUFFIX")) weakMissing = YES;
+    BOOL weakMissing;
+    if (strstr(argv[0], "-not-missing.out")) {
+        weakMissing = NO;
+    } else if (strstr(argv[0], "-missing.out")) {
+        weakMissing = YES;
+    } else {
+        fail("executable name must be weak*-missing.out or weak*-not-missing.out");
+    }
 
     // class and category +load methods
     if (weakMissing) testassert(state == 8);
@@ -176,9 +189,7 @@ int main()
     }
 
     // class list
-    Class classes[100];
-    int count = objc_getClassList(classes, 99);
-    classes[count] = NULL;
+    Class *classes = objc_copyClassList(NULL);
     testassert(classInList(classes, "NotMissingRoot"));
     testassert(classInList(classes, "NotMissingSuper"));
     testassert(classInList(classes, "MyNotMissingSuper"));
@@ -194,6 +205,7 @@ int main()
         testassert(classInList(classes, "MyMissingSuper"));
         testassert(classInList(classes, "MyMissingSub"));
     }
+    free(classes);
 
     // class name list
     const char *image = class_getImageName(objc_getClass("NotMissingRoot"));
@@ -265,13 +277,16 @@ int main()
     NotMissingSuper *obj2;
     MissingSuper *obj3;
     testassert((obj = [[NotMissingRoot alloc] init])); 
-    free(obj);
+    [obj dealloc];
     testassert((obj2 = [[NotMissingSuper alloc] init]));
-    testassert(obj2->ivar == 200); free(obj2);
+    TESTIVAR(obj2->ivar == 200); 
+    [obj2 dealloc];
     testassert((obj2 = [[MyNotMissingSuper alloc] init]));
-    testassert(obj2->ivar == 200); free(obj2);
+    TESTIVAR(obj2->ivar == 200); 
+    [obj2 dealloc];
     testassert((obj2 = [[MyNotMissingSub alloc] init]));
-    testassert(obj2->ivar == 200); free(obj2);
+    TESTIVAR(obj2->ivar == 200); 
+    [obj2 dealloc];
     if (weakMissing) {
         testassert(! [[MissingRoot alloc] init]);
         testassert(! [[MissingSuper alloc] init]);
@@ -279,16 +294,20 @@ int main()
         testassert(! [[MyMissingSub alloc] init]);
     } else {
         testassert((obj = [[MissingRoot alloc] init])); 
-        free(obj);
+        [obj dealloc];
         testassert((obj3 = [[MissingSuper alloc] init])); 
-        testassert(obj3->ivar == 100); free(obj3);
+        TESTIVAR(obj3->ivar == 100); 
+        [obj3 dealloc];
         testassert((obj3 = [[MyMissingSuper alloc] init])); 
-        testassert(obj3->ivar == 100); free(obj3);
+        TESTIVAR(obj3->ivar == 100); 
+        [obj3 dealloc];
         testassert((obj3 = [[MyMissingSub alloc] init])); 
-        testassert(obj3->ivar == 100); free(obj3);
+        TESTIVAR(obj3->ivar == 100); 
+        [obj3 dealloc];
     }
 
-    if (weakMissing) succeed("weak-missing");
-    else succeed("weak-not-missing");
+    *strrchr(argv[0], '.') = 0;
+    succeed(basename(argv[0]));
     return 0;
 }
+

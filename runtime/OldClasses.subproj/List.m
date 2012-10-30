@@ -33,7 +33,6 @@
 #import <stdio.h>
 #import <string.h>
 
-#define OLD 1
 #import <objc/List.h>
 
 #define DATASIZE(count) ((count) * sizeof(id))

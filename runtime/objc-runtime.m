@@ -35,6 +35,7 @@
 
 #include "objc-private.h"
 #include "objc-loadmethod.h"
+#include "message.h"
 
 OBJC_EXPORT Class getOriginalClassForPosingClass(Class);
 
@@ -44,37 +45,41 @@ OBJC_EXPORT Class getOriginalClassForPosingClass(Class);
 **********************************************************************/
 
 // Settings from environment variables
-#ifndef NO_ENVIRON
-__private_extern__ int PrintImages = -1;     // env OBJC_PRINT_IMAGES
-__private_extern__ int PrintLoading = -1;    // env OBJC_PRINT_LOAD_METHODS
-__private_extern__ int PrintInitializing = -1; // env OBJC_PRINT_INITIALIZE_METHODS
-__private_extern__ int PrintResolving = -1;  // env OBJC_PRINT_RESOLVED_METHODS
-__private_extern__ int PrintConnecting = -1; // env OBJC_PRINT_CLASS_SETUP
-__private_extern__ int PrintProtocols = -1;  // env OBJC_PRINT_PROTOCOL_SETUP
-__private_extern__ int PrintIvars = -1;      // env OBJC_PRINT_IVAR_SETUP
-__private_extern__ int PrintVtables = -1;    // env OBJC_PRINT_VTABLE_SETUP
-__private_extern__ int PrintVtableImages = -1;//env OBJC_PRINT_VTABLE_IMAGES
-__private_extern__ int PrintFuture = -1;     // env OBJC_PRINT_FUTURE_CLASSES
-__private_extern__ int PrintRTP = -1;        // env OBJC_PRINT_RTP
-__private_extern__ int PrintGC = -1;         // env OBJC_PRINT_GC
-__private_extern__ int PrintPreopt = -1;     // env OBJC_PRINT_PREOPTIMIZATION
-__private_extern__ int PrintCxxCtors = -1;   // env OBJC_PRINT_CXX_CTORS
-__private_extern__ int PrintExceptions = -1; // env OBJC_PRINT_EXCEPTIONS
-__private_extern__ int PrintAltHandlers = -1; // env OBJC_PRINT_ALT_HANDLERS
-__private_extern__ int PrintDeprecation = -1;// env OBJC_PRINT_DEPRECATION_WARNINGS
-__private_extern__ int PrintReplacedMethods = -1; // env OBJC_PRINT_REPLACED_METHODS
-__private_extern__ int PrintCaches = -1;     // env OBJC_PRINT_CACHE_SETUP
+#if SUPPORT_ENVIRON
+PRIVATE_EXTERN int PrintImages = -1;     // env OBJC_PRINT_IMAGES
+PRIVATE_EXTERN int PrintLoading = -1;    // env OBJC_PRINT_LOAD_METHODS
+PRIVATE_EXTERN int PrintInitializing = -1; // env OBJC_PRINT_INITIALIZE_METHODS
+PRIVATE_EXTERN int PrintResolving = -1;  // env OBJC_PRINT_RESOLVED_METHODS
+PRIVATE_EXTERN int PrintConnecting = -1; // env OBJC_PRINT_CLASS_SETUP
+PRIVATE_EXTERN int PrintProtocols = -1;  // env OBJC_PRINT_PROTOCOL_SETUP
+PRIVATE_EXTERN int PrintIvars = -1;      // env OBJC_PRINT_IVAR_SETUP
+PRIVATE_EXTERN int PrintVtables = -1;    // env OBJC_PRINT_VTABLE_SETUP
+PRIVATE_EXTERN int PrintVtableImages = -1;//env OBJC_PRINT_VTABLE_IMAGES
+PRIVATE_EXTERN int PrintFuture = -1;     // env OBJC_PRINT_FUTURE_CLASSES
+PRIVATE_EXTERN int PrintRTP = -1;        // env OBJC_PRINT_RTP
+PRIVATE_EXTERN int PrintGC = -1;         // env OBJC_PRINT_GC
+PRIVATE_EXTERN int PrintPreopt = -1;     // env OBJC_PRINT_PREOPTIMIZATION
+PRIVATE_EXTERN int PrintCxxCtors = -1;   // env OBJC_PRINT_CXX_CTORS
+PRIVATE_EXTERN int PrintExceptions = -1; // env OBJC_PRINT_EXCEPTIONS
+PRIVATE_EXTERN int PrintExceptionThrow = -1; // env OBJC_PRINT_EXCEPTION_THROW
+PRIVATE_EXTERN int PrintAltHandlers = -1; // env OBJC_PRINT_ALT_HANDLERS
+PRIVATE_EXTERN int PrintDeprecation = -1;// env OBJC_PRINT_DEPRECATION_WARNINGS
+PRIVATE_EXTERN int PrintReplacedMethods = -1; // env OBJC_PRINT_REPLACED_METHODS
+PRIVATE_EXTERN int PrintCaches = -1;     // env OBJC_PRINT_CACHE_SETUP
+PRIVATE_EXTERN int PrintPoolHiwat = -1;  // env OBJC_PRINT_POOL_HIGHWATER
 
-__private_extern__ int UseInternalZone = -1; // env OBJC_USE_INTERNAL_ZONE
+PRIVATE_EXTERN int UseInternalZone = -1; // env OBJC_USE_INTERNAL_ZONE
 
-__private_extern__ int DebugUnload = -1;     // env OBJC_DEBUG_UNLOAD
-__private_extern__ int DebugFragileSuperclasses = -1; // env OBJC_DEBUG_FRAGILE_SUPERCLASSES
-__private_extern__ int DebugNilSync = -1;    // env OBJC_DEBUG_NIL_SYNC
+PRIVATE_EXTERN int DebugUnload = -1;     // env OBJC_DEBUG_UNLOAD
+PRIVATE_EXTERN int DebugFragileSuperclasses = -1; // env OBJC_DEBUG_FRAGILE_SUPERCLASSES
+PRIVATE_EXTERN int DebugNilSync = -1;    // env OBJC_DEBUG_NIL_SYNC
+PRIVATE_EXTERN int DebugNonFragileIvars = -1; // env OBJC_DEBUG_NONFRAGILE_IVARS
+PRIVATE_EXTERN int DebugAltHandlers = -1;// env OBJC_DEBUG_ALT_HANDLERS
 
-__private_extern__ int DisableGC = -1;       // env OBJC_DISABLE_GC
-__private_extern__ int DisableVtables = -1;  // env OBJC_DISABLE_VTABLES
-__private_extern__ int DisablePreopt = -1;   // env OBJC_DISABLE_PREOPTIMIZATION
-__private_extern__ int DebugFinalizers = -1; // env OBJC_DEBUG_FINALIZERS
+PRIVATE_EXTERN int DisableGC = -1;       // env OBJC_DISABLE_GC
+PRIVATE_EXTERN int DisableVtables = -1;  // env OBJC_DISABLE_VTABLES
+PRIVATE_EXTERN int DisablePreopt = -1;   // env OBJC_DISABLE_PREOPTIMIZATION
+PRIVATE_EXTERN int DebugFinalizers = -1; // env OBJC_DEBUG_FINALIZERS
 #endif
 
 
@@ -82,21 +87,25 @@ __private_extern__ int DebugFinalizers = -1; // env OBJC_DEBUG_FINALIZERS
 static tls_key_t _objc_pthread_key;
 
 // Selectors
-__private_extern__ SEL SEL_load = NULL;
-__private_extern__ SEL SEL_initialize = NULL;
-__private_extern__ SEL SEL_resolveInstanceMethod = NULL;
-__private_extern__ SEL SEL_resolveClassMethod = NULL;
-__private_extern__ SEL SEL_cxx_construct = NULL;
-__private_extern__ SEL SEL_cxx_destruct = NULL;
-__private_extern__ SEL SEL_retain = NULL;
-__private_extern__ SEL SEL_release = NULL;
-__private_extern__ SEL SEL_autorelease = NULL;
-__private_extern__ SEL SEL_copy = NULL;
-__private_extern__ SEL SEL_finalize = NULL;
+PRIVATE_EXTERN SEL SEL_load = NULL;
+PRIVATE_EXTERN SEL SEL_initialize = NULL;
+PRIVATE_EXTERN SEL SEL_resolveInstanceMethod = NULL;
+PRIVATE_EXTERN SEL SEL_resolveClassMethod = NULL;
+PRIVATE_EXTERN SEL SEL_cxx_construct = NULL;
+PRIVATE_EXTERN SEL SEL_cxx_destruct = NULL;
+PRIVATE_EXTERN SEL SEL_retain = NULL;
+PRIVATE_EXTERN SEL SEL_release = NULL;
+PRIVATE_EXTERN SEL SEL_autorelease = NULL;
+PRIVATE_EXTERN SEL SEL_retainCount = NULL;
+PRIVATE_EXTERN SEL SEL_alloc = NULL;
+PRIVATE_EXTERN SEL SEL_copy = NULL;
+PRIVATE_EXTERN SEL SEL_new = NULL;
+PRIVATE_EXTERN SEL SEL_finalize = NULL;
+PRIVATE_EXTERN SEL SEL_forwardInvocation = NULL;
 
-__private_extern__ header_info *FirstHeader NOBSS = 0;  // NULL means empty list
-__private_extern__ header_info *LastHeader  NOBSS = 0;  // NULL means invalid; recompute it
-__private_extern__ int HeaderCount NOBSS = 0;
+PRIVATE_EXTERN header_info *FirstHeader = 0;  // NULL means empty list
+PRIVATE_EXTERN header_info *LastHeader  = 0;  // NULL means invalid; recompute it
+PRIVATE_EXTERN int HeaderCount = 0;
 
 
 
@@ -196,7 +205,7 @@ id objc_getMetaClass(const char *aClassName)
 /***********************************************************************
 * _nameForHeader.
 **********************************************************************/
-__private_extern__ const char *_nameForHeader(const headerType *header)
+PRIVATE_EXTERN const char *_nameForHeader(const headerType *header)
 {
     return _getObjcHeaderName ((headerType *) header);
 }
@@ -205,7 +214,7 @@ __private_extern__ const char *_nameForHeader(const headerType *header)
 /***********************************************************************
 * _objc_appendHeader.  Add a newly-constructed header_info to the list. 
 **********************************************************************/
-__private_extern__ void _objc_appendHeader(header_info *hi)
+PRIVATE_EXTERN void _objc_appendHeader(header_info *hi)
 {
     // Add the header to the header list. 
     // The header is appended to the list, to preserve the bottom-up order.
@@ -234,7 +243,7 @@ __private_extern__ void _objc_appendHeader(header_info *hi)
 * LastHeader is set to NULL. Any code that uses LastHeader must 
 * detect this NULL and recompute LastHeader by traversing the list.
 **********************************************************************/
-__private_extern__ void _objc_removeHeader(header_info *hi)
+PRIVATE_EXTERN void _objc_removeHeader(header_info *hi)
 {
     header_info **hiP;
 
@@ -262,9 +271,9 @@ __private_extern__ void _objc_removeHeader(header_info *hi)
 * Read environment variables that affect the runtime.
 * Also print environment variable help, if requested.
 **********************************************************************/
-__private_extern__ void environ_init(void) 
+PRIVATE_EXTERN void environ_init(void) 
 {
-#ifndef NO_ENVIRON
+#if SUPPORT_ENVIRON
     int PrintHelp = (getenv("OBJC_HELP") != NULL);
     int PrintOptions = (getenv("OBJC_PRINT_OPTIONS") != NULL);
     int secure = issetugid();
@@ -332,12 +341,16 @@ __private_extern__ void environ_init(void)
            "log calls to C++ ctors and dtors for instance variables");
     OPTION(PrintExceptions, OBJC_PRINT_EXCEPTIONS, 
            "log exception handling");
+    OPTION(PrintExceptionThrow, OBJC_PRINT_EXCEPTION_THROW, 
+           "log backtrace of every objc_exception_throw()");
     OPTION(PrintAltHandlers, OBJC_PRINT_ALT_HANDLERS, 
            "log processing of exception alt handlers");
     OPTION(PrintReplacedMethods, OBJC_PRINT_REPLACED_METHODS, 
            "log methods replaced by category implementations");
     OPTION(PrintDeprecation, OBJC_PRINT_DEPRECATION_WARNINGS, 
            "warn about calls to deprecated runtime functions");
+    OPTION(PrintPoolHiwat, OBJC_PRINT_POOL_HIGHWATER, 
+           "print high-water marks for autorelease pools");
 
     OPTION(DebugUnload, OBJC_DEBUG_UNLOAD,
            "warn about poorly-behaving bundles when unloaded");
@@ -347,6 +360,10 @@ __private_extern__ void environ_init(void)
            "warn about classes that implement -dealloc but not -finalize");
     OPTION(DebugNilSync, OBJC_DEBUG_NIL_SYNC, 
            "warn about @synchronized(nil), which does no synchronization");
+    OPTION(DebugNonFragileIvars, OBJC_DEBUG_NONFRAGILE_IVARS, 
+           "capriciously rearrange non-fragile ivars");
+    OPTION(DebugAltHandlers, OBJC_DEBUG_ALT_HANDLERS, 
+           "record more info about bad alt handler use");
 
     OPTION(UseInternalZone, OBJC_USE_INTERNAL_ZONE,
            "allocate runtime data in a dedicated malloc zone");
@@ -367,7 +384,7 @@ __private_extern__ void environ_init(void)
 * logReplacedMethod
 * OBJC_PRINT_REPLACED_METHODS implementation
 **********************************************************************/
-__private_extern__ void 
+PRIVATE_EXTERN void 
 logReplacedMethod(const char *className, SEL s, 
                   BOOL isMeta, const char *catName, 
                   IMP oldImp, IMP newImp)
@@ -412,7 +429,7 @@ void objc_setMultithreaded (BOOL flag)
 * If the data doesn't exist yet and create is NO, return NULL.
 * If the data doesn't exist yet and create is YES, allocate and return it.
 **********************************************************************/
-__private_extern__ _objc_pthread_data *_objc_fetch_pthread_data(BOOL create)
+PRIVATE_EXTERN _objc_pthread_data *_objc_fetch_pthread_data(BOOL create)
 {
     _objc_pthread_data *data;
 
@@ -432,12 +449,11 @@ __private_extern__ _objc_pthread_data *_objc_fetch_pthread_data(BOOL create)
 * arg shouldn't be NULL, but we check anyway.
 **********************************************************************/
 extern void _destroyInitializingClassList(struct _objc_initializing_classes *list);
-__private_extern__ void _objc_pthread_destroyspecific(void *arg)
+PRIVATE_EXTERN void _objc_pthread_destroyspecific(void *arg)
 {
     _objc_pthread_data *data = (_objc_pthread_data *)arg;
     if (data != NULL) {
         _destroyInitializingClassList(data->initializingClasses);
-        _destroyLockList(data->lockList);
         _destroySyncCache(data->syncCache);
         _destroyAltHandlerList(data->handlerList);
 
@@ -448,13 +464,13 @@ __private_extern__ void _objc_pthread_destroyspecific(void *arg)
 }
 
 
-__private_extern__ void tls_init(void)
+PRIVATE_EXTERN void tls_init(void)
 {
-#ifdef NO_DIRECT_THREAD_KEYS
-    tls_create(&_objc_pthread_key, &_objc_pthread_destroyspecific);
-#else
+#if SUPPORT_DIRECT_THREAD_KEYS
     _objc_pthread_key = TLS_DIRECT_KEY;
     pthread_key_init_np(TLS_DIRECT_KEY, &_objc_pthread_destroyspecific);
+#else
+    _objc_pthread_key = tls_create(&_objc_pthread_destroyspecific);
 #endif
 }
 
@@ -471,7 +487,7 @@ void _objcInit(void)
 }
 
 
-#if !TARGET_OS_WIN32
+#if !(TARGET_OS_WIN32  ||  TARGET_OS_EMBEDDED  ||  TARGET_OS_IPHONE)
 /***********************************************************************
 * _objc_setNilReceiver
 **********************************************************************/
@@ -505,167 +521,6 @@ void objc_setForwardHandler(void *fwd, void *fwd_stret)
 }
 
 
-#if defined(__ppc__)  ||  defined(__ppc64__)
-
-// Test to see if either the displacement or destination is within 
-// the +/- 2^25 range needed for a PPC branch immediate instruction.  
-// Shifting the high bit of the displacement (or destination)
-// left 6 bits and then 6 bits arithmetically to the right does a 
-// sign extend of the 26th bit.  If that result is equivalent to the 
-// original value, then the displacement (or destination) will fit
-// into a simple branch.  Otherwise a larger branch sequence is required. 
-// ppc64: max displacement is still +/- 2^25, but intptr_t is bigger
-
-// tiny:  bc*
-// small: b, ba (unconditional only)
-// 32:    bctr with lis+ori only
-static BOOL ppc_tiny_displacement(intptr_t displacement)
-{
-    size_t shift = sizeof(intptr_t) - 16;  // ilp32=16, lp64=48
-    return (((displacement << shift) >> shift) == displacement);
-}
-
-static BOOL ppc_small_displacement(intptr_t displacement)
-{
-    size_t shift = sizeof(intptr_t) - 26;  // ilp32=6, lp64=38
-    return (((displacement << shift) >> shift) == displacement);
-}
-
-#if defined(__ppc64__)
-// Same as ppc_small_displacement, but decides whether 32 bits is big enough.
-static BOOL ppc_32bit_displacement(intptr_t displacement)
-{
-    size_t shift = sizeof(intptr_t) - 32;
-    return (((displacement << shift) >> shift) == displacement);
-}
-#endif
-
-/**********************************************************************
-* objc_branch_size
-* Returns the number of instructions needed 
-* for a branch from entry to target. 
-**********************************************************************/
-__private_extern__ size_t objc_branch_size(void *entry, void *target)
-{
-    return objc_cond_branch_size(entry, target, COND_ALWAYS);
-}
-
-__private_extern__ size_t 
-objc_cond_branch_size(void *entry, void *target, unsigned cond)
-{
-    intptr_t destination = (intptr_t)target;
-    intptr_t displacement = (intptr_t)destination - (intptr_t)entry;
-
-    if (cond == COND_ALWAYS  &&  ppc_small_displacement(displacement)) {
-        // fits in unconditional relative branch immediate
-        return 1;
-    } 
-    if (cond == COND_ALWAYS  &&  ppc_small_displacement(destination)) {
-        // fits in unconditional absolute branch immediate
-        return 1;
-    }
-    if (ppc_tiny_displacement(displacement)) {
-        // fits in conditional relative branch immediate
-        return 1;
-    } 
-    if (ppc_tiny_displacement(destination)) {
-        // fits in conditional absolute branch immediate
-        return 1;
-    }
-#if defined(__ppc64__)
-    if (!ppc_32bit_displacement(destination)) {
-        // fits in 64-bit absolute branch through CTR
-        return 7;
-    }
-#endif
-    
-    // fits in 32-bit absolute branch through CTR
-    return 4;
-}
-
-/**********************************************************************
-* objc_write_branch
-* Writes at entry a PPC branch instruction sequence that branches to target.
-* The sequence written will be objc_branch_size(entry, target) instructions.
-* Returns the number of instructions written.
-**********************************************************************/
-__private_extern__ size_t objc_write_branch(void *entry, void *target) 
-{
-    return objc_write_cond_branch(entry, target, COND_ALWAYS);
-}
-
-__private_extern__ size_t 
-objc_write_cond_branch(void *entry, void *target, unsigned cond) 
-{
-    unsigned *address = (unsigned *)entry;                              // location to store the 32 bit PPC instructions
-    intptr_t destination = (intptr_t)target;                            // destination as an absolute address
-    intptr_t displacement = (intptr_t)destination - (intptr_t)address;  // destination as a branch relative offset
-
-    if (cond == COND_ALWAYS  &&  ppc_small_displacement(displacement)) {
-        // use unconditional relative branch with the displacement
-        address[0] = 0x48000000 | (unsigned)(displacement & 0x03fffffc); // b *+displacement
-        // issued 1 instruction
-        return 1;
-    } 
-    if (cond == COND_ALWAYS  &&  ppc_small_displacement(destination)) {
-        // use unconditional absolute branch with the destination
-        address[0] = 0x48000000 | (unsigned)(destination & 0x03fffffc) | 2; // ba destination (2 is the absolute flag)
-        // issued 1 instruction
-        return 1;
-    }
-
-    if (ppc_tiny_displacement(displacement)) {
-        // use conditional relative branch with the displacement
-        address[0] = 0x40000000 | cond | (unsigned)(displacement & 0x0000fffc); // b *+displacement
-        // issued 1 instruction
-        return 1;
-    } 
-    if (ppc_tiny_displacement(destination)) {
-        // use conditional absolute branch with the destination
-        address[0] = 0x40000000 | cond | (unsigned)(destination & 0x0000fffc) | 2; // ba destination (2 is the absolute flag)
-        // issued 1 instruction
-        return 1;
-    }
-
-
-    // destination is large and far away. 
-    // Use an absolute branch via CTR.
-
-#if defined(__ppc64__)
-    if (!ppc_32bit_displacement(destination)) {
-        uint16_t lo = destination & 0xffff;
-        uint16_t hi = (destination >> 16) & 0xffff;
-        uint16_t hi2 = (destination >> 32) & 0xffff;
-        uint16_t hi3 = (destination >> 48) & 0xffff;
-        
-        address[0] = 0x3d800000 | hi3;   // lis  r12, hi3
-        address[1] = 0x618c0000 | hi2;   // ori  r12, r12, hi2
-        address[2] = 0x798c07c6;         // sldi r12, r12, 32
-        address[3] = 0x658c0000 | hi;    // oris r12, r12, hi
-        address[4] = 0x618c0000 | lo;    // ori  r12, r12, lo
-        address[5] = 0x7d8903a6;         // mtctr r12
-        address[6] = 0x4c000420 | cond;  // bctr
-        // issued 7 instructions
-        return 7;
-    }
-#endif
-
-    {
-        uint16_t lo = destination & 0xffff;
-        uint16_t hi = (destination >> 16) & 0xffff;
-
-        address[0] = 0x3d800000 | hi;               // lis r12,hi
-        address[1] = 0x618c0000 | lo;               // ori r12,r12,lo
-        address[2] = 0x7d8903a6;                    // mtctr r12
-        address[3] = 0x4c000420 | cond;             // bctr
-        // issued 4 instructions
-        return 4;
-    }
-}
-
-// defined(__ppc__)  ||  defined(__ppc64__)
-#endif
-
 #if defined(__i386__) || defined(__x86_64__)
 
 /**********************************************************************
@@ -673,12 +528,12 @@ objc_write_cond_branch(void *entry, void *target, unsigned cond)
 * Returns the number of BYTES needed 
 * for a branch from entry to target. 
 **********************************************************************/
-__private_extern__ size_t objc_branch_size(void *entry, void *target)
+PRIVATE_EXTERN size_t objc_branch_size(void *entry, void *target)
 {
     return objc_cond_branch_size(entry, target, COND_ALWAYS);
 }
 
-__private_extern__ size_t 
+PRIVATE_EXTERN size_t 
 objc_cond_branch_size(void *entry, void *target, unsigned cond)
 {
     // For simplicity, always use 32-bit relative jumps.
@@ -692,12 +547,12 @@ objc_cond_branch_size(void *entry, void *target, unsigned cond)
 * The sequence written will be objc_branch_size(entry, target) BYTES.
 * Returns the number of BYTES written.
 **********************************************************************/
-__private_extern__ size_t objc_write_branch(void *entry, void *target) 
+PRIVATE_EXTERN size_t objc_write_branch(void *entry, void *target) 
 {
     return objc_write_cond_branch(entry, target, COND_ALWAYS);
 }
 
-__private_extern__ size_t 
+PRIVATE_EXTERN size_t 
 objc_write_cond_branch(void *entry, void *target, unsigned cond) 
 {
     uint8_t *address = (uint8_t *)entry;  // instructions written to here
@@ -743,13 +598,13 @@ const char *class_getImageName(Class cls)
 #endif
 #if TARGET_OS_WIN32
 	charactersCopied = 0;
-	szFileName = malloc(MAX_PATH);
+	szFileName = malloc(MAX_PATH * sizeof(TCHAR));
 	
 	origCls = objc_getOrigClass(class_getName(cls));
 	classModule = NULL;
 	res = GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCTSTR)origCls, &classModule);
 	if (res && classModule) {
-		charactersCopied = GetModuleFileName(classModule, szFileName, MAX_PATH);
+	    charactersCopied = GetModuleFileName(classModule, szFileName, MAX_PATH * sizeof(TCHAR));
 	}
 	if (classModule) FreeLibrary(classModule);
 	if (charactersCopied) {
@@ -768,20 +623,17 @@ const char **objc_copyImageNames(unsigned int *outCount)
     header_info *hi;
     int count = 0;
     int max = HeaderCount;
+#if TARGET_OS_WIN32
+    const TCHAR **names = calloc(max+1, sizeof(TCHAR *));
+#else
     const char **names = calloc(max+1, sizeof(char *));
+#endif
     
     for (hi = FirstHeader; hi != NULL && count < max; hi = hi->next) {
 #if TARGET_OS_WIN32
-		TCHAR *szFileName;
-		DWORD charactersCopied;
-		
-		szFileName = malloc(MAX_PATH);
-		
-		charactersCopied = GetModuleFileName((HMODULE)(hi->mhdr), szFileName, MAX_PATH);
-		if (charactersCopied)
-			names[count++] = (const char *)szFileName;
-		else
-			free(szFileName);
+        if (hi->os.moduleName) {
+            names[count++] = hi->os.moduleName;
+        }
 #else
         if (hi->os.dl_info.dli_fname) {
             names[count++] = hi->os.dl_info.dli_fname;
@@ -817,7 +669,7 @@ objc_copyClassNamesForImage(const char *image, unsigned int *outCount)
     // Find the image.
     for (hi = FirstHeader; hi != NULL; hi = hi->next) {
 #if TARGET_OS_WIN32
-        // fixme
+        if (0 == wcscmp((TCHAR *)image, hi->os.moduleName)) break;
 #else
         if (0 == strcmp(image, hi->os.dl_info.dli_fname)) break;
 #endif
@@ -860,6 +712,75 @@ void objc_setEnumerationMutationHandler(void (*handler)(id)) {
 
 
 /**********************************************************************
+* Associative Reference Support
+**********************************************************************/
+
+#if SUPPORT_GC
+PRIVATE_EXTERN id objc_getAssociatedObject_gc(id object, const void *key) {
+    return auto_zone_get_associative_ref(gc_zone, object, (void *)key);
+}
+#endif
+
+PRIVATE_EXTERN id objc_getAssociatedObject_non_gc(id object, const void *key) {
+    return _object_get_associative_reference(object, (void *)key);
+}
+
+id objc_getAssociatedObject(id object, const void *key) {
+#if SUPPORT_GC
+    if (UseGC) {
+        return auto_zone_get_associative_ref(gc_zone, object, (void *)key);
+    } else 
+#endif
+    {
+        return _object_get_associative_reference(object, (void *)key);
+    }
+}
+
+#if SUPPORT_GC
+PRIVATE_EXTERN void objc_setAssociatedObject_gc(id object, const void *key, id value, objc_AssociationPolicy policy) {
+    if ((policy & OBJC_ASSOCIATION_COPY_NONATOMIC) == OBJC_ASSOCIATION_COPY_NONATOMIC) {
+        value = objc_msgSend(value, SEL_copy);
+    }
+    auto_zone_set_associative_ref(gc_zone, object, (void *)key, value);
+}
+#endif
+
+PRIVATE_EXTERN void objc_setAssociatedObject_non_gc(id object, const void *key, id value, objc_AssociationPolicy policy) {
+    _object_set_associative_reference(object, (void *)key, value, policy);
+}
+
+void objc_setAssociatedObject(id object, const void *key, id value, objc_AssociationPolicy policy) {
+#if SUPPORT_GC
+    if (UseGC) {
+        if ((policy & OBJC_ASSOCIATION_COPY_NONATOMIC) == OBJC_ASSOCIATION_COPY_NONATOMIC) {
+            value = objc_msgSend(value, SEL_copy);
+        }
+        auto_zone_set_associative_ref(gc_zone, object, (void *)key, value);
+    } else 
+#endif
+    {
+        // Note, creates a retained reference in non-GC.
+        _object_set_associative_reference(object, (void *)key, value, policy);
+    }
+}
+
+void objc_removeAssociatedObjects(id object) {
+#if SUPPORT_GC
+    if (UseGC) {
+        auto_zone_erase_associative_refs(gc_zone, object);
+    } else 
+#endif
+    {
+        if (_class_instancesHaveAssociatedObjects(_object_getClass(object))) _object_remove_assocations(object);
+    }
+}
+
+BOOL class_instancesHaveAssociatedObjects(Class cls) {
+    return _class_instancesHaveAssociatedObjects(cls);
+}
+
+
+/**********************************************************************
 * Debugger mode
 *
 * Debugger mode is used when gdb wants to call runtime functions 
@@ -878,10 +799,10 @@ void objc_setEnumerationMutationHandler(void (*handler)(id)) {
 * handled there is a potential gdb deadlock.
 **********************************************************************/
 
-#ifndef NO_DEBUGGER_MODE
+#if SUPPORT_DEBUGGER_MODE
 
-__private_extern__ int DebuggerMode = DEBUGGER_OFF;
-__private_extern__ objc_thread_t DebuggerModeThread = 0;
+PRIVATE_EXTERN int DebuggerMode = DEBUGGER_OFF;
+PRIVATE_EXTERN objc_thread_t DebuggerModeThread = 0;
 static int DebuggerModeCount;
 
 /**********************************************************************
@@ -958,5 +879,5 @@ void gdb_objc_debuggerModeFailure(void)
     _objc_fatal("DEBUGGER MODE: failed");
 }
 
-// !defined(NO_DEBUGGER_MODE)
+// SUPPORT_DEBUGGER_MODE
 #endif

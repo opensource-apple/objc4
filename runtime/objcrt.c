@@ -87,9 +87,10 @@ static int __objc_load(void)
 #pragma data_seg(".CRT$XIAA")
 static void *__objc_init_fn = &__objc_init;
 
-// run _objc_load_image (+load methods) after init_seg(compiler) but before init_seg(library) or init_seg(user)
-#pragma section(".CRT$XCI",long,read,write)
-#pragma data_seg(".CRT$XCI")
+// run _objc_load_image (+load methods) after all other initializers; 
+// otherwise constant NSStrings are not initialized yet
+#pragma section(".CRT$XCUO",long,read,write)
+#pragma data_seg(".CRT$XCUO")
 static void *__objc_load_fn = &__objc_load;
 
 // _objc_unload_image is called by atexit(), not by an image terminator

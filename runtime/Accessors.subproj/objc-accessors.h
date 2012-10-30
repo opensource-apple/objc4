@@ -27,9 +27,19 @@
 #import <objc/objc.h>
 #import <stddef.h>
 
+__BEGIN_DECLS
+
 // Called under non-GC for retain or copy attributed properties
 void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy);
 id objc_getProperty(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic);
+
+// GC-specific accessors.
+void objc_setProperty_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy);
+id objc_getProperty_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic);
+
+// Non-GC accessors.
+void objc_setProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy);
+id objc_getProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic);
 
 // Called under GC by compiler for copying structures containing objects or other strong pointers when
 // the destination memory is not known to be stack local memory.
@@ -47,5 +57,7 @@ void object_setProperty_bycopy(id object, SEL _cmd, id <NSCopying> value, ptrdif
 // called for @property(retain)
 id object_getProperty_byref(id object, SEL _cmd, ptrdiff_t offset);
 void object_setProperty_byref(id object, SEL _cmd, id value, ptrdiff_t offset);
+
+__END_DECLS
 
 #endif

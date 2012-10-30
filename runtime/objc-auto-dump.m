@@ -21,6 +21,10 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+#import "objc-auto.h"
+
+#ifndef OBJC_NO_GC
+
 #import <auto_zone.h>
 #import <objc/objc.h>
 #import <objc/runtime.h>
@@ -102,7 +106,7 @@ static void pointer_set_dispose(pointer_set_t *set) {
 /*
    Quickly dump heap to a named file in a pretty raw format.
  */
-__private_extern__ BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) {
+PRIVATE_EXTERN BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) {
     // just write interesting info to disk
     int fd = secure_open(filename, O_WRONLY|O_CREAT, geteuid());
     if (fd < 0) return NO;
@@ -118,7 +122,7 @@ __private_extern__ BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) 
     // for each thread...
     
     // do registers first
-    void (^dump_registers)(const void *, unsigned long) = ^(const void *base, unsigned long byte_size) {
+    auto_zone_register_dump dump_registers = ^(const void *base, unsigned long byte_size) {
         char type = REGISTER;
         fwrite(&type, 1, 1, fp);
         //fwrite(REGISTER, strlen(REGISTER), 1, fp);
@@ -127,7 +131,7 @@ __private_extern__ BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) 
     };
     
     // then stacks
-    void (^dump_stack)(const void *, unsigned long) = ^(const void *base, unsigned long byte_size) {
+    auto_zone_stack_dump dump_stack = ^(const void *base, unsigned long byte_size) {
         char type = THREAD;
         fwrite(&type, 1, 1, fp);
         //fwrite(THREAD, strlen(THREAD), 1, fp);
@@ -147,7 +151,7 @@ __private_extern__ BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) 
     
     
     // roots
-    void (^dump_root)(const void **) = ^(const void **address) {
+    auto_zone_root_dump dump_root = ^(const void **address) {
         char type = ROOT;
         fwrite(&type, 1, 1, fp);
         // write the address so that we can catch misregistered globals
@@ -158,26 +162,25 @@ __private_extern__ BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) 
     
     // the nodes
     pointer_set_t *classes = new_pointer_set();
-    void (^dump_node)(const void *, unsigned long, unsigned int, unsigned long) =
-        ^(const void *address, unsigned long size, unsigned int layout, unsigned long refcount) {
-            char type = NODE;
-            fwrite(&type, 1, 1, fp);
-            fwrite(&address, sizeof(address), 1, fp);
-            fwrite(&size, sizeof(size), 1, fp);
-            fwrite(&layout, sizeof(layout), 1, fp);
-            fwrite(&refcount, sizeof(refcount), 1, fp);
-            if ((layout & AUTO_UNSCANNED) != AUTO_UNSCANNED) {
-                // now the nodes unfiltered content
-                fwrite(address, size, 1, fp);
-            }
-            if ((layout & AUTO_OBJECT) == AUTO_OBJECT) {
-                long theClass = *(long *)address;
-                if (theClass) pointer_set_add(classes, theClass);
-            }
+    auto_zone_node_dump dump_node = ^(const void *address, unsigned long size, unsigned int layout, unsigned long refcount) {
+        char type = NODE;
+        fwrite(&type, 1, 1, fp);
+        fwrite(&address, sizeof(address), 1, fp);
+        fwrite(&size, sizeof(size), 1, fp);
+        fwrite(&layout, sizeof(layout), 1, fp);
+        fwrite(&refcount, sizeof(refcount), 1, fp);
+        if ((layout & AUTO_UNSCANNED) != AUTO_UNSCANNED) {
+            // now the nodes unfiltered content
+            fwrite(address, size, 1, fp);
+        }
+        if ((layout & AUTO_OBJECT) == AUTO_OBJECT) {
+            long theClass = *(long *)address;
+            if (theClass) pointer_set_add(classes, theClass);
+        }
     };
     
     // weak
-    void (^dump_weak)(const void **, const void *) = ^(const void **address, const void *item) {
+    auto_zone_weak_dump dump_weak = ^(const void **address, const void *item) {
         char type = WEAK;
         fwrite(&type, 1, 1, fp);
         fwrite(&address, sizeof(address), 1, fp);
@@ -196,13 +199,13 @@ __private_extern__ BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) 
         fwrite(&length, sizeof(length), 1, fp);      // n
         fwrite(className, length, 1, fp);          // n bytes
         // strong layout
-        const char *layout = class_getIvarLayout((Class)class);
-        length = layout ? (int)strlen(layout)+1 : 0; // format is <skipnibble><count nibble> ending with <0><0>
+        const uint8_t *layout = class_getIvarLayout((Class)class);
+        length = layout ? (int)strlen((char *)layout)+1 : 0; // format is <skipnibble><count nibble> ending with <0><0>
         fwrite(&length, sizeof(length), 1, fp);      // n
         fwrite(layout, length, 1, fp);            // n bytes
         // weak layout
         layout = class_getWeakIvarLayout((Class)class);
-        length = layout ? (int)strlen(layout)+1 : 0; // format is <skipnibble><count nibble> ending with <0><0>
+        length = layout ? (int)strlen((char *)layout)+1 : 0; // format is <skipnibble><count nibble> ending with <0><0>
         fwrite(&length, sizeof(length), 1, fp);      // n
         fwrite(layout, length, 1, fp);             // n bytes
     });
@@ -216,3 +219,5 @@ __private_extern__ BOOL _objc_dumpHeap(auto_zone_t *zone, const char *filename) 
     }
     return YES;
 }
+
+#endif

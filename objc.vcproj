@@ -24,8 +24,8 @@
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
-				Description="Install"
-				CommandLine="xcopy /Y &quot;$(ProjectDir)runtime\objc.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\objc-api.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\objc-auto.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\objc-exception.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\message.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\runtime.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\hashtable.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\hashtable2.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\maptable.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;"
+				Description="prebuild.bat..."
+				CommandLine="prebuild"
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
@@ -67,6 +67,7 @@
 				OutputFile="$(OutDir)\$(ProjectName)_debug.dll"
 				LinkIncremental="2"
 				GenerateDebugInformation="true"
+				StripPrivateSymbols="$(TargetDir)$(TargetName).pdbstripped"
 				SubSystem="2"
 				OptimizeReferences="1"
 				EnableCOMDATFolding="0"
@@ -96,7 +97,7 @@
 			<Tool
 				Name="VCPostBuildEventTool"
 				Description="Install"
-				CommandLine="xcopy /Y &quot;$(TargetDir)$(TargetName).dll&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).exp&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).lib&quot; &quot;%DSTROOT%\AppleInternal\lib\&quot;&#x0D;&#x0A;"
+				CommandLine="xcopy /Y &quot;$(TargetDir)$(TargetName).dll&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).exp&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).lib&quot; &quot;%DSTROOT%\AppleInternal\lib\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdbstripped&quot; &quot;$(TargetDir)$(TargetName).pdb&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%DSTROOT%\AppleInternal\public\sym\&quot;&#x0D;&#x0A;"
 			/>
 		</Configuration>
 		<Configuration
@@ -109,8 +110,8 @@
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
-				Description="Install Headers"
-				CommandLine="xcopy /Y &quot;$(ProjectDir)runtime\objc.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\objc-api.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\objc-auto.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\objc-exception.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\message.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\runtime.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\hashtable.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\hashtable2.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\maptable.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;"
+				Description="prebuild.bat..."
+				CommandLine="prebuild"
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
@@ -148,6 +149,7 @@
 				AdditionalOptions="/dynamicbase"
 				LinkIncremental="1"
 				GenerateDebugInformation="true"
+				StripPrivateSymbols="$(TargetDir)$(TargetName).pdbstripped"
 				SubSystem="2"
 				OptimizeReferences="1"
 				EnableCOMDATFolding="2"
@@ -177,7 +179,7 @@
 			<Tool
 				Name="VCPostBuildEventTool"
 				Description="Install"
-				CommandLine="xcopy /Y &quot;$(TargetDir)$(TargetName).dll&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).exp&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).lib&quot; &quot;%DSTROOT%\AppleInternal\lib\&quot;&#x0D;&#x0A;"
+				CommandLine="xcopy /Y &quot;$(TargetDir)$(TargetName).dll&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).exp&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).lib&quot; &quot;%DSTROOT%\AppleInternal\lib\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdbstripped&quot; &quot;$(TargetDir)$(TargetName).pdb&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%DSTROOT%\AppleInternal\public\sym\&quot;&#x0D;&#x0A;"
 			/>
 		</Configuration>
 		<Configuration
@@ -189,8 +191,8 @@
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
-				Description="Install"
-				CommandLine="xcopy /Y &quot;$(ProjectDir)runtime\objc.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\objc-api.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\objc-auto.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\objc-exception.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\message.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\runtime.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\hashtable.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\hashtable2.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(ProjectDir)runtime\maptable.h&quot; &quot;%DSTROOT%\AppleInternal\include\objc\&quot;&#x0D;&#x0A;"
+				Description="prebuild.bat..."
+				CommandLine="prebuild"
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
@@ -232,6 +234,7 @@
 				OutputFile="$(OutDir)\$(ProjectName)_debug.dll"
 				LinkIncremental="2"
 				GenerateDebugInformation="true"
+				StripPrivateSymbols="$(TargetDir)$(TargetName).pdbstripped"
 				SubSystem="2"
 				OptimizeReferences="1"
 				EnableCOMDATFolding="0"
@@ -261,7 +264,7 @@
 			<Tool
 				Name="VCPostBuildEventTool"
 				Description="Install"
-				CommandLine="xcopy /Y &quot;$(TargetDir)$(TargetName).dll&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).exp&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).lib&quot; &quot;%DSTROOT%\AppleInternal\lib\&quot;&#x0D;&#x0A;"
+				CommandLine="xcopy /Y &quot;$(TargetDir)$(TargetName).dll&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).exp&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).lib&quot; &quot;%DSTROOT%\AppleInternal\lib\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%DSTROOT%\AppleInternal\bin\&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdbstripped&quot; &quot;$(TargetDir)$(TargetName).pdb&quot;&#x0D;&#x0A;xcopy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%DSTROOT%\AppleInternal\public\sym\&quot;&#x0D;&#x0A;"
 			/>
 		</Configuration>
 	</Configurations>
@@ -470,14 +473,13 @@
 				</FileConfiguration>
 			</File>
 			<File
-				RelativePath=".\runtime\objc-file.m"
+				RelativePath=".\runtime\objc-file-old.m"
 				>
 				<FileConfiguration
 					Name="Debug|Win32"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
-						CompileAs="1"
 					/>
 				</FileConfiguration>
 				<FileConfiguration
@@ -485,7 +487,6 @@
 					>
 					<Tool
 						Name="VCCLCompilerTool"
-						CompileAs="1"
 					/>
 				</FileConfiguration>
 				<FileConfiguration
@@ -493,7 +494,31 @@
 					>
 					<Tool
 						Name="VCCLCompilerTool"
-						CompileAs="1"
+					/>
+				</FileConfiguration>
+			</File>
+			<File
+				RelativePath=".\runtime\objc-file.mm"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="DebugDLL|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
 					/>
 				</FileConfiguration>
 			</File>
@@ -719,14 +744,13 @@
 				</FileConfiguration>
 			</File>
 			<File
-				RelativePath=".\runtime\objc-runtime-new.m"
+				RelativePath=".\runtime\objc-runtime-new.mm"
 				>
 				<FileConfiguration
 					Name="Debug|Win32"
 					>
 					<Tool
 						Name="VCCLCompilerTool"
-						CompileAs="1"
 					/>
 				</FileConfiguration>
 				<FileConfiguration
@@ -734,7 +758,6 @@
 					>
 					<Tool
 						Name="VCCLCompilerTool"
-						CompileAs="1"
 					/>
 				</FileConfiguration>
 				<FileConfiguration
@@ -742,7 +765,6 @@
 					>
 					<Tool
 						Name="VCCLCompilerTool"
-						CompileAs="1"
 					/>
 				</FileConfiguration>
 			</File>
@@ -958,6 +980,14 @@
 				>
 			</File>
 			<File
+				RelativePath=".\runtime\objc-file-old.h"
+				>
+			</File>
+			<File
+				RelativePath=".\runtime\objc-file.h"
+				>
+			</File>
+			<File
 				RelativePath=".\runtime\objc-initialize.h"
 				>
 			</File>
@@ -1023,6 +1053,34 @@
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
+			<File
+				RelativePath=".\version.rc"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					>
+					<Tool
+						Name="VCResourceCompilerTool"
+						AdditionalIncludeDirectories="$(OBJROOT)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|Win32"
+					>
+					<Tool
+						Name="VCResourceCompilerTool"
+						AdditionalIncludeDirectories="$(OBJROOT)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="DebugDLL|Win32"
+					>
+					<Tool
+						Name="VCResourceCompilerTool"
+						AdditionalIncludeDirectories="$(OBJROOT)"
+					/>
+				</FileConfiguration>
+			</File>
 		</Filter>
 	</Files>
 	<Globals>

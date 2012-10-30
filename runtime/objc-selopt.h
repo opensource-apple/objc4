@@ -87,11 +87,21 @@ Source is http://burtleburtle.net/bob/c/perfect.c
   dyld USES THIS FILE AND CANNOT SEE THEM
 */
 
-// #define SELOPT_DEBUG
+#ifndef STATIC_ASSERT
+#   define STATIC_ASSERT(x) _STATIC_ASSERT2(x, __LINE__)
+#   define _STATIC_ASSERT2(x, line) _STATIC_ASSERT3(x, line)
+#   define _STATIC_ASSERT3(x, line)                                     \
+        typedef struct {                                                \
+            int _static_assert[(x) ? 0 : -1];                           \
+        } _static_assert_ ## line __attribute__((unavailable)) 
+#endif
 
-namespace objc_selopt {
+#define SELOPT_DEBUG 0
+
+namespace objc_opt {
 
     typedef int32_t objc_selopt_offset_t;
+    typedef uint8_t objc_selopt_check_t;
 
 #ifdef SELOPT_WRITE
 
@@ -126,25 +136,26 @@ static perfect_hash make_perfect(const string_map& strings);
 
 static uint64_t lookup8( uint8_t *k, size_t length, uint64_t level);
 
-enum { VERSION = 3 };
-
+// Edit objc-sel-table.s and OPT_INITIALIZER if you change this structure.
 struct objc_selopt_t {
-
-    uint32_t version;  /* this is version 3: external cstrings */
     uint32_t capacity;
     uint32_t occupied;
     uint32_t shift;
     uint32_t mask;
     uint32_t zero;
+    uint32_t unused; // alignment pad
     uint64_t salt;
-    uint64_t base;
     
     uint32_t scramble[256];
-    uint8_t tab[0];                 /* tab[mask+1] (always power-of-2) */
-    // int32_t offsets[capacity];   /* offsets from &version to cstrings */
+    uint8_t tab[0];                   /* tab[mask+1] (always power-of-2) */
+    // int32_t offsets[capacity];     /* offsets from &capacity to cstrings */
+    // uint8_t checkbytes[capacity];  /* check byte for each selector string */
 
     objc_selopt_offset_t *offsets() { return (objc_selopt_offset_t *)&tab[mask+1]; }
     const objc_selopt_offset_t *offsets() const { return (const objc_selopt_offset_t *)&tab[mask+1]; }
+
+    objc_selopt_check_t *checkbytes() { return (objc_selopt_check_t *)&offsets()[capacity]; }
+    const objc_selopt_check_t *checkbytes() const { return (const objc_selopt_check_t *)&offsets()[capacity]; }
 
     uint32_t hash(const char *key) const
     {
@@ -153,27 +164,82 @@ struct objc_selopt_t {
         return index;
     }
 
+    // The check bytes areused to reject strings that aren't in the table
+    // without paging in the table's cstring data. This checkbyte calculation 
+    // catches 4785/4815 rejects when launching Safari; a perfect checkbyte 
+    // would catch 4796/4815.
+    objc_selopt_check_t checkbyte(const char *key) const
+    {
+        return 
+            ((key[0] & 0x7) << 5)
+            |
+            (strlen(key) & 0x1f);
+    }
+
     const char *get(const char *key) const 
     {
-        const char *result = (const char *)this + offsets()[hash(key)];
-        if (0 == strcmp(key, result)) return result;
-        else return NULL;
+        uint32_t h = hash(key);
+
+        // Use check byte to reject without paging in the table's cstrings
+        objc_selopt_check_t h_check = checkbytes()[h];
+        objc_selopt_check_t key_check = checkbyte(key);
+        bool check_fail = (h_check != key_check);
+#if ! SELOPT_DEBUG
+        if (check_fail) return NULL;
+#endif
+
+        const char *result = (const char *)this + offsets()[h];
+        if (0 != strcmp(key, result)) return NULL;
+
+#if SELOPT_DEBUG
+        if (check_fail) abort();
+#endif
+
+        return result;
     }
 
 #ifdef SELOPT_WRITE
     void set(const char *key, objc_selopt_offset_t value) 
     {
-        offsets()[hash(key)] = value;
+        uint32_t h = hash(key);
+        offsets()[h] = value;
+        checkbytes()[h] = checkbyte(key);
     }
 #endif
 };
 
-// Initializer for empty table of type uint32_t[].
+
+// Edit objc-sel-table.s if you change this value.
+enum { VERSION = 10 };
+
+// Edit objc-sel-table.s and OPT_INITIALIZER if you change this structure.
+struct objc_opt_t {
+    uint32_t version;
+    uint32_t selopt_offset;
+
+    const objc_selopt_t* selopt() const { 
+        if (selopt_offset == 0) return NULL;
+        return (objc_selopt_t *)((uint8_t *)this + selopt_offset);
+    }
+    objc_selopt_t* selopt() { 
+        if (selopt_offset == 0) return NULL;
+        return (objc_selopt_t *)((uint8_t *)this + selopt_offset);
+    }
+};
+
+// sizeof(objc_opt_t) must be pointer-aligned
+STATIC_ASSERT(sizeof(objc_opt_t) % sizeof(void*) == 0);
+
+// Initializer for empty opt of type uint32_t[].
 #define X8(x) x, x, x, x, x, x, x, x
 #define X64(x) X8(x), X8(x), X8(x), X8(x), X8(x), X8(x), X8(x), X8(x)
 #define X256(x) X64(x), X64(x), X64(x), X64(x)
-#define SELOPT_INITIALIZER \
-    { objc_selopt::VERSION, 4, 4, 63, 3, 0, 0,0, 0,0, X256(0), 0, 20, 20, 20, 20 };
+#define OPT_INITIALIZER {                                           \
+        /* objc_opt_t */                                            \
+        objc_opt::VERSION, 8,                                       \
+        /* objc_selopt_t */                                         \
+        4, 4, 63, 3, 0, 0, 0,0, X256(0), 0, 16, 16, 16, 16, 0       \
+}
 
 
 /*
@@ -316,7 +382,10 @@ write_selopt(void *dst, uint64_t base, size_t dstSize,
         return "perfect hash failed (selectors not optimized)";
     }
     
-    size_t size = sizeof(objc_selopt_t) + (phash.mask+1) + phash.capacity * sizeof(objc_selopt_offset_t);
+    size_t size = sizeof(objc_selopt_t) 
+        + phash.mask+1 
+        + phash.capacity * sizeof(objc_selopt_offset_t) 
+        + phash.capacity * sizeof(objc_selopt_check_t);
     if (size > dstSize) {
         return "selector section too small (selectors not optimized)";
     }
@@ -325,14 +394,13 @@ write_selopt(void *dst, uint64_t base, size_t dstSize,
     objc_selopt_t *selopt = (objc_selopt_t *)buf;
 
     // Set header
-    selopt->version = VERSION;
     selopt->capacity = phash.capacity;
     selopt->occupied = phash.occupied;
     selopt->shift = phash.shift;
     selopt->mask = phash.mask;
     selopt->zero = 0;
+    selopt->unused = 0;
     selopt->salt = phash.salt;
-    selopt->base = base;
     
     // Set hash data
     for (uint32_t i = 0; i < 256; i++) {
@@ -347,8 +415,12 @@ write_selopt(void *dst, uint64_t base, size_t dstSize,
         selopt->offsets()[i] = 
             (objc_selopt_offset_t)offsetof(objc_selopt_t, zero);
     }
+    // Set checkbytes to 0
+    for (uint32_t i = 0; i < phash.capacity; i++) {
+        selopt->checkbytes()[i] = 0;
+    }
 
-    // Set real string offsets
+    // Set real string offsets and checkbytes
 #   define SHIFT (64 - 8*sizeof(objc_selopt_offset_t))
     string_map::const_iterator s;
     for (s = strings.begin(); s != strings.end(); ++s) {
@@ -372,14 +444,12 @@ write_selopt(void *dst, uint64_t base, size_t dstSize,
         S32(selopt->offsets()[i]);
     }
     
-    S32(selopt->version);
     S32(selopt->capacity);
     S32(selopt->occupied);
     S32(selopt->shift);
     S32(selopt->mask);
     S32(selopt->zero);
     S64(selopt->salt);
-    S64(selopt->base);
 #undef S32
 #undef S64
 
@@ -774,7 +844,7 @@ static int perfect(bstuff *tabb, hstuff *tabh, qstuff *tabq, ub4 blen, ub4 smax,
   ub4 maxkeys;                           /* maximum number of keys for any b */
   ub4 i, j;
 
-#ifdef SELOPT_DEBUG
+#if SELOPT_DEBUG
   fprintf(stderr, "           blen %d smax %d nkeys %d\n", blen, smax, nkeys);
 #endif
 

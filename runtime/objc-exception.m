@@ -30,6 +30,7 @@
 #include "objc-private.h"
 #include <stdlib.h>
 #include <setjmp.h>
+#include <execinfo.h>
 
 #include "objc-exception.h"
 
@@ -65,6 +66,14 @@ void objc_exception_set_functions(objc_exception_functions_t *table) {
 void objc_exception_throw(id exception) {
     if (!xtab.throw_exc) {
         set_default_handlers();
+    }
+    
+    if (PrintExceptionThrow) {
+        _objc_inform("EXCEPTIONS: throwing %p (%s)", 
+                     exception, object_getClassName(exception));
+        void* callstack[500];
+        int frameCount = backtrace(callstack, 500);
+        backtrace_symbols_fd(callstack, frameCount, fileno(stderr));
     }
 
     OBJC_RUNTIME_OBJC_EXCEPTION_THROW(exception);  // dtrace probe to log throw activity.
@@ -194,7 +203,7 @@ static id default_extract(void *localExceptionData) {
 static int default_match(Class exceptionClass, id exception) {
     //return [exception isKindOfClass:exceptionClass];
     Class cls;
-    for (cls = exception->isa; nil != cls; cls = _class_getSuperclass(cls)) 
+    for (cls = _object_getClass(exception); nil != cls; cls = _class_getSuperclass(cls)) 
         if (cls == exceptionClass) return 1;
     return 0;
 }
@@ -209,12 +218,12 @@ static void set_default_handlers() {
 }
 
 
-__private_extern__ void exception_init(void)
+PRIVATE_EXTERN void exception_init(void)
 {
     // nothing to do
 }
 
-__private_extern__ void _destroyAltHandlerList(struct alt_handler_list *list)
+PRIVATE_EXTERN void _destroyAltHandlerList(struct alt_handler_list *list)
 {
     // nothing to do
 }
@@ -230,7 +239,7 @@ __private_extern__ void _destroyAltHandlerList(struct alt_handler_list *list)
 
 #include "objc-private.h"
 #include <objc/objc-exception.h>
-
+#include <execinfo.h>
 
 // unwind library types and functions
 // Mostly adapted from Itanium C++ ABI: Exception Handling
@@ -245,17 +254,16 @@ static const _Unwind_Action _UA_CLEANUP_PHASE = 2;
 static const _Unwind_Action _UA_HANDLER_FRAME = 4;
 static const _Unwind_Action _UA_FORCE_UNWIND = 8;
 
-typedef enum {
-    _URC_NO_REASON = 0,
-    _URC_FOREIGN_EXCEPTION_CAUGHT = 1,
-    _URC_FATAL_PHASE2_ERROR = 2,
-    _URC_FATAL_PHASE1_ERROR = 3,
-    _URC_NORMAL_STOP = 4,
-    _URC_END_OF_STACK = 5,
-    _URC_HANDLER_FOUND = 6,
-    _URC_INSTALL_CONTEXT = 7,
-    _URC_CONTINUE_UNWIND = 8
-} _Unwind_Reason_Code;
+typedef int _Unwind_Reason_Code;
+static const _Unwind_Reason_Code _URC_NO_REASON = 0;
+static const _Unwind_Reason_Code _URC_FOREIGN_EXCEPTION_CAUGHT = 1;
+static const _Unwind_Reason_Code _URC_FATAL_PHASE2_ERROR = 2;
+static const _Unwind_Reason_Code _URC_FATAL_PHASE1_ERROR = 3;
+static const _Unwind_Reason_Code _URC_NORMAL_STOP = 4;
+static const _Unwind_Reason_Code _URC_END_OF_STACK = 5;
+static const _Unwind_Reason_Code _URC_HANDLER_FOUND = 6;
+static const _Unwind_Reason_Code _URC_INSTALL_CONTEXT = 7;
+static const _Unwind_Reason_Code _URC_CONTINUE_UNWIND = 8;
 
 struct dwarf_eh_bases
 {
@@ -270,13 +278,15 @@ extern uintptr_t _Unwind_GetLanguageSpecificData(struct _Unwind_Context *);
 
 
 // C++ runtime types and functions
-// Mostly adapted from Itanium C++ ABI: Exception Handling
-//   http://www.codesourcery.com/cxx-abi/abi-eh.html
+// copied from cxxabi.h
 
+#if TARGET_OS_IPHONE
 typedef void (*terminate_handler) ();
-
 // mangled std::set_terminate()
 extern terminate_handler _ZSt13set_terminatePFvvE(terminate_handler);
+#else
+extern void (*__cxa_terminate_handler)(void);
+#endif
 extern void *__cxa_allocate_exception(size_t thrown_size);
 extern void __cxa_throw(void *exc, void *typeinfo, void (*destructor)(void *)) __attribute__((noreturn));
 extern void *__cxa_begin_catch(void *exc);
@@ -284,13 +294,10 @@ extern void __cxa_end_catch(void);
 extern void __cxa_rethrow(void);
 extern void *__cxa_current_exception_type(void);
 
-#ifdef NO_ZEROCOST_EXCEPTIONS
-/* fixme _sj0 for objc too? */
-#define CXX_PERSONALITY __gxx_personality_sj0
-#define OBJC_PERSONALITY __objc_personality_v0
+#if SUPPORT_ZEROCOST_EXCEPTIONS
+#   define CXX_PERSONALITY __gxx_personality_v0
 #else
-#define CXX_PERSONALITY __gxx_personality_v0
-#define OBJC_PERSONALITY __objc_personality_v0
+#   define CXX_PERSONALITY __gxx_personality_sj0
 #endif
 
 extern _Unwind_Reason_Code 
@@ -302,8 +309,6 @@ CXX_PERSONALITY(int version,
 
 
 // objc's internal exception types and data
-
-extern const void *objc_ehtype_vtable[];
 
 struct objc_typeinfo {
     // Position of vtable and name fields must match C++ typeinfo object
@@ -368,7 +373,7 @@ static objc_exception_preprocessor exception_preprocessor = _objc_default_except
 static int _objc_default_exception_matcher(Class catch_cls, id exception)
 {
     Class cls;
-    for (cls = exception->isa;
+    for (cls = _object_getClass(exception);
          cls != NULL; 
          cls = class_getSuperclass(cls))
     {
@@ -439,11 +444,11 @@ objc_setUncaughtExceptionHandler(objc_uncaught_exception_handler fn)
 static void call_alt_handlers(struct _Unwind_Context *ctx);
 
 _Unwind_Reason_Code 
-OBJC_PERSONALITY(int version,
-                 _Unwind_Action actions,
-                 uint64_t exceptionClass,
-                 struct _Unwind_Exception *exceptionObject,
-                 struct _Unwind_Context *context)
+__objc_personality_v0(int version,
+                      _Unwind_Action actions,
+                      uint64_t exceptionClass,
+                      struct _Unwind_Exception *exceptionObject,
+                      struct _Unwind_Context *context)
 {
     BOOL unwinding = ((actions & _UA_CLEANUP_PHASE)  ||  
                       (actions & _UA_FORCE_UNWIND));
@@ -493,11 +498,20 @@ void objc_exception_throw(id obj)
 
     exc->tinfo.vtable = objc_ehtype_vtable+2;
     exc->tinfo.name = object_getClassName(obj);
-    exc->tinfo.cls = obj ? obj->isa : Nil;
+    exc->tinfo.cls = obj ? _object_getClass(obj) : Nil;
 
     if (PrintExceptions) {
         _objc_inform("EXCEPTIONS: throwing %p (object %p, a %s)", 
                      exc, obj, object_getClassName(obj));
+    }
+
+    if (PrintExceptionThrow) {
+        if (!PrintExceptions)
+            _objc_inform("EXCEPTIONS: throwing %p (object %p, a %s)", 
+                         exc, obj, object_getClassName(obj));
+        void* callstack[500];
+        int frameCount = backtrace(callstack, 500);
+        backtrace_symbols_fd(callstack, frameCount, fileno(stderr));
     }
     
     OBJC_RUNTIME_OBJC_EXCEPTION_THROW(obj);  // dtrace probe to log throw activity
@@ -583,7 +597,7 @@ static char _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo,
 * 3. If so, call our registered callback with the object.
 * 4. Finally, call the previous terminate handler.
 **********************************************************************/
-static terminate_handler old_terminate = NULL;
+static void (*old_terminate)(void) = NULL;
 static void _objc_terminate(void)
 {
     if (PrintExceptions) {
@@ -614,9 +628,9 @@ static void _objc_terminate(void)
 * alt handler support - zerocost implementation only
 **********************************************************************/
 
-#ifdef NO_ZEROCOST_EXCEPTIONS
+#if !SUPPORT_ALT_HANDLERS
 
-__private_extern__ void _destroyAltHandlerList(struct alt_handler_list *list)
+PRIVATE_EXTERN void _destroyAltHandlerList(struct alt_handler_list *list)
 {
 }
 
@@ -628,6 +642,8 @@ static void call_alt_handlers(struct _Unwind_Context *ctx)
 #else
 
 #include <libunwind.h>
+#include <execinfo.h>
+#include <dispatch/dispatch.h>
 
 // Dwarf eh data encodings
 #define DW_EH_PE_omit      0xff  // no data follows
@@ -906,20 +922,39 @@ static struct frame_range findHandler(void)
 
 // This data structure assumes the number of 
 // active alt handlers per frame is small.
+
+// for OBJC_DEBUG_ALT_HANDLERS, record the call to objc_addExceptionHandler.
+#define BACKTRACE_COUNT 46
+#define THREADNAME_COUNT 64
+struct alt_handler_debug {
+    uintptr_t token;
+    int backtraceSize;
+    void *backtrace[BACKTRACE_COUNT];
+    char thread[THREADNAME_COUNT];
+    char queue[THREADNAME_COUNT];
+};
+
 struct alt_handler_data {
     uintptr_t ip_start;
     uintptr_t ip_end;
     uintptr_t cfa;
     objc_exception_handler fn;
     void *context;
+    struct alt_handler_debug *debug;
 };
 
 struct alt_handler_list {
     unsigned int allocated;
     unsigned int used;
     struct alt_handler_data *handlers;
+    struct alt_handler_list *next_DEBUGONLY;
 };
 
+static pthread_mutex_t DebugLock = PTHREAD_MUTEX_INITIALIZER;
+static struct alt_handler_list *DebugLists;
+static uintptr_t DebugCounter;
+
+PRIVATE_EXTERN void alt_handler_error(uintptr_t token) __attribute__((noinline));
 
 static struct alt_handler_list *
 fetch_handler_list(BOOL create)
@@ -932,15 +967,32 @@ fetch_handler_list(BOOL create)
         if (!create) return NULL;
         list = _calloc_internal(1, sizeof(*list));
         data->handlerList = list;
+
+        if (DebugAltHandlers) {
+            // Save this list so the debug code can find it from other threads
+            pthread_mutex_lock(&DebugLock);
+            list->next_DEBUGONLY = DebugLists;
+            DebugLists = list;
+            pthread_mutex_unlock(&DebugLock);
+        }
     }
 
     return list;
 }
 
 
-__private_extern__ void _destroyAltHandlerList(struct alt_handler_list *list)
+PRIVATE_EXTERN void _destroyAltHandlerList(struct alt_handler_list *list)
 {
     if (list) {
+        if (DebugAltHandlers) {
+            // Detach from the list-of-lists.
+            pthread_mutex_lock(&DebugLock);
+            struct alt_handler_list **listp = &DebugLists;
+            while (*listp && *listp != list) listp = &(*listp)->next_DEBUGONLY;
+            if (*listp) *listp = (*listp)->next_DEBUGONLY;
+            pthread_mutex_unlock(&DebugLock);
+        }
+
         if (list->handlers) {
             _free_internal(list->handlers);
         }
@@ -991,11 +1043,37 @@ uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
     data->context = context;
     list->used++;
 
+    uintptr_t token = i+1;
+
+    if (DebugAltHandlers) {
+        // Record backtrace in case this handler is misused later.
+        pthread_mutex_lock(&DebugLock);
+
+        token = DebugCounter++;
+        if (token == 0) token = DebugCounter++;
+
+        if (!data->debug) {
+            data->debug = _calloc_internal(sizeof(*data->debug), 1);
+        } else {
+            bzero(data->debug, sizeof(*data->debug));
+        }
+
+        pthread_getname_np(pthread_self(), data->debug->thread, THREADNAME_COUNT);
+        strlcpy(data->debug->queue, 
+                dispatch_queue_get_label(dispatch_get_current_queue()), 
+                THREADNAME_COUNT);
+        data->debug->backtraceSize = 
+            backtrace(data->debug->backtrace, BACKTRACE_COUNT);
+        data->debug->token = token;
+
+        pthread_mutex_unlock(&DebugLock);
+    }
+
     if (PrintAltHandlers) {
-        _objc_inform("ALT HANDLERS: installing alt handler %d %p(%p) on "
-                     "frame [ip=%p..%p sp=%p]", i+1, data->fn, data->context, 
-                     (void *)data->ip_start, (void *)data->ip_end, 
-                     (void *)data->cfa);
+        _objc_inform("ALT HANDLERS: installing alt handler #%lu %p(%p) on "
+                     "frame [ip=%p..%p sp=%p]", (unsigned long)token, 
+                     data->fn, data->context, (void *)data->ip_start, 
+                     (void *)data->ip_end, (void *)data->cfa);
     }
 
     if (list->used > 1000) {
@@ -1007,7 +1085,7 @@ uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
         }
     }
 
-    return i+1;
+    return token;
 }
 
 
@@ -1017,37 +1095,122 @@ void objc_removeExceptionHandler(uintptr_t token)
         // objc_addExceptionHandler failed
         return;
     }
-    unsigned int i = (unsigned int)(token - 1);
     
     struct alt_handler_list *list = fetch_handler_list(NO);
-    if (!list  ||  list->used == 0) {
-        // no handlers present
-        if (PrintAltHandlers) {
-            _objc_inform("ALT HANDLERS: *** can't remove alt handler %lu "
-                         "(no alt handlers present)", token);
-        }
-        return;
+    if (!list  ||  !list->handlers) {
+        // no alt handlers active
+        alt_handler_error(token);
+        __builtin_trap();
     }
-    if (i >= list->allocated) {
-        // bogus token
-        if (PrintAltHandlers) {
-            _objc_inform("ALT HANDLERS: *** can't remove alt handler %lu "
-                         "(current max is %u)", token, list->allocated);
+
+    uintptr_t i = token-1;
+    
+    if (DebugAltHandlers) {
+        // search for the token instead of using token-1
+        for (i = 0; i < list->allocated; i++) {
+            struct alt_handler_data *data = &list->handlers[i];
+            if (data->debug  &&  data->debug->token == token) break;
         }
-        return;
+    }
+    
+    if (i >= list->allocated) {
+        // token out of range
+        alt_handler_error(token);
+        __builtin_trap();
     }
 
     struct alt_handler_data *data = &list->handlers[i];
-    if (PrintAltHandlers) {
-        _objc_inform("ALT HANDLERS: removing   alt handler %d %p(%p) on "
-                     "frame [ip=%p..%p sp=%p]", i+1, data->fn, data->context, 
-                     (void *)data->ip_start, (void *)data->ip_end, 
-                     (void *)data->cfa);
+
+    if (data->ip_start == 0  &&  data->ip_end == 0  &&  data->cfa == 0) {
+        // token in range, but invalid
+        alt_handler_error(token);
+        __builtin_trap();
     }
+
+    if (PrintAltHandlers) {
+        _objc_inform("ALT HANDLERS: removing   alt handler #%lu %p(%p) on "
+                     "frame [ip=%p..%p sp=%p]", (unsigned long)token, 
+                     data->fn, data->context, (void *)data->ip_start, 
+                     (void *)data->ip_end, (void *)data->cfa);
+    }
+
+    if (data->debug) _free_internal(data->debug);
     bzero(data, sizeof(*data));
     list->used--;
 }
 
+PRIVATE_EXTERN void objc_alt_handler_error(void) __attribute__((noinline));
+
+PRIVATE_EXTERN void alt_handler_error(uintptr_t token)
+{
+    if (!DebugAltHandlers) {
+        _objc_inform_now_and_on_crash
+            ("objc_removeExceptionHandler() called with unknown alt handler; "
+             "this is probably a bug in multithreaded AppKit use. "
+             "Set environment variable OBJC_DEBUG_ALT_HANDLERS=YES "
+             "or break in objc_alt_handler_error() to debug.");
+        objc_alt_handler_error();
+    }
+
+    pthread_mutex_lock(&DebugLock);
+
+    // Search other threads' alt handler lists for this handler.
+    struct alt_handler_list *list;
+    for (list = DebugLists; list; list = list->next_DEBUGONLY) {
+        int h;
+        for (h = 0; h < list->allocated; h++) {
+            struct alt_handler_data *data = &list->handlers[h];
+            if (data->debug  &&  data->debug->token == token) {
+                // found it
+                int i;
+
+                // Build a string from the recorded backtrace
+                char *symbolString;
+                char **symbols = 
+                    backtrace_symbols(data->debug->backtrace, 
+                                      data->debug->backtraceSize);
+                size_t len = 1;
+                for (i = 0; i < data->debug->backtraceSize; i++){
+                    len += 4 + strlen(symbols[i]) + 1;
+                }
+                symbolString = _calloc_internal(len, 1);
+                for (i = 0; i < data->debug->backtraceSize; i++){
+                    strcat(symbolString, "    ");
+                    strcat(symbolString, symbols[i]);
+                    strcat(symbolString, "\n");
+                }
+
+                free(symbols);
+
+                _objc_inform_now_and_on_crash
+                    ("objc_removeExceptionHandler() called with "
+                     "unknown alt handler; this is probably a bug in "
+                     "multithreaded AppKit use. \n"
+                     "The matching objc_addExceptionHandler() was called by:\n"
+                     "Thread '%s': Dispatch queue: '%s': \n%s", 
+                     data->debug->thread, data->debug->queue, symbolString);
+
+                pthread_mutex_unlock(&DebugLock);
+                _free_internal(symbolString);
+                
+                objc_alt_handler_error();
+            }
+        }
+    }
+
+    pthread_mutex_lock(&DebugLock);
+
+    // not found
+    _objc_inform_now_and_on_crash
+        ("objc_removeExceptionHandler() called with unknown alt handler; "
+         "this is probably a bug in multithreaded AppKit use");
+    objc_alt_handler_error();
+}
+
+PRIVATE_EXTERN void objc_alt_handler_error(void)
+{
+    __builtin_trap();
+}
 
 // called in order registered, to match 32-bit _NSAddAltHandler2
 // fixme reverse registration order matches c++ destructors better
@@ -1080,7 +1243,7 @@ static void call_alt_handlers(struct _Unwind_Context *ctx)
     }
 }
 
-// ! NO_ZEROCOST_EXCEPTIONS
+// SUPPORT_ALT_HANDLERS
 #endif
 
 
@@ -1089,10 +1252,14 @@ static void call_alt_handlers(struct _Unwind_Context *ctx)
 * Initialize libobjc's exception handling system.
 * Called by map_images().
 **********************************************************************/
-__private_extern__ void exception_init(void)
+PRIVATE_EXTERN void exception_init(void)
 {
-    // call std::set_terminate
+#if TARGET_OS_IPHONE
     old_terminate = _ZSt13set_terminatePFvvE(&_objc_terminate);
+#else
+    old_terminate = __cxa_terminate_handler;
+    __cxa_terminate_handler = &_objc_terminate;
+#endif
 }
 
 

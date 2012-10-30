@@ -1,10 +1,12 @@
+// TEST_CONFIG GC=1 SDK=macos
+
 #include "test.h"
 #include <string.h>
 #include <objc/objc-runtime.h>
 
 @class NSObject;
 
-void printlayout(const char *name, const char *layout)
+void printlayout(const char *name, const uint8_t *layout)
 {
     testprintf("%s: ", name);
 
@@ -13,7 +15,7 @@ void printlayout(const char *name, const char *layout)
         return;
     }
 
-    const char *c;
+    const uint8_t *c;
     for (c = layout; *c; c++) {
         testprintf("%02x ", *c);
     }
@@ -32,8 +34,8 @@ void printlayout(const char *name, const char *layout)
     id id1;
     NSObject *o1;
     __strong void *v1;
-    __strong intptr_t i1;
-    __strong long l1;
+    __strong intptr_t *i1;
+    __strong long *l1;
     /* fixme
     struct {
         id id1;
@@ -51,8 +53,8 @@ void printlayout(const char *name, const char *layout)
     __weak id id1;
     __weak NSObject *o1;
     __weak void *v1;
-    __weak intptr_t i1;
-    __weak long l1;
+    __weak intptr_t *i1;
+    __weak long *l1;
     /* fixme
     struct {
         __weak id id1;
@@ -71,7 +73,7 @@ void printlayout(const char *name, const char *layout)
 
 int main() 
 {
-    const char *layout;
+    const uint8_t *layout;
 
     layout = class_getIvarLayout(objc_getClass("AllScanned"));
     printlayout("AllScanned", layout);

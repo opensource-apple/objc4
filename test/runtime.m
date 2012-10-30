@@ -1,3 +1,11 @@
+/* 
+TEST_RUN_OUTPUT
+objc\[\d+\]: class `DoesNotExist\' not linked into application
+OK: runtime.m
+END 
+*/
+
+
 #include "test.h"
 
 #include <string.h>
@@ -18,7 +26,8 @@
 int main()
 {
     Class list[100];
-    unsigned int count, count0;
+    Class *list2;
+    unsigned int count, count0, count2;
     unsigned int i;
     int foundSuper;
     int foundSub;
@@ -78,6 +87,17 @@ int main()
     testassert(objc_lookUpClass("Super") == [Super class]);
     testassert(objc_lookUpClass("DoesNotExist") == nil);
     testassert(objc_lookUpClass(NULL) == nil);
+
+    list2 = objc_copyClassList(&count2);
+    testassert(count2 == count);
+    testassert(list2);
+    testassert(malloc_size(list2) >= (1+count2) * sizeof(Class));
+    for (i = 0; i < count; i++) {
+        testassert(list[i] == list2[i]);
+    }
+    testassert(list2[count] == NULL);
+    free(list2);
+    free(objc_copyClassList(NULL));
 
     succeed(__FILE__);
 }

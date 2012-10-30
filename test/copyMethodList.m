@@ -1,37 +1,49 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <malloc/malloc.h>
 #include <objc/objc-runtime.h>
 
+#if __OBJC2__
+// methods added by the runtime: +initialize
+#   define MC 1  // class methods
+#   define MI 0  // instance methods
+#else
+// no magic
+#   define MC 0
+#   define MI 0
+#endif
+
 @interface SuperMethods { } @end
 @implementation SuperMethods
-+(void)SuperMethodClass { } 
-+(void)SuperMethodClass2 { } 
--(void)SuperMethodInstance { } 
--(void)SuperMethodInstance2 { } 
++(BOOL)SuperMethodClass { return NO; } 
++(BOOL)SuperMethodClass2 { return NO; } 
+-(BOOL)SuperMethodInstance { return NO; } 
+-(BOOL)SuperMethodInstance2 { return NO; } 
 @end
 
 @interface SubMethods { } @end
 @implementation SubMethods
-+(void)SubMethodClass { } 
-+(void)SubMethodClass2 { } 
--(void)SubMethodInstance { } 
--(void)SubMethodInstance2 { } 
++(BOOL)SubMethodClass { return NO; } 
++(BOOL)SubMethodClass2 { return NO; } 
+-(BOOL)SubMethodInstance { return NO; } 
+-(BOOL)SubMethodInstance2 { return NO; } 
 @end
 
 @interface SuperMethods (Category) @end
 @implementation SuperMethods (Category)
-+(void)SuperMethodClassCat { } 
-+(void)SuperMethodClassCat2 { } 
--(void)SuperMethodInstanceCat { } 
--(void)SuperMethodInstanceCat2 { } 
++(BOOL)SuperMethodClass { return YES; } 
++(BOOL)SuperMethodClass2 { return YES; } 
+-(BOOL)SuperMethodInstance { return YES; } 
+-(BOOL)SuperMethodInstance2 { return YES; } 
 @end
 
 @interface SubMethods (Category) @end
 @implementation SubMethods (Category)
-+(void)SubMethodClassCat { } 
-+(void)SubMethodClassCat2 { } 
--(void)SubMethodInstanceCat { } 
--(void)SubMethodInstanceCat2 { } 
++(BOOL)SubMethodClass { return YES; } 
++(BOOL)SubMethodClass2 { return YES; } 
+-(BOOL)SubMethodInstance { return YES; } 
+-(BOOL)SubMethodInstance2 { return YES; } 
 @end
 
 
@@ -46,9 +58,29 @@
 @interface NoMethods @end
 @implementation NoMethods @end
 
-static int isNamed(Method m, const char *name)
+static void checkReplacement(Method *list, const char *name)
 {
-    return (method_getName(m) == sel_registerName(name));
+    Method first = NULL, second = NULL;
+    SEL sel = sel_registerName(name);
+    int i;
+
+    testassert(list);
+
+    // Find the methods. There should be two.
+    for (i = 0; list[i]; i++) {
+        if (method_getName(list[i]) == sel) {
+            if (!first) first = list[i];
+            else if (!second) second = list[i];
+            else testassert(0);
+        }
+    }
+
+    // Call the methods. The first should be the category (returns YES).
+    BOOL isCat;
+    isCat = ((BOOL(*)(id, Method))method_invoke)(NULL, first);
+    testassert(isCat);
+    isCat = ((BOOL(*)(id, Method))method_invoke)(NULL, second);
+    testassert(! isCat);
 }
 
 int main()
@@ -67,21 +99,14 @@ int main()
     count = 100;
     methods = class_copyMethodList(cls, &count);
     testassert(methods);
-    testassert(count == 4);
-    // First two methods should be the category methods, 
-    // followed by the class methods
-    testassert((isNamed(methods[0], "SubMethodInstanceCat")  &&  
-                isNamed(methods[1], "SubMethodInstanceCat2"))  
-               ||
-               (isNamed(methods[1], "SubMethodInstanceCat")  &&  
-                isNamed(methods[0], "SubMethodInstanceCat2")));
-    testassert((isNamed(methods[2], "SubMethodInstance")  &&  
-                isNamed(methods[3], "SubMethodInstance2"))  
-               ||
-               (isNamed(methods[3], "SubMethodInstance")  &&  
-                isNamed(methods[2], "SubMethodInstance2")));
+    testassert(count == 4+MI);
     // methods[] should be null-terminated
-    testassert(methods[4] == NULL);
+    testassert(methods[4+MI] == NULL);
+    // Class and category methods may be mixed in the method list thanks 
+    // to linker / shared cache sorting, but a category's replacement should
+    // always precede the class's implementation.
+    checkReplacement(methods, "SubMethodInstance");
+    checkReplacement(methods, "SubMethodInstance2");
     free(methods);
 
     testprintf("calling class_copyMethodList(SubMethods(meta)) (should be unmethodized)\n");
@@ -89,21 +114,14 @@ int main()
     count = 100;
     methods = class_copyMethodList(cls->isa, &count);
     testassert(methods);
-    testassert(count == 4);
-    // First two methods should be the category methods, 
-    // followed by the class methods
-    testassert((isNamed(methods[0], "SubMethodClassCat")  &&  
-                isNamed(methods[1], "SubMethodClassCat2"))  
-               ||
-               (isNamed(methods[1], "SubMethodClassCat")  &&  
-                isNamed(methods[0], "SubMethodClassCat2")));
-    testassert((isNamed(methods[2], "SubMethodClass")  &&  
-                isNamed(methods[3], "SubMethodClass2"))  
-               ||
-               (isNamed(methods[3], "SubMethodClass")  &&  
-                isNamed(methods[2], "SubMethodClass2")));
+    testassert(count == 4+MC);
     // methods[] should be null-terminated
-    testassert(methods[4] == NULL);
+    testassert(methods[4+MC] == NULL);
+    // Class and category methods may be mixed in the method list thanks 
+    // to linker / shared cache sorting, but a category's replacement should
+    // always precede the class's implementation.
+    checkReplacement(methods, "SubMethodClass");
+    checkReplacement(methods, "SubMethodClass2");
     free(methods);
 
     // Check null-termination - this method list block would be 16 bytes
@@ -112,17 +130,17 @@ int main()
     cls = objc_getClass("FourMethods");
     methods = class_copyMethodList(cls, &count);
     testassert(methods);
-    testassert(count == 4);
-    testassert(malloc_size(methods) >= 5 * sizeof(Method));
-    testassert(methods[3] != NULL);
-    testassert(methods[4] == NULL);
+    testassert(count == 4+MI);
+    testassert(malloc_size(methods) >= (4+MI+1) * sizeof(Method));
+    testassert(methods[3+MI] != NULL);
+    testassert(methods[4+MI] == NULL);
     free(methods);
 
     // Check NULL count parameter
     methods = class_copyMethodList(cls, NULL);
     testassert(methods);
-    testassert(methods[4] == NULL);
-    testassert(methods[3] != NULL);
+    testassert(methods[4+MI] == NULL);
+    testassert(methods[3+MI] != NULL);
     free(methods);
 
     // Check NULL class parameter
@@ -139,8 +157,15 @@ int main()
     count = 100;
     cls = objc_getClass("NoMethods");
     methods = class_copyMethodList(cls, &count);
-    testassert(!methods);
-    testassert(count == 0);
+    if (MI == 0) {
+        testassert(!methods);
+        testassert(count == 0);
+    } else {
+        testassert(methods);
+        testassert(count == MI);
+        testassert(methods[MI] == NULL);
+        testassert(methods[MI-1] != NULL);
+    }
 
     succeed(__FILE__);
 }

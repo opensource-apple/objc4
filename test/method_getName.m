@@ -1,7 +1,9 @@
+// TEST_CFLAGS -framework Foundation
+
 #include "test.h"
 #include <Foundation/NSObject.h>
 #include <objc/runtime.h>
-#include "../runtime/objc-rtp.h"
+#include "../runtime/objc-config.h"
 
 int main() {
   unsigned i;
@@ -11,9 +13,12 @@ int main() {
 
   for (i=0; i<numMethods; ++i) {
       // <rdar://problem/6190950> method_getName crash on NSObject method when GC is enabled
-      SEL aMethod = method_getName(methods[i]);
+      SEL aMethod;
+      aMethod = method_getName(methods[i]);
+#if defined(kIgnore)
       if (aMethod == (SEL)kIgnore)
 	  fail(__FILE__);
+#endif
   }
 
   succeed(__FILE__);

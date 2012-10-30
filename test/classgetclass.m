@@ -1,13 +1,14 @@
+// TEST_CFLAGS -framework Foundation
+
 #include "test.h"
 #include <objc/objc-runtime.h>
+#include <objc/objc-gdb.h>
 #import <Foundation/Foundation.h>
 
 @interface Foo:NSObject
 @end
 @implementation Foo
 @end
-
-extern Class gdb_class_getClass(Class cls);
 
 int main()
 {

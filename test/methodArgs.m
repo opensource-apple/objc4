@@ -1,13 +1,16 @@
+// TEST_CFLAGS -Wno-deprecated-declarations
+
 #include "test.h"
 #include <string.h>
 #include <objc/objc-runtime.h>
-#include <objc/Protocol.h>
 
 @interface Super { id isa; } @end
 @implementation Super 
 +(void)initialize { } 
 +class { return self; }
-+(id)method:(int)arg { return (id)(intptr_t)arg; }
++(id)method:(int)arg :(void(^)(void))arg2 { 
+    return (id)((intptr_t)arg+(intptr_t)arg2); 
+}
 @end
 
 
@@ -16,12 +19,12 @@ int main()
     char buf[128];
     char *arg;
     struct objc_method_description *desc;
-    Method m = class_getClassMethod([Super class], sel_registerName("method:"));
+    Method m = class_getClassMethod([Super class], sel_registerName("method::"));
     testassert(m);
 
-    testassert(method_getNumberOfArguments(m) == 3);
+    testassert(method_getNumberOfArguments(m) == 4);
 #if !__OBJC2__
-    testassert(method_getSizeOfArguments(m) == 12);
+    testassert(method_getSizeOfArguments(m) == 16);
 #endif
 
     arg = method_copyArgumentType(m, 0);
@@ -64,13 +67,30 @@ int main()
     free(arg);
 
     arg = method_copyArgumentType(m, 3);
+    testassert(arg);
+    testassert(0 == strcmp(arg, "@?"));
+    memset(buf, 1, 128);
+    method_getArgumentType(m, 3, buf, 1+strlen(arg));
+    testassert(0 == strcmp(arg, buf));
+    testassert(buf[1+strlen(arg)] == 1);
+    memset(buf, 1, 128);
+    method_getArgumentType(m, 3, buf, 2);
+    testassert(0 == strncmp(arg, buf, 2));
+    testassert(buf[2] == 1);
+    memset(buf, 1, 128);
+    method_getArgumentType(m, 3, buf, 3);
+    testassert(0 == strncmp(arg, buf, 3));
+    testassert(buf[3] == 1);
+    free(arg);
+
+    arg = method_copyArgumentType(m, 4);
     testassert(!arg);
 
     arg = method_copyArgumentType(m, -1);
     testassert(!arg);
 
     memset(buf, 1, 128);
-    method_getArgumentType(m, 3, buf, 127);
+    method_getArgumentType(m, 4, buf, 127);
     testassert(buf[0] == 0);
     testassert(buf[1] == 0);
     testassert(buf[127] == 1);
@@ -96,11 +116,11 @@ int main()
 
     desc = method_getDescription(m);
     testassert(desc);
-    testassert(desc->name == sel_registerName("method:"));
+    testassert(desc->name == sel_registerName("method::"));
 #if __LP64__
-    testassert(0 == strcmp(desc->types, "@20@0:8i16"));
+    testassert(0 == strcmp(desc->types, "@28@0:8i16@?20"));
 #else
-    testassert(0 == strcmp(desc->types, "@12@0:4i8"));
+    testassert(0 == strcmp(desc->types, "@16@0:4i8@?12"));
 #endif
 
     testassert(0 == method_getNumberOfArguments(NULL));

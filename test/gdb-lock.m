@@ -1,20 +1,15 @@
+// TEST_CFLAGS -framework Foundation
+
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <objc/objc-gdb.h>
 
 #include "test.h"
-
-// gcc -arch ppc -arch i386 -arch x86_64 -x objective-c gdb-lock.m -framework Foundation
-// CONFIG GC RR
-
-#if __cplusplus
-extern "C" 
-#endif
-   BOOL gdb_objc_isRuntimeLocked();
 
 @interface Foo : NSObject
 @end
 @implementation Foo
-- (void) foo;
+- (void) foo
 {
 }
 

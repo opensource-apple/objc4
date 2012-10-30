@@ -1,3 +1,5 @@
+// TEST_CFLAGS -Wno-deprecated-declarations
+
 #include "test.h"
 #include <objc/objc-runtime.h>
 #ifndef OBJC_NO_GC
@@ -60,10 +62,10 @@ int main()
     cls = [Super class];
     clone = objc_duplicateClass(cls, "Super_copy", 0);
 #ifndef OBJC_NO_GC
-    if (objc_collecting_enabled()) {
-        testassert(auto_zone_size(auto_zone(), clone));
+    if (objc_collectingEnabled()) {
+        testassert(auto_zone_size(objc_collectableZone(), clone));
         // objc_duplicateClass() doesn't duplicate the metaclass
-        // no: testassert(auto_zone_size(auto_zone(), clone->isa));
+        // no: testassert(auto_zone_size(objc_collectableZone(), clone->isa));
     }
 #endif
 
@@ -107,16 +109,16 @@ int main()
     free(i2);
 
     // Check protocol list
-    Protocol **p1 = class_copyProtocolList(cls, NULL);
-    Protocol **p2 = class_copyProtocolList(clone, NULL);
+    Protocol * const *p1 = class_copyProtocolList(cls, NULL);
+    Protocol * const *p2 = class_copyProtocolList(clone, NULL);
     testassert(p1);
     testassert(p2);
     for (i = 0; p1[i]  &&  p2[i]; i++) {
         testassert(p1[i] == p2[i]);  // protocols are not deep-copied
     }
     testassert(p1[i] == NULL  &&  p2[i] == NULL);
-    free(p1);
-    free(p2);
+    free((void*)p1);
+    free((void*)p2);
 
     // Check property list
     objc_property_t *o1 = class_copyPropertyList(cls, NULL);

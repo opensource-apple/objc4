@@ -191,7 +191,7 @@ enum {
     OBJC_ASSOCIATION_GETTER_AUTORELEASE = (2 << 8)
 }; 
 
-__private_extern__ id _object_get_associative_reference(id object, void *key) {
+PRIVATE_EXTERN id _object_get_associative_reference(id object, void *key) {
     id value = nil;
     uintptr_t policy = OBJC_ASSOCIATION_ASSIGN;
     {
@@ -237,7 +237,7 @@ struct ReleaseValue {
     }
 };
 
-__private_extern__ void _object_set_associative_reference(id object, void *key, id value, uintptr_t policy) {
+PRIVATE_EXTERN void _object_set_associative_reference(id object, void *key, id value, uintptr_t policy) {
     // retain the new value (if any) outside the lock.
     uintptr_t old_policy = 0; // NOTE:  old_policy is always assigned to when old_value is non-nil.
     id new_value = value ? acquireValue(value, policy) : nil, old_value = nil;
@@ -265,7 +265,7 @@ __private_extern__ void _object_set_associative_reference(id object, void *key, 
                 ObjectAssociationMap *refs = new ObjectAssociationMap;
                 associations[object] = refs;
                 (*refs)[key] = ObjcAssociation(policy, new_value);
-                _class_assertInstancesHaveAssociatedObjects(object->isa);
+                _class_setInstancesHaveAssociatedObjects(_object_getClass(object));
             }
         } else {
             // setting the association to nil breaks the association.
@@ -286,8 +286,8 @@ __private_extern__ void _object_set_associative_reference(id object, void *key, 
     if (old_value) releaseValue(old_value, old_policy);
 }
 
-__private_extern__ void _object_remove_assocations(id object) {
-    vector<ObjcAssociation> elements;
+PRIVATE_EXTERN void _object_remove_assocations(id object) {
+    vector< ObjcAssociation,ObjcAllocator<ObjcAssociation> > elements;
     {
         AssociationsManager manager;
         AssociationsHashMap &associations(manager.associations());

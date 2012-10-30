@@ -21,7 +21,9 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#ifdef __i386__
+#include <TargetConditionals.h>
+	
+#if __i386__  &&  !TARGET_OS_IPHONE  &&  !TARGET_OS_WIN32
 
 /*
     This file defines the non-GC variants of objc_assign_* on a dedicated
@@ -38,8 +40,6 @@
 .section __IMPORT, __objctext, regular, pure_instructions + self_modifying_code
 
 .align 12   // align to page boundary
-
-LNonGCAssigns$Begin:
 
 // id objc_assign_ivar(id value, id dest, ptrdiff_t offset);
 .globl  _objc_assign_ivar
@@ -64,6 +64,17 @@ _objc_assign_global:
     leave
     ret
 
+// id objc_assign_threadlocal(id value, id *dest);
+.globl  _objc_assign_threadlocal
+_objc_assign_threadlocal:
+    pushl   %ebp
+    movl    %esp,%ebp
+    movl    0x08(%ebp),%eax     // value
+    movl    0x0c(%ebp),%edx     // dest
+    movl    %eax,(%edx)         // return (*dest = value);
+    leave
+    ret
+
 // As of OS X 10.5, objc_assign_strongCast_non_gc is identical to
 // objc_assign_global_non_gc.
 
@@ -78,10 +89,7 @@ _objc_assign_strongCast:
     leave
     ret
 
-LNonGCAssigns$End:
-
 // Claim the remainder of the page.
-.set    L$set$assignsSize,LNonGCAssigns$End-LNonGCAssigns$Begin
-.space  4096-L$set$assignsSize
+.align 12, 0
 
 #endif

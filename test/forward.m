@@ -1,8 +1,19 @@
+// TEST_CFLAGS -Wno-deprecated-declarations
+
 #include "test.h"
+
+#ifdef __cplusplus
+
+int main()
+{
+    testwarn("c++ rdar://8366474 @selector(foo::)");
+    succeed(__FILE__);
+}
+
+#else
+
 #include <objc/runtime.h>
 #include <objc/message.h>
-
-extern void _objc_flush_caches(Class cls, BOOL flushMeta);
 
 struct stret {
     int a;
@@ -10,7 +21,6 @@ struct stret {
     int c;
     int d;
     int e;
-    int pad[100];  // force stack return on ppc64
 };
 
 BOOL stret_equal(struct stret a, struct stret b)
@@ -24,7 +34,7 @@ BOOL stret_equal(struct stret a, struct stret b)
 
 id ID_RESULT = (id)0x12345678;
 long long LL_RESULT = __LONG_LONG_MAX__ - 2LL*__INT_MAX__;
-struct stret STRET_RESULT = {1, 2, 3, 4, 5, {0}};
+struct stret STRET_RESULT = {1, 2, 3, 4, 5};
 double FP_RESULT = __DBL_MIN__ + __DBL_EPSILON__;
 long double LFP_RESULT = __LDBL_MIN__ + __LDBL_EPSILON__;
 
@@ -133,9 +143,7 @@ long long forward_handler(id self, SEL _cmd, long i1, long i2, long i3, long i4,
     {
         testassert(state == 15);
         state = 16;
-#if defined(__ppc__)  ||  defined(__ppc64__)
-        __asm__ volatile("lfd  f1,%0" : : "m" (FP_RESULT));
-#elif defined(__i386__)
+#if defined(__i386__)
         __asm__ volatile("fldl %0" : : "m" (FP_RESULT));
 #elif defined(__x86_64__)
         __asm__ volatile("movsd %0, %%xmm0" : : "m" (FP_RESULT));
@@ -232,10 +240,6 @@ struct stret forward_stret_handler(id self, SEL _cmd, long i1, long i2, long i3,
     
 #if defined(__i386__)
     struct_addr = ((struct stret **)args)[-1];
-#elif defined(__ppc__)
-    struct_addr = *(struct stret **)((char *)args + 128);
-#elif defined(__ppc64__)
-    struct_addr = *(struct stret **)((char *)args + 152);
 #elif defined(__x86_64__)
     struct_addr = *(struct stret **)((char *)args + 8*16+4*8);
 #elif defined(__arm__)
@@ -248,15 +252,7 @@ struct stret forward_stret_handler(id self, SEL _cmd, long i1, long i2, long i3,
     testassert(_cmd == sel_registerName("forward::"));
 
     p = args;
-#if defined(__ppc__)  ||  defined(__ppc64__)
-    p += 13*sizeof(double) + 6*sizeof(void*);  // skip over fp and linkage
-    if (sel == @selector(stret::::::::::::::::::::::::::::)  ||  
-        sel == @selector(stre2::::::::::::::::::::::::::::)  ||  
-        sel == @selector(stre3::::::::::::::::::::::::::::)) 
-    {
-        p += sizeof(void *);  // struct return
-    }
-#elif defined(__x86_64__)
+#if defined(__x86_64__)
     p += 8*16 + 4*8;  // skip over xmm and linkage
     if (sel == @selector(stret::::::::::::::::::::::::::::)  ||  
         sel == @selector(stre2::::::::::::::::::::::::::::)  ||  
@@ -293,15 +289,9 @@ struct stret forward_stret_handler(id self, SEL _cmd, long i1, long i2, long i3,
     testassert(*gp++ == 12);
     testassert(*gp++ == 13);
 
-#if defined(__i386__)  ||  defined(__ppc__)  ||  defined(__ppc64__)  ||  defined(__arm__)
+#if defined(__i386__)  ||  defined(__arm__)
 
-# if defined(__ppc__)  ||  defined(__ppc64__)
-    fp = (double *)args;
-# elif defined(__i386__)  ||  defined(__arm__)
     fp = (double *)gp;
-# else
-#   error unknown architecture
-# endif
     testassert(*fp++ == 1.0);
     testassert(*fp++ == 2.0);
     testassert(*fp++ == 3.0);
@@ -315,9 +305,6 @@ struct stret forward_stret_handler(id self, SEL _cmd, long i1, long i2, long i3,
     testassert(*fp++ == 11.0);
     testassert(*fp++ == 12.0);
     testassert(*fp++ == 13.0);
-# if defined(__ppc__)  ||  defined(__ppc64__)
-    fp = 13 + (double *)gp;
-# endif
     testassert(*fp++ == 14.0);
     testassert(*fp++ == 15.0);
 
@@ -370,9 +357,7 @@ struct stret forward_stret_handler(id self, SEL _cmd, long i1, long i2, long i3,
     {
         testassert(state == 5);
         state = 6;
-#if defined(__ppc__)  ||  defined(__ppc64__)
-        __asm__ volatile("lfd  f1,%0" : : "m" (FP_RESULT));
-#elif defined(__i386__)
+#if defined(__i386__)
         __asm__ volatile("fldl %0" : : "m" (FP_RESULT));
 #elif defined(__x86_64__)
         __asm__ volatile("movsd %0, %%xmm0" : : "m" (FP_RESULT));
@@ -411,34 +396,61 @@ typedef double (*fp_fn_t)(id self, SEL _cmd, long i1, long i2, long i3, long i4,
 
 typedef struct stret (*st_fn_t)(id self, SEL _cmd, long i1, long i2, long i3, long i4, long i5, long i6, long i7, long i8, long i9, long i10, long i11, long i12, long i13, double f1, double f2, double f3, double f4, double f5, double f6, double f7, double f8, double f9, double f10, double f11, double f12, double f13, double f14, double f15);
 
+
+extern void *getSP(void);
+
+#if defined(__x86_64__)
+    asm(".text \n _getSP: movq %rsp, %rax \n retq \n");
+#elif defined(__i386__)
+    asm(".text \n _getSP: movl %esp, %eax \n ret \n");
+#elif defined(__arm__)
+    asm(".text \n _getSP: mov r0, sp \n bx lr \n");
+#else
+#   error unknown architecture
+#endif
+
 int main()
 {
     id idval;
     long long llval;
     struct stret stval;
     double fpval;
+    void *sp1 = (void*)1;
+    void *sp2 = (void*)2;
 
     receiver = [Super class];
 
     // Test default forward handler
 
     state = 1;
+    sp1 = getSP();
     idval = [Super idret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 2);
     testassert(idval == ID_RESULT);
 
     state = 3;
+    sp1 = getSP();
     llval = [Super llret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 4);
     testassert(llval == LL_RESULT);
 
     state = 5;
+    sp1 = getSP();
     fpval = [Super fpret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 6);
     testassert(fpval == FP_RESULT);
 
     state = 7;
+    sp1 = getSP();
     stval = [Super stret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 8);
     testassert(stret_equal(stval, STRET_RESULT));
 
@@ -446,47 +458,71 @@ int main()
     // Test default forward handler, cached
 
     state = 1;
+    sp1 = getSP();
     idval = [Super idret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 2);
     testassert(idval == ID_RESULT);
 
     state = 3;
+    sp1 = getSP();
     llval = [Super llret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 4);
     testassert(llval == LL_RESULT);
 
     state = 5;
+    sp1 = getSP();
     fpval = [Super fpret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 6);
     testassert(fpval == FP_RESULT);
 
     state = 7;
+    sp1 = getSP();
     stval = [Super stret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 8);
     testassert(stret_equal(stval, STRET_RESULT));
 
 
     // Test default forward handler, uncached but fixed-up
 
-    _objc_flush_caches(nil, YES);
+    _objc_flush_caches(nil);
 
     state = 1;
+    sp1 = getSP();
     idval = [Super idret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 2);
     testassert(idval == ID_RESULT);
 
     state = 3;
+    sp1 = getSP();
     llval = [Super llret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 4);
     testassert(llval == LL_RESULT);
 
     state = 5;
+    sp1 = getSP();
     fpval = [Super fpret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 6);
     testassert(fpval == FP_RESULT);
 
     state = 7;
+    sp1 = getSP();
     stval = [Super stret:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 8);
     testassert(stret_equal(stval, STRET_RESULT));
 
@@ -494,22 +530,34 @@ int main()
     // Test manual forwarding
 
     state = 1;
+    sp1 = getSP();
     idval = ((id_fn_t)_objc_msgForward)(receiver, @selector(idre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 2);
     testassert(idval == ID_RESULT);
 
     state = 3;
+    sp1 = getSP();
     llval = ((ll_fn_t)_objc_msgForward)(receiver, @selector(llre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 4);
     testassert(llval == LL_RESULT);
 
     state = 5;
+    sp1 = getSP();
     fpval = ((fp_fn_t)_objc_msgForward)(receiver, @selector(fpre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 6);
     testassert(fpval == FP_RESULT);
 
     state = 7;
+    sp1 = getSP();
     stval = ((st_fn_t)_objc_msgForward_stret)(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 8);
     testassert(stret_equal(stval, STRET_RESULT));
 
@@ -517,47 +565,71 @@ int main()
     // Test manual forwarding, cached
 
     state = 1;
+    sp1 = getSP();
     idval = ((id_fn_t)_objc_msgForward)(receiver, @selector(idre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 2);
     testassert(idval == ID_RESULT);
 
     state = 3;
+    sp1 = getSP();
     llval = ((ll_fn_t)_objc_msgForward)(receiver, @selector(llre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 4);
     testassert(llval == LL_RESULT);
 
     state = 5;
+    sp1 = getSP();
     fpval = ((fp_fn_t)_objc_msgForward)(receiver, @selector(fpre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 6);
     testassert(fpval == FP_RESULT);
 
     state = 7;
+    sp1 = getSP();
     stval = ((st_fn_t)_objc_msgForward_stret)(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 8);
     testassert(stret_equal(stval, STRET_RESULT));
 
 
     // Test manual forwarding, uncached but fixed-up
 
-    _objc_flush_caches(nil, YES);
+    _objc_flush_caches(nil);
 
     state = 1;
+    sp1 = getSP();
     idval = ((id_fn_t)_objc_msgForward)(receiver, @selector(idre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 2);
     testassert(idval == ID_RESULT);
 
     state = 3;
+    sp1 = getSP();
     llval = ((ll_fn_t)_objc_msgForward)(receiver, @selector(llre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 4);
     testassert(llval == LL_RESULT);
 
     state = 5;
+    sp1 = getSP();
     fpval = ((fp_fn_t)_objc_msgForward)(receiver, @selector(fpre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 6);
     testassert(fpval == FP_RESULT);
 
     state = 7;
+    sp1 = getSP();
     stval = ((st_fn_t)_objc_msgForward_stret)(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 8);
     testassert(stret_equal(stval, STRET_RESULT));
 
@@ -567,22 +639,34 @@ int main()
     objc_setForwardHandler(&forward_handler, &forward_stret_handler);
 
     state = 11;
+    sp1 = getSP();
     idval = [Super idre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 12);
     testassert(idval == ID_RESULT);
 
     state = 13;
+    sp1 = getSP();
     llval = [Super llre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 14);
     testassert(llval == LL_RESULT);
 
     state = 15;
+    sp1 = getSP();
     fpval = [Super fpre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 16);
     testassert(fpval == FP_RESULT);
 
     state = 17;
+    sp1 = getSP();
     stval = [Super stre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 18);
     testassert(stret_equal(stval, STRET_RESULT));
 
@@ -590,50 +674,76 @@ int main()
     // Test user-defined forward handler, cached
 
     state = 11;
+    sp1 = getSP();
     idval = [Super idre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 12);
     testassert(idval == ID_RESULT);
 
     state = 13;
+    sp1 = getSP();
     llval = [Super llre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 14);
     testassert(llval == LL_RESULT);
 
     state = 15;
+    sp1 = getSP();
     fpval = [Super fpre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 16);
     testassert(fpval == FP_RESULT);
 
     state = 17;
+    sp1 = getSP();
     stval = [Super stre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 18);
     testassert(stret_equal(stval, STRET_RESULT));
 
 
     // Test user-defined forward handler, uncached but fixed-up
 
-    _objc_flush_caches(nil, YES);
+    _objc_flush_caches(nil);
 
     state = 11;
+    sp1 = getSP();
     idval = [Super idre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 12);
     testassert(idval == ID_RESULT);
 
     state = 13;
+    sp1 = getSP();
     llval = [Super llre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 14);
     testassert(llval == LL_RESULT);
 
     state = 15;
+    sp1 = getSP();
     fpval = [Super fpre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 16);
     testassert(fpval == FP_RESULT);
 
     state = 17;
+    sp1 = getSP();
     stval = [Super stre3:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    sp2 = getSP();
+    testassert(sp1 == sp2);
     testassert(state == 18);
     testassert(stret_equal(stval, STRET_RESULT));
 
 
     succeed(__FILE__);
 }
+
+#endif

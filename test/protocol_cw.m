@@ -1,3 +1,5 @@
+// TEST_CFLAGS -Wno-deprecated-declarations
+
 #include "test.h"
 
 #if __OBJC2__
@@ -16,13 +18,15 @@ int main()
 
 char Protocol_name[] __attribute__((section("__OBJC,__class_names"))) = "Protocol";
 
-struct {
+struct st {
     void *isa; 
-    char *protocol_name;
+    const char *protocol_name;
     void *protocol_list;
     void *instance_methods;
     void *class_methods;
-} Foo_protocol __attribute__((section("__OBJC,__protocol"))) = { Protocol_name, "Foo", 0, 0, 0 };
+};
+
+struct st Foo_protocol __attribute__((section("__OBJC,__protocol"))) = { Protocol_name, "Foo", 0, 0, 0 };
 
 int main()
 {

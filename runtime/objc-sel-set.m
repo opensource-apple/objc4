@@ -34,7 +34,7 @@
 #include "objc-private.h"
 #include "objc-sel-set.h"
 
-#ifdef NO_MOD
+#if !SUPPORT_MOD
 // mod-free power of 2 version
 
 #define CONSTRAIN(val, range) ((val) & ((range)-1))
@@ -95,7 +95,7 @@ static struct __objc_sel_set_finds __objc_sel_set_findBuckets(struct __objc_sel_
         if (!currentSel) {
             ret.nomatch = probe;
             return ret;
-        } else if (!ret.match && 0 == _objc_strcmp((const char *)currentSel, (const char *)candidate)) {
+        } else if (!ret.match && 0 == strcmp((const char *)currentSel, (const char *)candidate)) {
             ret.match = currentSel;
         }
         probe++;
@@ -106,7 +106,7 @@ static struct __objc_sel_set_finds __objc_sel_set_findBuckets(struct __objc_sel_
 }
 
 // create a set with given starting capacity, will resize as needed
-__private_extern__ struct __objc_sel_set *__objc_sel_set_create(uint32_t capacity) {
+PRIVATE_EXTERN struct __objc_sel_set *__objc_sel_set_create(uint32_t capacity) {
     uint32_t idx;
 
     struct __objc_sel_set *sset = _malloc_internal(sizeof(struct __objc_sel_set));
@@ -123,12 +123,12 @@ __private_extern__ struct __objc_sel_set *__objc_sel_set_create(uint32_t capacit
 }
 
 // returns 0 on failure; candidate may not be 0
-__private_extern__ SEL __objc_sel_set_get(struct __objc_sel_set *sset, SEL candidate) {
+PRIVATE_EXTERN SEL __objc_sel_set_get(struct __objc_sel_set *sset, SEL candidate) {
     return __objc_sel_set_findBuckets(sset, candidate).match;
 }
 
 // value may not be 0; should not be called unless it is known the value is not in the set
-__private_extern__ void __objc_sel_set_add(struct __objc_sel_set *sset, SEL value) {
+PRIVATE_EXTERN void __objc_sel_set_add(struct __objc_sel_set *sset, SEL value) {
     if (sset->_count == sset->_capacity) {
         SEL *oldbuckets = sset->_buckets;
         uint32_t oldnbuckets = sset->_bucketsNum;

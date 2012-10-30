@@ -1,17 +1,16 @@
+// TEST_CFLAGS -framework Foundation
 
+#include "test.h"
 #import <Foundation/Foundation.h>
 
 /* foreach tester */
 
-int Verbosity = 0;
 int Errors = 0;
 
-bool testHandwritten(char *style, char *test, char *message, id collection, NSSet *reference) {
+bool testHandwritten(const char *style, const char *test, const char *message, id collection, NSSet *reference) {
     unsigned int counter = 0;
     bool result = true;
-    if (Verbosity) {
-        printf("testing: %s %s %s\n", style, test, message);
-    }
+    testprintf("testing: %s %s %s\n", style, test, message);
 /*
     for (id elem in collection)
         if ([reference member:elem]) ++counter;
@@ -37,9 +36,7 @@ bool testHandwritten(char *style, char *test, char *message, id collection, NSSe
  
  
     if (counter == [reference count]) {
-        if (Verbosity) {
-            printf("success: %s %s %s\n", style, test, message);
-        }
+        testprintf("success: %s %s %s\n", style, test, message);
     }
     else {
         result = false;
@@ -49,18 +46,14 @@ bool testHandwritten(char *style, char *test, char *message, id collection, NSSe
     return result;
 }
 
-bool testCompiler(char *style, char *test, char *message, id collection, NSSet *reference) {
+bool testCompiler(const char *style, const char *test, const char *message, id collection, NSSet *reference) {
     unsigned int counter = 0;
     bool result = true;
-    if (Verbosity) {
-        printf("testing: %s %s %s\n", style, test, message);
-    }
+    testprintf("testing: %s %s %s\n", style, test, message);
     for (id elem in collection)
         if ([reference member:elem]) ++counter;
     if (counter == [reference count]) {
-        if (Verbosity) {
-            printf("success: %s %s %s\n", style, test, message);
-        }
+        testprintf("success: %s %s %s\n", style, test, message);
     }
     else {
         result = false;
@@ -72,10 +65,8 @@ bool testCompiler(char *style, char *test, char *message, id collection, NSSet *
 
 void testContinue(NSArray *array) {
     bool broken = false;
-    if (Verbosity) {
-        printf("testing: continue statements\n");
-    }
-    for (id elem in array) {
+    testprintf("testing: continue statements\n");
+    for (id __unused elem in array) {
         if ([array count])
             continue;
         broken = true;
@@ -92,7 +83,7 @@ bool testBreak(unsigned int where, NSArray *array) {
     unsigned int counter = 0;
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
     id enumerator = [array objectEnumerator];
-    for (id elem in enumerator) {
+    for (id __unused elem in enumerator) {
         if (++counter == where)
             break;
     }
@@ -101,7 +92,7 @@ bool testBreak(unsigned int where, NSArray *array) {
         printf("*** break at %d didn't work (actual was %d)\n", where, counter);
         return false;
     }
-    for (id elem in enumerator)
+    for (id __unused elem in enumerator)
         ++counter;
     if (counter != [array count]) {
         ++Errors;
@@ -114,7 +105,7 @@ bool testBreak(unsigned int where, NSArray *array) {
     
 bool testBreaks(NSArray *array) {
     bool result = true;
-    if (Verbosity) printf("testing breaks\n");
+    testprintf("testing breaks\n");
     unsigned int counter = 0;
     for (counter = 1; counter < [array count]; ++counter) {
         result = testBreak(counter, array) && result;
@@ -122,14 +113,14 @@ bool testBreaks(NSArray *array) {
     return result;
 }
         
-bool testCompleteness(char *test, char *message, id collection, NSSet *reference) {
+bool testCompleteness(const char *test, const char *message, id collection, NSSet *reference) {
     bool result = true;
     result = result && testHandwritten("handwritten", test, message, collection, reference);
     result = result && testCompiler("compiler", test, message, collection, reference);
     return result;
 }
 
-bool testEnumerator(char *test, char *message, id collection, NSSet *reference) {
+bool testEnumerator(const char *test, const char *message, id collection, NSSet *reference) {
     bool result = true;
     result = result && testHandwritten("handwritten", test, message, [collection objectEnumerator], reference);
     result = result && testCompiler("compiler", test, message, [collection objectEnumerator], reference);
@@ -153,7 +144,7 @@ void makeReferences(int n) {
     }
 }
     
-void testCollections(char *test, NSArray *array, NSSet *set) {
+void testCollections(const char *test, NSArray *array, NSSet *set) {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
     id collection;
     collection = [NSMutableArray arrayWithArray:array];
@@ -171,9 +162,9 @@ void testCollections(char *test, NSArray *array, NSSet *set) {
     [pool drain];
 }
 
-void testInnerDecl(char *test, char *message, id collection) {
+void testInnerDecl(const char *test, const char *message, id collection) {
     unsigned int counter = 0;
-    for (id x in collection)
+    for (id __unused x in collection)
         ++counter;
     if (counter != [collection count]) {
         printf("** failed: %s %s\n", test, message);
@@ -182,7 +173,7 @@ void testInnerDecl(char *test, char *message, id collection) {
 }
 
 
-void testOuterDecl(char *test, char *message, id collection) {
+void testOuterDecl(const char *test, const char *message, id collection) {
     unsigned int counter = 0;
     id x;
     for (x in collection)
@@ -192,16 +183,16 @@ void testOuterDecl(char *test, char *message, id collection) {
         ++Errors;
     }
 }
-void testInnerExpression(char *test, char *message, id collection) {
+void testInnerExpression(const char *test, const char *message, id collection) {
     unsigned int counter = 0;
-    for (id x in [collection self])
+    for (id __unused x in [collection self])
         ++counter;
     if (counter != [collection count]) {
         printf("** failed: %s %s\n", test, message);
         ++Errors;
     }
 }
-void testOuterExpression(char *test, char *message, id collection) {
+void testOuterExpression(const char *test, const char *message, id collection) {
     unsigned int counter = 0;
     id x;
     for (x in [collection self])
@@ -212,7 +203,7 @@ void testOuterExpression(char *test, char *message, id collection) {
     }
 }
 
-void testExpressions(char *message, id collection) {
+void testExpressions(const char *message, id collection) {
     testInnerDecl("inner", message, collection);
     testOuterDecl("outer", message, collection);
     testInnerExpression("outer expression", message, collection);
@@ -221,7 +212,6 @@ void testExpressions(char *message, id collection) {
     
 
 int main() {
-    Verbosity = (getenv("VERBOSE") != NULL);
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
     testCollections("nil", nil, nil);
     testCollections("empty", [NSArray array], [NSSet set]);
@@ -230,8 +220,8 @@ int main() {
     testExpressions("array", ReferenceArray);
     testBreaks(ReferenceArray);
     testContinue(ReferenceArray);
-    if (Errors == 0) printf("OK: foreach\n");
-    else printf("BAD: foreach %d errors detected\n", Errors);
+    if (Errors == 0) succeed(__FILE__);
+    else fail("foreach %d errors detected\n", Errors);
     [pool drain];
     exit(Errors);
 }

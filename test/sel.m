@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <string.h>
 #include <objc/objc-runtime.h>
@@ -12,10 +14,13 @@ int main()
     testassert(0 == strcmp("<null selector>", sel_getName(0)));
 
     // sel_getName recognizes GC-ignored SELs
-    if (objc_collecting_enabled()) {
+#if defined(__i386__)
+    if (objc_collectingEnabled()) {
         testassert(0 == strcmp("<ignored selector>", 
                                sel_getName(@selector(retain))));
-    } else {
+    } else 
+#endif
+    {
         testassert(0 == strcmp("retain", 
                                sel_getName(@selector(retain))));
     }

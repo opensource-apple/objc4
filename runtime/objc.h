@@ -29,6 +29,7 @@
 #define _OBJC_OBJC_H_
 
 #include <sys/types.h>      // for __DARWIN_NULL
+#include <Availability.h>
 #include <objc/objc-api.h>
 
 
@@ -57,14 +58,69 @@ typedef signed char		BOOL;
 #define nil __DARWIN_NULL	/* id of Nil instance */
 #endif
 
-#ifndef __OBJC_GC__
+#if ! (defined(__OBJC_GC__)  ||  __has_feature(objc_arr))
 #define __strong /* empty */
 #endif
 
-OBJC_EXPORT const char *sel_getName(SEL sel);
-OBJC_EXPORT SEL sel_registerName(const char *str);
-OBJC_EXPORT const char *object_getClassName(id obj);
-OBJC_EXPORT void *object_getIndexedIvars(id obj);
+#if !__has_feature(objc_arr)
+#define __unsafe_unretained /* empty */
+#define __autoreleasing /* empty */
+#endif
+
+OBJC_EXPORT const char *sel_getName(SEL sel)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+OBJC_EXPORT SEL sel_registerName(const char *str)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+OBJC_EXPORT const char *object_getClassName(id obj)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+OBJC_EXPORT void *object_getIndexedIvars(id obj)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+OBJC_EXPORT BOOL sel_isMapped(SEL sel)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+OBJC_EXPORT SEL sel_getUid(const char *str)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+
+
+#ifndef CF_CONSUMED
+#if __has_feature(attribute_cf_consumed)
+#define CF_CONSUMED __attribute__((cf_consumed))
+#else
+#define CF_CONSUMED
+#endif
+#endif
+
+#ifndef CF_RETURNS_NOT_RETAINED
+#if __has_feature(attribute_cf_not_retained)
+#define CF_RETURNS_NOT_RETAINED __attribute__((cf_returns_not_retained))
+#else
+#define CF_RETURNS_NOT_RETAINED
+#endif
+#endif
+
+#ifndef NS_RETURNS_RETAINED
+#if __has_feature(attribute_ns_returns_retained)
+#define NS_RETURNS_RETAINED __attribute__((ns_returns_retained))
+#else
+#define NS_RETURNS_RETAINED
+#endif
+#endif
+
+#ifndef NS_RETURNS_NOT_RETAINED
+#if __has_feature(attribute_ns_returns_not_retained)
+#define NS_RETURNS_NOT_RETAINED __attribute__((ns_returns_not_retained))
+#else
+#define NS_RETURNS_NOT_RETAINED
+#endif
+#endif
+
+typedef const void* objc_objectptr_t;
+
+OBJC_EXPORT NS_RETURNS_RETAINED id objc_retainedObject(objc_objectptr_t CF_CONSUMED pointer)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_5_0);
+OBJC_EXPORT NS_RETURNS_NOT_RETAINED id objc_unretainedObject(objc_objectptr_t pointer)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_5_0);
+OBJC_EXPORT CF_RETURNS_NOT_RETAINED objc_objectptr_t objc_unretainedPointer(id object)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_5_0);
 
 
 #if !__OBJC2__
@@ -80,9 +136,6 @@ OBJC_EXPORT void *object_getIndexedIvars(id obj);
     typedef unsigned uarith_t;
 #   define ARITH_SHIFT 16
 #endif
-
-OBJC_EXPORT BOOL sel_isMapped(SEL sel);
-OBJC_EXPORT SEL sel_getUid(const char *str);
 
 typedef char *STR;
 

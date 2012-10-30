@@ -23,55 +23,109 @@
 
 #include <TargetConditionals.h>
 
-// Define NO_GC to disable garbage collection.
+// Define SUPPORT_GC=1 to enable garbage collection.
 // Be sure to edit OBJC_NO_GC in objc-auto.h as well.
-#if TARGET_OS_EMBEDDED  ||  TARGET_OS_WIN32
-#   define NO_GC 1
+#if TARGET_OS_EMBEDDED  ||  TARGET_OS_IPHONE  ||  TARGET_OS_WIN32
+#   define SUPPORT_GC 0
+#else
+#   define SUPPORT_GC 1
 #endif
 
-// Define NO_ENVIRON to disable getenv().
-#if TARGET_OS_EMBEDDED
-#   define NO_ENVIRON 1
+// Define SUPPORT_ENVIRON=1 to enable getenv().
+#if ((TARGET_OS_EMBEDDED  ||  TARGET_OS_IPHONE)  &&  !TARGET_IPHONE_SIMULATOR)  &&  defined(NDEBUG)
+#   define SUPPORT_ENVIRON 0
+#else
+#   define SUPPORT_ENVIRON 1
 #endif
 
-// Define NO_ZONES to disable malloc zone support in NXHashTable.
-#if TARGET_OS_EMBEDDED
-#   define NO_ZONES 1
+// Define SUPPORT_ZONES=1 to enable malloc zone support in NXHashTable.
+#if TARGET_OS_EMBEDDED  ||  TARGET_OS_IPHONE
+#   define SUPPORT_ZONES 0
+#else
+#   define SUPPORT_ZONES 1
 #endif
 
-// Define NO_MOD to avoid the mod operator in NXHashTable and objc-sel-set.
+// Define SUPPORT_MOD=1 to use the mod operator in NXHashTable and objc-sel-set
 #if defined(__arm__)
-#   define NO_MOD 1
+#   define SUPPORT_MOD 0
+#else
+#   define SUPPORT_MOD 1
 #endif
 
-// Define NO_BUILTINS to disable the builtin selector table from dyld
+// Define SUPPORT_BUILTINS=1 to enable the builtin selector table from dyld
 #if TARGET_OS_WIN32
-#   define NO_BUILTINS 1
+#   define SUPPORT_BUILTINS 0
+#else
+#   define SUPPORT_BUILTINS 1
 #endif
 
-// Define NO_DEBUGGER_MODE to disable lock-avoiding execution for debuggers
+// Define SUPPORT_DEBUGGER_MODE=1 to enable lock-avoiding execution for debuggers
 #if TARGET_OS_WIN32
-#   define NO_DEBUGGER_MODE 1
+#   define SUPPORT_DEBUGGER_MODE 0
+#else
+#   define SUPPORT_DEBUGGER_MODE 1
 #endif
 
-#if __OBJC2__
-
-// Define NO_FIXUP to use non-fixup messaging for OBJC2.
-#if defined(__arm__)
-#   define NO_FIXUP 1
+// Define SUPPORT_TAGGED_POINTERS=1 to enable tagged pointer objects
+// Be sure to edit objc-internal.h as well (_objc_insert_tagged_isa)
+#if !(__OBJC2__  &&  __LP64__)
+#   define SUPPORT_TAGGED_POINTERS 0
+#else
+#   define SUPPORT_TAGGED_POINTERS 1
 #endif
 
-// Define NO_VTABLE to disable vtable dispatch for OBJC2.
-#if defined(NO_FIXUP)  ||  defined(__ppc64__)
-#   define NO_VTABLE 1
+// Define SUPPORT_FIXUP=1 to use call-site fixup messaging for OBJC2.
+// Be sure to edit objc-abi.h as well (objc_msgSend*_fixup)
+#if !__OBJC2__  ||  !defined(__x86_64__)
+#   define SUPPORT_FIXUP 0
+#else
+#   define SUPPORT_FIXUP 1
 #endif
 
-// Define NO_ZEROCOST_EXCEPTIONS to use sjlj exceptions for OBJC2.
+// Define SUPPORT_VTABLE=1 to enable vtable dispatch for OBJC2.
+// Be sure to edit objc-gdb.h as well (gdb_objc_trampolines)
+#if !SUPPORT_FIXUP
+#   define SUPPORT_VTABLE 0
+#else
+#   define SUPPORT_VTABLE 1
+#endif
+
+// Define SUPPORT_IGNORED_SELECTOR_CONSTANT to remap GC-ignored selectors.
+// Good: fast ignore in objc_msgSend. Bad: disable shared cache optimizations
+// Non-GC does not remap. Fixup dispatch does not remap.
+#if !SUPPORT_GC  ||  SUPPORT_FIXUP
+#   define SUPPORT_IGNORED_SELECTOR_CONSTANT 0
+#else
+#   define SUPPORT_IGNORED_SELECTOR_CONSTANT 1
+#   if defined(__i386__)
+#       define kIgnore 0xfffeb010
+#   else
+#       error unknown architecture
+#   endif
+#endif
+
+// Define SUPPORT_ZEROCOST_EXCEPTIONS to use "zero-cost" exceptions for OBJC2.
 // Be sure to edit objc-exception.h as well (objc_add/removeExceptionHandler)
-#if defined(__arm__)
-#   define NO_ZEROCOST_EXCEPTIONS 1
+#if !__OBJC2__  ||  defined(__arm__)
+#   define SUPPORT_ZEROCOST_EXCEPTIONS 0
+#else
+#   define SUPPORT_ZEROCOST_EXCEPTIONS 1
 #endif
 
+// Define SUPPORT_ALT_HANDLERS if you're using zero-cost exceptions 
+// but also need to support AppKit's alt-handler scheme
+// Be sure to edit objc-exception.h as well (objc_add/removeExceptionHandler)
+#if !SUPPORT_ZEROCOST_EXCEPTIONS  ||  TARGET_OS_IPHONE  ||  TARGET_OS_EMBEDDED
+#   define SUPPORT_ALT_HANDLERS 0
+#else
+#   define SUPPORT_ALT_HANDLERS 1
+#endif
+
+// Define SUPPORT_RETURN_AUTORELEASE to optimize autoreleased return values
+#if !__OBJC2__  ||  TARGET_OS_WIN32
+#   define SUPPORT_RETURN_AUTORELEASE 0
+#else
+#   define SUPPORT_RETURN_AUTORELEASE 1
 #endif
 
 
@@ -88,6 +142,4 @@
 // (by us) on some configurations.
 #if defined (__i386__) || defined (i386)
 #   include <architecture/i386/asm_help.h>
-#elif defined (__ppc__) || defined(ppc)
-#   include <architecture/ppc/asm_help.h>
 #endif

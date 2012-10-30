@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <string.h>
 #include <objc/objc-runtime.h>
@@ -24,6 +26,9 @@ int main()
     testassert(object_setClass(obj, [Super class]) == [Fake class]);
     testassert(obj->isa == [Super class]);
     testassert(object_setClass(nil, [Super class]) == nil);
+
+    bzero(buf, sizeof(buf));
+    testassert(object_setClass(obj, [Super class]) == nil);
 
     testassert(object_getClass(obj) == buf[0]);
     testassert(object_getClass([Super class]) == [Super class]->isa);

@@ -34,14 +34,18 @@
 
 #ifdef __APPLE_API_PRIVATE
 
+#define _OBJC_PRIVATE_H_
 #include <stdint.h>
 #include <objc/hashtable.h>
 #include <objc/maptable.h>
 
+__BEGIN_DECLS
 
 /***********************************************************************
 * Trampoline descriptors for gdb.
 **********************************************************************/
+
+#if __OBJC2__  &&  defined(__x86_64__)
 
 typedef struct {
     uint32_t offset;  // 0 = unused, else code = (uintptr_t)desc + desc->offset
@@ -58,11 +62,15 @@ typedef struct objc_trampoline_header {
     struct objc_trampoline_header *next;
 } objc_trampoline_header;
 
-extern objc_trampoline_header *gdb_objc_trampolines;
+OBJC_EXPORT objc_trampoline_header *gdb_objc_trampolines
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA);
 
-extern void gdb_objc_trampolines_changed(objc_trampoline_header *thdr);
+OBJC_EXPORT void gdb_objc_trampolines_changed(objc_trampoline_header *thdr)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA);
 // Notify gdb that gdb_objc_trampolines has changed.
 // thdr itself includes the new descriptors; thdr->next is not new.
+
+#endif
 
 
 /***********************************************************************
@@ -76,15 +84,34 @@ extern void gdb_objc_trampolines_changed(objc_trampoline_header *thdr);
 // OBJC_DEBUGMODE_FULL requires more locks so later operations are less 
 // likely to fail.
 #define OBJC_DEBUGMODE_FULL (1<<0)
-extern int gdb_objc_startDebuggerMode(uint32_t flags);
+OBJC_EXPORT int gdb_objc_startDebuggerMode(uint32_t flags)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_1);
 
 // Stop debugger mode. Do not call if startDebuggerMode returned zero.
-extern void gdb_objc_endDebuggerMode(void);
+OBJC_EXPORT void gdb_objc_endDebuggerMode(void)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_1);
 
 // Failure hook when debugger mode tries something that would block.
 // Set a breakpoint here to handle it before the runtime causes a trap.
 // Debugger mode is still active; call endDebuggerMode to end it.
-extern void gdb_objc_debuggerModeFailure(void);
+OBJC_EXPORT void gdb_objc_debuggerModeFailure(void)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_1);
+
+// Older debugger-mode mechanism. Too simplistic.
+OBJC_EXPORT BOOL gdb_objc_isRuntimeLocked(void)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_1);
+
+// Return cls if it's a valid class, or crash.
+OBJC_EXPORT Class gdb_class_getClass(Class cls)
+#if __OBJC2__
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_1);
+#else
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_3_1);
+#endif
+
+// Same as gdb_class_getClass(object_getClass(cls)).
+OBJC_EXPORT Class gdb_object_getClass(id obj)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_4_3);
 
 
 /***********************************************************************
@@ -94,24 +121,34 @@ extern void gdb_objc_debuggerModeFailure(void);
 #if __OBJC2__
 
 // Maps class name to Class, for in-use classes only. NXStrValueMapPrototype.
-extern NXMapTable *gdb_objc_realized_classes;
+OBJC_EXPORT NXMapTable *gdb_objc_realized_classes
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_1);
 
 #else
 
 // Hashes Classes, for all known classes. Custom prototype.
-extern NXHashTable *_objc_debug_class_hash;
+OBJC_EXPORT NXHashTable *_objc_debug_class_hash
+    __OSX_AVAILABLE_STARTING(__MAC_10_2, __IPHONE_NA);
 
 #endif
+
+
+#ifndef OBJC_NO_GC
 
 /***********************************************************************
  * Garbage Collector heap dump
 **********************************************************************/
 
 /* Dump GC heap; if supplied the name is returned in filenamebuffer.  Returns YES on success. */
-OBJC_GC_EXPORT BOOL objc_dumpHeap(char *filenamebuffer, unsigned long length);
+OBJC_EXPORT BOOL objc_dumpHeap(char *filenamebuffer, unsigned long length)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_NA);
 
 #define OBJC_HEAP_DUMP_FILENAME_FORMAT "/tmp/objc-gc-heap-dump-%d-%d"
 
+#endif
+
+__END_DECLS
 
 #endif
+
 #endif

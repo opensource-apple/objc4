@@ -77,6 +77,10 @@ static const char *	SkipFirstType	   (const char *	type)
             case '^':	/* pointers */
                 break;
 
+            case '@':   /* objects */
+                if (type[0] == '?') type++;  /* Blocks */
+                return type;
+
                 /* arrays */
             case '[':
                 while ((*type >= '0') && (*type <= '9'))
@@ -102,7 +106,7 @@ static const char *	SkipFirstType	   (const char *	type)
 /***********************************************************************
 * encoding_getNumberOfArguments.
 **********************************************************************/
-__private_extern__ unsigned int 
+PRIVATE_EXTERN unsigned int 
 encoding_getNumberOfArguments(const char *typedesc)
 {
     unsigned nargs;
@@ -140,61 +144,20 @@ encoding_getNumberOfArguments(const char *typedesc)
 /***********************************************************************
 * encoding_getSizeOfArguments.
 **********************************************************************/
-__private_extern__ unsigned 
+PRIVATE_EXTERN unsigned 
 encoding_getSizeOfArguments(const char *typedesc)
 {
     unsigned		stack_size;
-#if defined(__ppc__) || defined(ppc)
-    unsigned		trueBaseOffset;
-    unsigned		foundBaseOffset;
-#endif
 
     // Get our starting points
     stack_size = 0;
 
     // Skip the return type
-#if defined (__ppc__) || defined(ppc)
-    // Struct returns cause the parameters to be bumped
-    // by a register, so the offset to the receiver is
-    // 4 instead of the normal 0.
-    trueBaseOffset = (*typedesc == '{') ? (unsigned)sizeof(void *) : 0;
-#endif
     typedesc = SkipFirstType (typedesc);
 
     // Convert ASCII number string to integer
     while ((*typedesc >= '0') && (*typedesc <= '9'))
         stack_size = (stack_size * 10) + (*typedesc++ - '0');
-#if defined (__ppc__) || defined(ppc)
-    // NOTE: This is a temporary measure pending a compiler fix.
-    // Work around PowerPC compiler bug wherein the method argument
-    // string contains an incorrect value for the "stack size."
-    // Generally, the size is reported 4 bytes too small, so we apply
-    // that fudge factor.  Unfortunately, there is at least one case
-    // where the error is something other than -4: when the last
-    // parameter is a double, the reported stack is much too high
-    // (about 32 bytes).  We do not attempt to detect that case.
-    // The result of returning a too-high value is that objc_msgSendv
-    // can bus error if the destination of the marg_list copying
-    // butts up against excluded memory.
-    // This fix disables itself when it sees a correctly built
-    // type string (i.e. the offset for the Id is correct).  This
-    // keeps us out of lockstep with the compiler.
-
-    // skip the '@' marking the Id field
-    typedesc = SkipFirstType (typedesc);
-
-    // Skip GNU runtime's register parameter hint
-    if (*typedesc == '+') typedesc++;
-
-    // pick up the offset for the Id field
-    foundBaseOffset = 0;
-    while ((*typedesc >= '0') && (*typedesc <= '9'))
-        foundBaseOffset = (foundBaseOffset * 10) + (*typedesc++ - '0');
-
-    // add fudge factor iff the Id field offset was wrong
-    if (foundBaseOffset != trueBaseOffset)
-        stack_size += 4;
-#endif
 
     return stack_size;
 }
@@ -203,7 +166,7 @@ encoding_getSizeOfArguments(const char *typedesc)
 /***********************************************************************
 * encoding_getArgumentInfo.
 **********************************************************************/
-__private_extern__ unsigned int 
+PRIVATE_EXTERN unsigned int 
 encoding_getArgumentInfo(const char *typedesc, int arg,
                          const char **type, int *offset)
 {
@@ -307,7 +270,7 @@ encoding_getArgumentInfo(const char *typedesc, int arg,
 }
 
 
-__private_extern__ void 
+PRIVATE_EXTERN void 
 encoding_getReturnType(const char *t, char *dst, size_t dst_len)
 {
     size_t len;
@@ -329,7 +292,7 @@ encoding_getReturnType(const char *t, char *dst, size_t dst_len)
 * encoding_copyReturnType.  Returns the method's return type string 
 * on the heap. 
 **********************************************************************/
-__private_extern__ char *
+PRIVATE_EXTERN char *
 encoding_copyReturnType(const char *t)
 {
     size_t len;
@@ -347,7 +310,7 @@ encoding_copyReturnType(const char *t)
 }
 
 
-__private_extern__ void 
+PRIVATE_EXTERN void 
 encoding_getArgumentType(const char *t, unsigned int index, 
                          char *dst, size_t dst_len)
 {
@@ -379,7 +342,7 @@ encoding_getArgumentType(const char *t, unsigned int index,
 * encoding_copyArgumentType.  Returns a single argument's type string 
 * on the heap. Argument 0 is `self`; argument 1 is `_cmd`. 
 **********************************************************************/
-__private_extern__ char *
+PRIVATE_EXTERN char *
 encoding_copyArgumentType(const char *t, unsigned int index)
 {
     size_t len;

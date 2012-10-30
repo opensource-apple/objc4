@@ -26,13 +26,13 @@
 * OS portability layer.
 **********************************************************************/
 
-#define OLD 1
 #include "objc-os.h"
 #include "objc-private.h"
 #include "objc-loadmethod.h"
 
 #if TARGET_OS_WIN32
 
+#include "objc-runtime-old.h"
 #include "objcrt.h"
 
 malloc_zone_t *_objc_internal_zone(void) 
@@ -154,6 +154,9 @@ OBJC_EXPORT void *_objc_init_image(HMODULE image, const objc_sections *sects)
             if (hi->os.modules[i]) memcpy(&hi->mod_ptr[hi->mod_count++], hi->os.modules[i], sizeof(struct objc_module));
         }
     }
+    
+    hi->os.moduleName = malloc(MAX_PATH * sizeof(TCHAR));
+    GetModuleFileName((HMODULE)(hi->mhdr), hi->os.moduleName, MAX_PATH * sizeof(TCHAR));
 
     _objc_appendHeader(hi);
 
@@ -181,16 +184,26 @@ OBJC_EXPORT void _objc_unload_image(HMODULE image, header_info *hinfo)
 }
 
 
+PRIVATE_EXTERN bool crashlog_header_name(header_info *hi)
+{
+    return true;
+}
+
+
 // TARGET_OS_WIN32
 #elif TARGET_OS_MAC
 
-__private_extern__ void mutex_init(mutex_t *m)
+#if !__OBJC2__
+#include "objc-file-old.h"
+#endif
+
+PRIVATE_EXTERN void mutex_init(mutex_t *m)
 {
     pthread_mutex_init(m, NULL);
 }
 
 
-__private_extern__ void recursive_mutex_init(recursive_mutex_t *m)
+PRIVATE_EXTERN void recursive_mutex_init(recursive_mutex_t *m)
 {
     // fixme error checking
     pthread_mutex_t *newmutex;
@@ -232,46 +245,20 @@ __private_extern__ void recursive_mutex_init(recursive_mutex_t *m)
 * bad_magic.
 * Return YES if the header has invalid Mach-o magic.
 **********************************************************************/
-__private_extern__ BOOL bad_magic(const headerType *mhdr)
+PRIVATE_EXTERN BOOL bad_magic(const headerType *mhdr)
 {
     return (mhdr->magic != MH_MAGIC  &&  mhdr->magic != MH_MAGIC_64  &&  
             mhdr->magic != MH_CIGAM  &&  mhdr->magic != MH_CIGAM_64);
 }
 
 
-static const segmentType *
-getsegbynamefromheader(const headerType *head, const char *segname)
-{
-#ifndef __LP64__
-#define SEGMENT_CMD LC_SEGMENT
-#else
-#define SEGMENT_CMD LC_SEGMENT_64
-#endif
-    const segmentType *sgp;
-    unsigned long i;
-    
-    sgp = (const segmentType *) (head + 1);
-    for (i = 0; i < head->ncmds; i++){
-        if (sgp->cmd == SEGMENT_CMD) {
-            if (strncmp(sgp->segname, segname, sizeof(sgp->segname)) == 0) {
-                return sgp;
-            }
-        }
-        sgp = (const segmentType *)((char *)sgp + sgp->cmdsize);
-    }
-    return NULL;
-#undef SEGMENT_CMD
-}
-
-
 static header_info * _objc_addHeader(const headerType *mhdr)
 {
     size_t info_size = 0;
-    const segmentType *objc_segment;
+    unsigned long seg_size;
+    const uint8_t *objc_segment;
     const objc_image_info *image_info;
-    const segmentType *data_segment;
     header_info *result;
-    ptrdiff_t image_slide;
 
     if (bad_magic(mhdr)) return NULL;
 
@@ -281,10 +268,8 @@ static header_info * _objc_addHeader(const headerType *mhdr)
     }
 
     // Locate the __OBJC segment
-    image_slide = _getImageSlide(mhdr);
-    image_info = _getObjcImageInfo(mhdr, image_slide, &info_size);
-    objc_segment = getsegbynamefromheader(mhdr, SEG_OBJC);
-    data_segment = getsegbynamefromheader(mhdr, SEG_DATA);
+    image_info = _getObjcImageInfo(mhdr, &info_size);
+    objc_segment = getsegmentdata(mhdr, SEG_OBJC, &seg_size);
     if (!objc_segment  &&  !image_info) return NULL;
 
     // Allocate a header_info entry.
@@ -292,11 +277,8 @@ static header_info * _objc_addHeader(const headerType *mhdr)
 
     // Set up the new header_info entry.
     result->mhdr = mhdr;
-    result->os.image_slide = image_slide;
-    result->os.objcSegmentHeader = objc_segment;
-    result->os.dataSegmentHeader = data_segment;
 #if !__OBJC2__
-    // mhdr and image_slide must already be set
+    // mhdr must already be set
     result->mod_count = 0;
     result->mod_ptr = _getObjcModules(result, &result->mod_count);
 #endif
@@ -338,22 +320,52 @@ static header_info * _objc_addHeader(const headerType *mhdr)
 }
 
 
-#ifndef NO_GC
+#if !SUPPORT_GC
+
+PRIVATE_EXTERN const char *_gcForHInfo(const header_info *hinfo)
+{
+    return "";
+}
+PRIVATE_EXTERN const char *_gcForHInfo2(const header_info *hinfo)
+{
+    return "";
+}
+
+#else
 
 /***********************************************************************
 * _gcForHInfo.
 **********************************************************************/
-__private_extern__ const char *_gcForHInfo(const header_info *hinfo)
+PRIVATE_EXTERN const char *_gcForHInfo(const header_info *hinfo)
 {
-    if (_objcHeaderRequiresGC(hinfo)) return "requires GC";
-    else if (_objcHeaderSupportsGC(hinfo)) return "supports GC";
-    else return "does not support GC";
+    if (_objcHeaderRequiresGC(hinfo)) {
+        if (_objcHeaderSupportsCompaction(hinfo))
+            return "requires GC, supports compaction";
+        else
+            return "requires GC";
+    } else if (_objcHeaderSupportsGC(hinfo)) {
+        if (_objcHeaderSupportsCompaction(hinfo))
+            return "supports GC, supports compaction";
+        else
+            return "supports GC";
+    } else {
+        return "does not support GC";
+    }
 }
-__private_extern__ const char *_gcForHInfo2(const header_info *hinfo)
+PRIVATE_EXTERN const char *_gcForHInfo2(const header_info *hinfo)
 {
-    if (_objcHeaderRequiresGC(hinfo)) return " (requires GC)";
-    else if (_objcHeaderSupportsGC(hinfo)) return " (supports GC)";
-    else return "";
+    if (_objcHeaderRequiresGC(hinfo)) {
+        if (_objcHeaderSupportsCompaction(hinfo))
+            return "(requires GC) (supports compaction)";
+        else
+            return "(requires GC)";
+    } else if (_objcHeaderSupportsGC(hinfo)) {
+        if (_objcHeaderSupportsCompaction(hinfo))
+            return "(supports GC) (supports compaction)";
+        else
+            return "(supports GC)";
+    }
+    return "";
 }
 
 
@@ -363,25 +375,27 @@ __private_extern__ const char *_gcForHInfo2(const header_info *hinfo)
 * all already-loaded libraries support the executable's GC mode.
 * Returns TRUE if the executable wants GC on.
 **********************************************************************/
-static BOOL check_wants_gc(void)
+static void check_wants_gc(BOOL *appWantsGC, BOOL *appSupportsCompaction)
 {
     const header_info *hi;
-    BOOL appWantsGC;
 
     // Environment variables can override the following.
     if (DisableGC) {
         _objc_inform("GC: forcing GC OFF because OBJC_DISABLE_GC is set");
-        appWantsGC = NO;
+        *appWantsGC = NO;
+        *appSupportsCompaction = NO;
     }
     else {
         // Find the executable and check its GC bits. 
         // If the executable cannot be found, default to NO.
         // (The executable will not be found if the executable contains 
         // no Objective-C code.)
-        appWantsGC = NO;
+        *appWantsGC = NO;
+        *appSupportsCompaction = NO;
         for (hi = FirstHeader; hi != NULL; hi = hi->next) {
             if (hi->mhdr->filetype == MH_EXECUTE) {
-                appWantsGC = _objcHeaderSupportsGC(hi) ? YES : NO;
+                *appWantsGC = _objcHeaderSupportsGC(hi) ? YES : NO;
+                *appSupportsCompaction = (*appWantsGC && _objcHeaderSupportsCompaction(hi)) ? YES : NO;
                 if (PrintGC) {
                     _objc_inform("GC: executable '%s' %s",
                                  _nameForHeader(hi->mhdr), _gcForHInfo(hi));
@@ -389,7 +403,6 @@ static BOOL check_wants_gc(void)
             }
         }
     }
-    return appWantsGC;
 }
 
 
@@ -398,8 +411,8 @@ static BOOL check_wants_gc(void)
 * if we want gc, verify that every header describes files compiled
 * and presumably ready for gc.
 ************************************************************************/
-static void verify_gc_readiness(BOOL wantsGC, header_info **hList, 
-                                uint32_t hCount) 
+static void verify_gc_readiness(BOOL wantsGC, BOOL *wantsCompaction,
+                                header_info **hList, uint32_t hCount)
 {
     BOOL busted = NO;
     uint32_t i;
@@ -429,6 +442,18 @@ static void verify_gc_readiness(BOOL wantsGC, header_info **hList,
                  "but the application does not support GC",
                  _nameForHeader(hi->mhdr));
             busted = YES;            
+        }
+        
+        if (*wantsCompaction && !_objcHeaderSupportsCompaction(hi)) {
+            // App supports compaction, but library doesn't.
+            _objc_inform_now_and_on_crash
+                ("'%s' was not linked with -Xlinker -objc_gc_compaction, "
+                 "but the application wants compaction.",
+                 _nameForHeader(hi->mhdr));
+            // Simply warn for now until radars are filed. Eventually,
+            // objc_disableCompaction() will block until any current compaction completes.
+            objc_disableCompaction();
+            *wantsCompaction = NO;
         }
 
         if (PrintGC) {
@@ -469,6 +494,8 @@ static const char *gc_enforcer(enum dyld_image_states state,
     }
 
     for (i = 0; i < infoCount; i++) {
+        crashlog_header_name_string(info[i].imageFilePath);
+
         const headerType *mhdr = (const headerType *)info[i].imageLoadAddress;
         if (bad_magic(mhdr)) continue;
 
@@ -481,12 +508,13 @@ static const char *gc_enforcer(enum dyld_image_states state,
         }
 
 #if !__OBJC2__
+        unsigned long seg_size;
         // 32-bit: __OBJC seg but no image_info means no GC support
-        if (!getsegbynamefromheader(mhdr, SEG_OBJC)) {
+        if (!getsegmentdata(mhdr, "__OBJC", &seg_size)) {
             // not objc - assume OK
             continue;
         }
-        image_info = _getObjcImageInfo(mhdr, _getImageSlide(mhdr), &size);
+        image_info = _getObjcImageInfo(mhdr, &size);
         if (!image_info) {
             // No image_info - assume GC unsupported
             if (!UseGC) {
@@ -497,12 +525,12 @@ static const char *gc_enforcer(enum dyld_image_states state,
                 if (PrintImages  ||  PrintGC) {
                     _objc_inform("IMAGES: rejecting %d images because %s doesn't support GC (no image_info)", infoCount, info[i].imageFilePath);
                 }
-                return "GC capability mismatch";
+                goto reject;
             }
         }
 #else
         // 64-bit: no image_info means no objc at all
-        image_info = _getObjcImageInfo(mhdr, _getImageSlide(mhdr), &size);
+        image_info = _getObjcImageInfo(mhdr, &size);
         if (!image_info) {
             // not objc - assume OK
             continue;
@@ -514,21 +542,26 @@ static const char *gc_enforcer(enum dyld_image_states state,
             if (PrintImages  ||  PrintGC) {
                 _objc_inform("IMAGES: rejecting %d images because %s doesn't support GC", infoCount, info[i].imageFilePath);
             }
-            return "GC capability mismatch";
+            goto reject;
         }
         if (!UseGC  &&  _objcInfoRequiresGC(image_info)) {
             // GC is OFF, but image requires GC
             if (PrintImages  ||  PrintGC) {
                 _objc_inform("IMAGES: rejecting %d images because %s requires GC", infoCount, info[i].imageFilePath);
             }
-            return "GC capability mismatch";
+            goto reject;
         }
     }
 
+    crashlog_header_name_string(NULL);
     return NULL;
+
+ reject:
+    crashlog_header_name_string(NULL);
+    return "GC capability mismatch";
 }
 
-// !defined(NO_GC)
+// SUPPORT_GC
 #endif
 
 
@@ -543,12 +576,13 @@ static const char *gc_enforcer(enum dyld_image_states state,
 *
 * Locking: loadMethodLock(old) or runtimeLock(new) acquired by map_images.
 **********************************************************************/
-__private_extern__ const char *
+PRIVATE_EXTERN const char *
 map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
                   const struct dyld_image_info infoList[])
 {
     static BOOL firstTime = YES;
-    static BOOL wantsGC NOBSS = NO;
+    static BOOL wantsGC = NO;
+    static BOOL wantsCompaction = NO;
     uint32_t i;
     header_info *hi;
     header_info *hList[infoCount];
@@ -558,7 +592,7 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
     // This function is called before ordinary library initializers. 
     // fixme defer initialization until an objc-using image is found?
     if (firstTime) {
-#ifndef NO_GC
+#if SUPPORT_GC
         InitialDyldRegistration = YES;
         dyld_register_image_state_change_handler(dyld_image_state_mapped, 0 /* batch */, &gc_enforcer);
         InitialDyldRegistration = NO;
@@ -602,33 +636,38 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
     // executable does not contain Objective-C code but Objective-C 
     // is dynamically loaded later. In that case, check_wants_gc() 
     // will do the right thing.)
-#ifndef NO_GC
+#if SUPPORT_GC
     if (firstTime) {
-        wantsGC = check_wants_gc();
+        check_wants_gc(&wantsGC, &wantsCompaction);
 
-        verify_gc_readiness(wantsGC, hList, hCount);
+        verify_gc_readiness(wantsGC, &wantsCompaction, hList, hCount);
         
-        gc_init(wantsGC);           // needs executable for GC decision
-        rtp_init();                 // needs GC decision first
+        gc_init(wantsGC, wantsCompaction);  // needs executable for GC decision
+        rtp_init();                         // needs GC decision first
     } else {
-        verify_gc_readiness(wantsGC, hList, hCount);
+        verify_gc_readiness(wantsGC, &wantsCompaction, hList, hCount);
     }
 
     if (wantsGC) {
         // tell the collector about the data segment ranges.
         for (i = 0; i < hCount; ++i) {
+            uint8_t *seg;
+            unsigned long seg_size;
             hi = hList[i];
-            const segmentType *dataSegment = hi->os.dataSegmentHeader;
-            const segmentType *objcSegment = hi->os.objcSegmentHeader;
-            if (dataSegment) {
-                gc_register_datasegment(dataSegment->vmaddr + hi->os.image_slide, dataSegment->vmsize);
-            }
-            if (objcSegment) {
-                // __OBJC contains no GC data, but pointers to it are 
-                // used as associated reference values (rdar://6953570)
-                gc_register_datasegment(objcSegment->vmaddr + hi->os.image_slide, objcSegment->vmsize);
-            }
+
+            seg = getsegmentdata(hi->mhdr, "__DATA", &seg_size);
+            if (seg) gc_register_datasegment((uintptr_t)seg, seg_size);
+
+            seg = getsegmentdata(hi->mhdr, "__OBJC", &seg_size);
+            if (seg) gc_register_datasegment((uintptr_t)seg, seg_size);
+            // __OBJC contains no GC data, but pointers to it are 
+            // used as associated reference values (rdar://6953570)
         }
+    }
+
+    // Need to fixup barriers in all libraries that call into libobjc, whether GC is on or not.
+    for (i = 0; i < infoCount; ++i) {
+        gc_fixup_barrier_stubs(&infoList[i]);
     }
 #endif
 
@@ -636,6 +675,8 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
         extern SEL FwdSel;  // in objc-msg-*.s
         sel_init(wantsGC);
         FwdSel = sel_registerName("forward::");
+
+        arr_init();
     }
 
     _read_images(hList, hCount);
@@ -653,7 +694,7 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
 *
 * Locking: loadMethodLock(both) and runtimeLock(new) acquired by load_images
 **********************************************************************/
-__private_extern__ BOOL 
+PRIVATE_EXTERN BOOL 
 load_images_nolock(enum dyld_image_states state,uint32_t infoCount,
                    const struct dyld_image_info infoList[])
 {
@@ -684,8 +725,8 @@ load_images_nolock(enum dyld_image_states state,uint32_t infoCount,
 * 
 * Locking: loadMethodLock(both) and runtimeLock(new) acquired by unmap_image.
 **********************************************************************/
-__private_extern__ void 
-unmap_image_nolock(const struct mach_header *mh, intptr_t vmaddr_slide)
+PRIVATE_EXTERN void 
+unmap_image_nolock(const struct mach_header *mh)
 {
     if (PrintImages) {
         _objc_inform("IMAGES: processing 1 newly-unmapped image...\n");
@@ -710,16 +751,16 @@ unmap_image_nolock(const struct mach_header *mh, intptr_t vmaddr_slide)
                      _gcForHInfo2(hi));
     }
 
-#ifndef NO_GC
+#if SUPPORT_GC
     if (UseGC) {
-        const segmentType *dataSegment = hi->os.dataSegmentHeader;
-        const segmentType *objcSegment = hi->os.objcSegmentHeader;
-        if (dataSegment) {
-            gc_unregister_datasegment(dataSegment->vmaddr + hi->os.image_slide, dataSegment->vmsize);
-        }
-        if (objcSegment) {
-            gc_unregister_datasegment(objcSegment->vmaddr + hi->os.image_slide, objcSegment->vmsize);
-        }
+        uint8_t *seg;
+        unsigned long seg_size;
+
+        seg = getsegmentdata(hi->mhdr, "__DATA", &seg_size);
+        if (seg) gc_unregister_datasegment((uintptr_t)seg, seg_size);
+
+        seg = getsegmentdata(hi->mhdr, "__OBJC", &seg_size);
+        if (seg) gc_unregister_datasegment((uintptr_t)seg, seg_size);
     }
 #endif
 
@@ -743,7 +784,7 @@ void _objc_init(void)
     tls_init();
     lock_init();
     exception_init();
-
+        
     // Register for unmap first, in case some +load unmaps something
     _dyld_register_func_for_remove_image(&unmap_image);
     dyld_register_image_state_change_handler(dyld_image_state_bound,
@@ -758,27 +799,24 @@ void _objc_init(void)
 **********************************************************************/
 static const header_info *_headerForAddress(void *addr)
 {
-    unsigned long			size;
-    unsigned long			seg;
-    header_info *		hi;
+#if __OBJC2__
+    const char *segname = "__DATA";
+#else
+    const char *segname = "__OBJC";
+#endif
+    header_info *hi;
 
     // Check all headers in the vector
     for (hi = FirstHeader; hi != NULL; hi = hi->next)
     {
-        // Locate header data, if any
-        const segmentType *segHeader;
-#if __OBJC2__
-        segHeader = hi->os.dataSegmentHeader;
-#else
-        segHeader = hi->os.objcSegmentHeader;
-#endif
-        if (!segHeader) continue;
-        seg = segHeader->vmaddr + hi->os.image_slide;
-        size = segHeader->filesize;
+        uint8_t *seg;
+        unsigned long seg_size;
+
+        seg = getsegmentdata(hi->mhdr, segname, &seg_size);
+        if (!seg) continue;
 
         // Is the class in this header?
-        if ((seg <= (unsigned long) addr) &&
-            ((unsigned long) addr < (seg + size)))
+        if ((uint8_t *)addr >= seg  &&  (uint8_t *)addr < seg + seg_size)
             return hi;
     }
 
@@ -792,7 +830,7 @@ static const header_info *_headerForAddress(void *addr)
 * Return the image header containing this class, or NULL.
 * Returns NULL on runtime-constructed classes, and the NSCF classes.
 **********************************************************************/
-__private_extern__ const header_info *_headerForClass(Class cls)
+PRIVATE_EXTERN const header_info *_headerForClass(Class cls)
 {
     return _headerForAddress(cls);
 }
@@ -809,7 +847,7 @@ __private_extern__ const header_info *_headerForClass(Class cls)
 *   4. link count == 1
 * Returns a file descriptor or -1. Errno may or may not be set on error.
 **********************************************************************/
-__private_extern__ int secure_open(const char *filename, int flags, uid_t euid)
+PRIVATE_EXTERN int secure_open(const char *filename, int flags, uid_t euid)
 {
     struct stat fs, ls;
     int fd = -1;
@@ -888,7 +926,7 @@ __private_extern__ int secure_open(const char *filename, int flags, uid_t euid)
 * By default this is the default malloc zone, but a dedicated zone is 
 * used if environment variable OBJC_USE_INTERNAL_ZONE is set.
 **********************************************************************/
-__private_extern__ malloc_zone_t *_objc_internal_zone(void)
+PRIVATE_EXTERN malloc_zone_t *_objc_internal_zone(void)
 {
     static malloc_zone_t *z = (malloc_zone_t *)-1;
     if (z == (malloc_zone_t *)-1) {
@@ -902,6 +940,54 @@ __private_extern__ malloc_zone_t *_objc_internal_zone(void)
     return z;
 }
 
+
+PRIVATE_EXTERN const char *
+_getObjcHeaderName(const headerType *header)
+{
+    Dl_info info;
+
+    if (dladdr(header, &info)) {
+        return info.dli_fname;
+    }
+    else {
+        return (*_NSGetArgv())[0];
+    }
+}
+
+
+PRIVATE_EXTERN bool crashlog_header_name(header_info *hi)
+{
+    return crashlog_header_name_string(hi ? hi->os.dl_info.dli_fname : NULL);
+}
+
+PRIVATE_EXTERN bool crashlog_header_name_string(const char *name)
+{
+    CRSetCrashLogMessage2(name);
+    return true;
+}
+
+
+#if TARGET_OS_IPHONE
+
+PRIVATE_EXTERN const char *__crashreporter_info__ = NULL;
+
+PRIVATE_EXTERN const char *CRSetCrashLogMessage(const char *msg)
+{
+    __crashreporter_info__ = msg;
+    return msg;
+}
+PRIVATE_EXTERN const char *CRGetCrashLogMessage(void)
+{
+    return __crashreporter_info__;
+}
+
+PRIVATE_EXTERN const char *CRSetCrashLogMessage2(const char *msg)
+{
+    // sorry
+    return msg;
+}
+
+#endif
 
 // TARGET_OS_MAC
 #else

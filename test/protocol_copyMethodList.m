@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <malloc/malloc.h>
 #include <objc/objc-runtime.h>

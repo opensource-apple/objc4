@@ -20,15 +20,15 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
-
-#ifdef __arm__
-
 /********************************************************************
  * 
  *  objc-msg-arm.s - ARM code to support objc messaging
  *
  ********************************************************************/
 
+#ifdef __arm__
+	
+#include <arm/arch.h>
 
 #ifdef ARM11
 #define MOVE cpy
@@ -40,19 +40,16 @@
 #define MOVENE movne
 #endif
 
-#ifdef VFP_ARGS
-#define SAVE_VFP	fstmfdd  sp!, {d0-d7}
-#define RESTORE_VFP	fldmfdd  sp!, {d0-d7}
-#else
-#define SAVE_VFP	/* empty */
-#define RESTORE_VFP	/* empty */
+#ifdef _ARM_ARCH_7
+#define THUMB 1
 #endif
 
+.syntax unified	
 	
 #if defined(__DYNAMIC__)
 #define MI_EXTERN(var) \
 	.non_lazy_symbol_pointer                        ;\
-L ## var ## __non_lazy_ptr:                             ;\
+L ## var ## __non_lazy_ptr:                         ;\
 	.indirect_symbol var                            ;\
 	.long 0
 #else
@@ -60,14 +57,23 @@ L ## var ## __non_lazy_ptr:                             ;\
 	.globl var
 #endif
 
-#if defined(__DYNAMIC__)
+
+#if defined(__DYNAMIC__) && defined(THUMB)
+#define MI_GET_ADDRESS(reg,var)  \
+	ldr     reg, 4f                                 ;\
+3:	add	reg, pc, reg                                ;\
+	ldr	reg, [reg]                                  ;\
+	b	5f                                          ;\
+4:	.long   L ## var ## __non_lazy_ptr - (3b + 4)	;\
+5:
+#elif defined(__DYNAMIC__)	
 #define MI_GET_ADDRESS(reg,var)  \
 	ldr     reg, 4f                                 ;\
 3:	ldr     reg, [pc, reg]                          ;\
 	b       5f                                      ;\
 4:	.long   L ## var ## __non_lazy_ptr - (3b + 8)   ;\
 5:
-#else
+#else	
 #define MI_GET_ADDRESS(reg,var)  \
 	ldr     reg, 3f ;\
 	b       4f      ;\
@@ -75,22 +81,27 @@ L ## var ## __non_lazy_ptr:                             ;\
 4:
 #endif
 
+
 #if defined(__DYNAMIC__)
-#define MI_BRANCH_EXTERNAL(var)                         \
+#define MI_BRANCH_EXTERNAL(var)  \
 	MI_GET_ADDRESS(ip, var)                         ;\
 	bx      ip
 #else
-#define MI_BRANCH_EXTERNAL(var)                         ;\
+#define MI_BRANCH_EXTERNAL(var)                     \
 	b       var
 #endif
 
-#if defined(__DYNAMIC__)
+#if defined(__DYNAMIC__) && defined(THUMB)
+#define MI_CALL_EXTERNAL(var)    \
+	MI_GET_ADDRESS(ip,var)  ;\
+	blx     ip
+#elif defined(__DYNAMIC__)
 #define MI_CALL_EXTERNAL(var)    \
 	MI_GET_ADDRESS(ip,var)  ;\
 	MOVE    lr, pc          ;\
 	bx      ip
 #else
-#define MI_CALL_EXTERNAL(var)                           \
+#define MI_CALL_EXTERNAL(var)  \
 	bl      var
 #endif
 
@@ -120,25 +131,31 @@ L__objc_notify_images:
 # in the cache for dispatching.  The labels surround the asm code
 # that do cache lookups.  The tables are zero-terminated.
 .data
-.globl _objc_entryPoints
+.private_extern _objc_entryPoints
 _objc_entryPoints:
 	.long   __cache_getImp
 	.long   __cache_getMethod
 	.long   _objc_msgSend
+	.long   _objc_msgSend_noarg
 	.long   _objc_msgSend_stret
 	.long   _objc_msgSendSuper
 	.long   _objc_msgSendSuper_stret
+	.long   _objc_msgSendSuper2
+	.long   _objc_msgSendSuper2_stret
 	.long   0
 
 .data
-.globl _objc_exitPoints
+.private_extern _objc_exitPoints
 _objc_exitPoints:
 	.long   LGetImpExit
 	.long   LGetMethodExit
 	.long   LMsgSendExit
+	.long   LMsgSendNoArgExit
 	.long   LMsgSendStretExit
 	.long   LMsgSendSuperExit
 	.long   LMsgSendSuperStretExit
+	.long   LMsgSendSuper2Exit
+	.long   LMsgSendSuper2StretExit
 	.long   0
 
 
@@ -148,11 +165,8 @@ _objc_exitPoints:
 
 /* Selected field offsets in class structure */
 .set ISA,              0
-#if __OBJC2__
+.set SUPERCLASS,       4
 .set CACHE,            8
-#else
-.set CACHE,            32
-#endif
 
 /* Method descriptor */
 .set METHOD_NAME,      0
@@ -160,6 +174,7 @@ _objc_exitPoints:
 
 /* Cache header */
 .set MASK,             0
+.set NEGMASK,         -8
 .set OCCUPIED,         4
 .set BUCKETS,          8     /* variable length array */
 
@@ -176,11 +191,31 @@ _objc_exitPoints:
 
 .macro ENTRY /* name */
 	.text
-	.align    2
+#ifdef THUMB
+	.thumb
+#endif
+	.align 2
 	.globl    _$0
+#ifdef THUMB
+	.thumb_func
+#endif
 _$0:	
 .endmacro
 
+.macro STATIC_ENTRY /*name*/
+	.text
+#ifdef THUMB
+	.thumb
+#endif
+	.align 2
+	.private_extern _$0
+#ifdef THUMB
+	.thumb_func
+#endif
+_$0:	
+.endmacro
+	
+	
 #####################################################################
 #
 # END_ENTRY	functionName
@@ -197,46 +232,46 @@ _$0:
 
 #####################################################################
 #
-# CacheLookup selectorRegister, cacheMissLabel
+# CacheLookup selectorRegister, classReg, cacheMissLabel
 #
 # Locate the implementation for a selector in a class method cache.
 #
 # Takes: 
-#	 v1 = class whose cache is to be searched
 #	 $0 = register containing selector (a2 or a3 ONLY)
+#	 $1 = class whose cache is to be searched
 #	 cacheMissLabel = label to branch to iff method is not cached
 #
 # Kills:
-#	a4, v1, v2, v3, ip
+#	a4, $1, r9, ip
 #
-# On exit: (found) method triplet in v1, imp in ip
+# On exit: (found) method triplet in $1, imp in ip
 #          (not found) jumps to cacheMissLabel
 #
 #####################################################################
 
-.macro CacheLookup /* selReg, missLabel */
+.macro CacheLookup /* selReg, classReg, missLabel */
 	
-	ldr     v2, [v1, #CACHE]        /* cache = class->cache */
-	ldr     v3, [v2, #MASK]         /* mask = cache->mask */
-	add     a4, v2, #BUCKETS        /* buckets = &cache->buckets */
-	and     v2, v3, $0, LSR #2 /* index = mask & (sel >> 2) */
+	MOVE	r9, $0, LSR #2          /* index = (sel >> 2) */
+	ldr     a4, [$1, #CACHE]        /* cache = class->cache */
+	add     a4, a4, #BUCKETS        /* buckets = &cache->buckets */
 
 /* search the cache */
-/* a1=receiver, a2 or a3=sel, v2=index, v3=mask, a4=buckets, v1=method */
+/* a1=receiver, a2 or a3=sel, r9=index, a4=buckets, $1=method */
 1:
-	ldr     v1, [a4, v2, LSL #2]    /* method = buckets[index] */
-	teq     v1, #0                  /* if (method == NULL)     */
-	add     v2, v2, #1              /* index++                 */
-	beq     $1                      /*     goto cacheMissLabel */
+	ldr     ip, [a4, #NEGMASK]      /* mask = cache->mask */
+	and     r9, r9, ip              /* index &= mask           */
+	ldr     $1, [a4, r9, LSL #2]    /* method = buckets[index] */
+	teq     $1, #0                  /* if (method == NULL)     */
+	add     r9, r9, #1              /* index++                 */
+	beq     $2                      /*     goto cacheMissLabel */
 
-	ldr     ip, [v1, #METHOD_NAME]  /* load method->method_name        */
+	ldr     ip, [$1, #METHOD_NAME]  /* load method->method_name        */
 	teq     $0, ip                  /* if (method->method_name != sel) */
-	and     v2, v2, v3              /* index &= mask                   */
 	bne     1b                      /*     retry                       */
 
-/* cache hit, v1 == method triplet address */
-/* Return triplet in v1 and imp in ip      */
-	ldr     ip, [v1, #METHOD_IMP]   /* imp = method->method_imp */
+/* cache hit, $1 == method triplet address */
+/* Return triplet in $1 and imp in ip      */
+	ldr     ip, [$1, #METHOD_IMP]   /* imp = method->method_imp */
 
 .endmacro
 
@@ -260,25 +295,21 @@ _$0:
  * efficient to do the (PIC) lookup once in the caller than repeatedly here.
  ********************************************************************/
 
-	ENTRY _cache_getMethod
-
-# save registers and load class for CacheLookup
-	stmfd   sp!, {a4,v1-v3,r7,lr}
-	add     r7, sp, #16
-	MOVE    v1, a1
+	STATIC_ENTRY _cache_getMethod
 
 # search the cache
-	CacheLookup a2, LGetMethodMiss
+	CacheLookup a2, a1, LGetMethodMiss
 
-# cache hit, method triplet in v1 and imp in ip
+# cache hit, method triplet in a1 and imp in ip
 	teq     ip, a3          /* check for _objc_msgForward_internal */
+	it	eq
 	MOVEEQ  a1, #1          /* return (Method)1 if forward */
-	MOVENE  a1, v1          /* return triplet if not forward */
-	ldmfd   sp!, {a4,v1-v3,r7,pc}
+	                        /* else return triplet (already in a1) */
+	bx	lr
 	
 LGetMethodMiss:
 	MOVE    a1, #0          /* return nil if cache miss */
-	ldmfd   sp!, {a4,v1-v3,r7,pc}
+	bx	lr
 
 LGetMethodExit: 
     END_ENTRY _cache_getMethod
@@ -294,23 +325,20 @@ LGetMethodExit:
  * If not found, returns NULL.
  ********************************************************************/
 
-	ENTRY _cache_getImp
+	STATIC_ENTRY _cache_getImp
 
 # save registers and load class for CacheLookup
-	stmfd   sp!, {a4,v1-v3,r7,lr}
-	add     r7, sp, #16
-	MOVE    v1, a1
 
 # search the cache
-	CacheLookup a2, LGetImpMiss
+	CacheLookup a2, a1, LGetImpMiss
 
-# cache hit, method triplet in v1 and imp in ip
+# cache hit, method triplet in a1 and imp in ip
 	MOVE    a1, ip          @ return imp
-	ldmfd   sp!, {a4,v1-v3,r7,pc}
+	bx	lr
 	
 LGetImpMiss:
 	MOVE    a1, #0          @ return nil if cache miss
-	ldmfd   sp!, {a4,v1-v3,r7,pc}
+	bx	lr
 
 LGetImpExit: 
     END_ENTRY _cache_getImp
@@ -328,38 +356,35 @@ LGetImpExit:
 	ENTRY objc_msgSend
 # check whether receiver is nil
 	teq     a1, #0
+	itt	eq
 	moveq   a2, #0
 	bxeq    lr
 	
 # save registers and load receiver's class for CacheLookup
-	stmfd   sp!, {a4,v1-v3}
+	stmfd   sp!, {a4,v1}
 	ldr     v1, [a1, #ISA]
 
 # receiver is non-nil: search the cache
-	CacheLookup a2, LMsgSendCacheMiss
+	CacheLookup a2, v1, LMsgSendCacheMiss
 
-# cache hit (imp in ip) - prep for forwarding, restore registers and call
-	teq	v1, v1		/* set nonstret (eq) */
-	ldmfd   sp!, {a4,v1-v3}
+# cache hit (imp in ip) and CacheLookup returns with nonstret (eq) set, restore registers and call
+	ldmfd   sp!, {a4,v1}
 	bx      ip
 
 # cache miss: go search the method lists
 LMsgSendCacheMiss:
-	ldmfd	sp!, {a4,v1-v3}
+	ldmfd	sp!, {a4,v1}
 	b	_objc_msgSend_uncached
 
 LMsgSendExit:
 	END_ENTRY objc_msgSend
 
 
-	.text
-	.align 2
-_objc_msgSend_uncached:
+	STATIC_ENTRY objc_msgSend_uncached
 
 # Push stack frame
 	stmfd	sp!, {a1-a4,r7,lr}
 	add     r7, sp, #16
-	SAVE_VFP
 
 # Load class and selector
 	ldr	a1, [a1, #ISA]		/* class = receiver->isa  */
@@ -371,9 +396,38 @@ _objc_msgSend_uncached:
 
 # Prep for forwarding, Pop stack frame and call imp
 	teq	v1, v1		/* set nonstret (eq) */
-	RESTORE_VFP
 	ldmfd	sp!, {a1-a4,r7,lr}
 	bx	ip
+
+/********************************************************************
+ * id		objc_msgSend_noarg(id self, SEL op)
+ *
+ * On entry: a1 is the message receiver,
+ *           a2 is the selector
+ ********************************************************************/
+
+	ENTRY objc_msgSend_noarg
+# check whether receiver is nil
+	teq     a1, #0
+	itt	eq
+	moveq   a2, #0
+	bxeq    lr
+	
+# load receiver's class for CacheLookup
+	ldr     a3, [a1, #ISA]
+
+# receiver is non-nil: search the cache
+	CacheLookup a2, a3, LMsgSendNoArgCacheMiss
+
+# cache hit (imp in ip) and CacheLookup returns with nonstret (eq) set
+	bx      ip
+
+# cache miss: go search the method lists
+LMsgSendNoArgCacheMiss:
+	b	_objc_msgSend_uncached
+
+LMsgSendNoArgExit:
+	END_ENTRY objc_msgSend_noarg
 
 
 /********************************************************************
@@ -393,37 +447,35 @@ _objc_msgSend_uncached:
 	ENTRY objc_msgSend_stret
 # check whether receiver is nil
 	teq     a2, #0
+	it	eq
 	bxeq    lr
 
 # save registers and load receiver's class for CacheLookup
-	stmfd   sp!, {a4,v1-v3}
+	stmfd   sp!, {a4,v1}
 	ldr     v1, [a2, #ISA]
 
 # receiver is non-nil: search the cache
-	CacheLookup a3, LMsgSendStretCacheMiss
+	CacheLookup a3, v1, LMsgSendStretCacheMiss
 
 # cache hit (imp in ip) - prep for forwarding, restore registers and call
 	tst	v1, v1		/* set stret (ne); v1 is nonzero (triplet) */
-	ldmfd   sp!, {a4,v1-v3}
+	ldmfd   sp!, {a4,v1}
 	bx      ip
 
 # cache miss: go search the method lists
 LMsgSendStretCacheMiss:
-	ldmfd	sp!, {a4,v1-v3}
+	ldmfd	sp!, {a4,v1}
 	b	_objc_msgSend_stret_uncached
 	
 LMsgSendStretExit:
 	END_ENTRY objc_msgSend_stret
 
 
-	.text
-	.align 2
-_objc_msgSend_stret_uncached:
+	STATIC_ENTRY objc_msgSend_stret_uncached
 
 # Push stack frame
 	stmfd	sp!, {a1-a4,r7,lr}
 	add     r7, sp, #16
-	SAVE_VFP
 
 # Load class and selector
 	ldr	a1, [a2, #ISA]		/* class = receiver->isa */
@@ -436,7 +488,6 @@ _objc_msgSend_stret_uncached:
 # Prep for forwarding, pop stack frame and call imp
 	tst	a1, a1		/* set stret (ne); a1 is nonzero (imp) */
 	
-	RESTORE_VFP
 	ldmfd	sp!, {a1-a4,r7,lr}
 	bx	ip
 
@@ -452,46 +503,34 @@ _objc_msgSend_stret_uncached:
  * }
  ********************************************************************/
 
-	ENTRY objc_msgSendSuper2
-	@ objc_super->class is superclass of the class to search
-	ldr	r12, [a1, #CLASS]
-	ldr	r12, [r12, #4]		@ r12 = cls->super_class
-	str	r12, [a1, #CLASS]
-	b	_objc_msgSendSuper
-	END_ENTRY
-
 	ENTRY objc_msgSendSuper
 
 # save registers and load super class for CacheLookup
-	stmfd   sp!, {a4,v1-v3}
+	stmfd   sp!, {a4,v1}
 	ldr     v1, [a1, #CLASS]
 
 # search the cache
-	CacheLookup a2, LMsgSendSuperCacheMiss
+	CacheLookup a2, v1, LMsgSendSuperCacheMiss
 
-# cache hit (imp in ip) - prep for forwarding, restore registers and call
-	teq	v1, v1			/* set nonstret (eq) */
-	ldmfd   sp!, {a4,v1-v3}
+# cache hit (imp in ip) and CacheLookup returns with nonstret (eq) set, restore registers and call
+	ldmfd   sp!, {a4,v1}
 	ldr     a1, [a1, #RECEIVER]    @ fetch real receiver
 	bx      ip
 
 # cache miss: go search the method lists
 LMsgSendSuperCacheMiss:
-	ldmfd   sp!, {a4,v1-v3}
+	ldmfd   sp!, {a4,v1}
 	b	_objc_msgSendSuper_uncached
 
 LMsgSendSuperExit:
 	END_ENTRY objc_msgSendSuper
 
 
-	.text
-	.align 2
-_objc_msgSendSuper_uncached:
+	STATIC_ENTRY objc_msgSendSuper_uncached
 
 # Push stack frame
 	stmfd	sp!, {a1-a4,r7,lr}
 	add     r7, sp, #16
-	SAVE_VFP
 
 # Load class and selector
 	ldr     a1, [a1, #CLASS]        /* class = super->class   */
@@ -503,7 +542,56 @@ _objc_msgSendSuper_uncached:
 
 # Prep for forwarding, pop stack frame and call imp
 	teq	v1, v1			/* set nonstret (eq) */
-	RESTORE_VFP
+	ldmfd	sp!, {a1-a4,r7,lr}
+	ldr     a1, [a1, #RECEIVER]    @ fetch real receiver
+	bx	ip
+
+
+/********************************************************************
+ * objc_msgSendSuper2
+ ********************************************************************/
+	
+	ENTRY objc_msgSendSuper2
+
+# save registers and load super class for CacheLookup
+	stmfd   sp!, {a4,v1}
+	ldr     v1, [a1, #CLASS]
+	ldr     v1, [v1, #SUPERCLASS]
+
+# search the cache
+	CacheLookup a2, v1, LMsgSendSuper2CacheMiss
+
+# cache hit (imp in ip) and CacheLookup returns with nonstret (eq) set, restore registers and call
+	ldmfd   sp!, {a4,v1}
+	ldr     a1, [a1, #RECEIVER]    @ fetch real receiver
+	bx      ip
+
+# cache miss: go search the method lists
+LMsgSendSuper2CacheMiss:
+	ldmfd   sp!, {a4,v1}
+	b	_objc_msgSendSuper2_uncached
+
+LMsgSendSuper2Exit:
+	END_ENTRY objc_msgSendSuper2
+
+
+	STATIC_ENTRY objc_msgSendSuper2_uncached
+
+# Push stack frame
+	stmfd	sp!, {a1-a4,r7,lr}
+	add     r7, sp, #16
+
+# Load class and selector
+	ldr     a1, [a1, #CLASS]        /* class = super->class   */
+	ldr     a1, [a1, #SUPERCLASS]   /* class = class->superclass */
+	# MOVE	a2, a2			/* selector already in a2 */
+
+# Do the lookup
+	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache)
+	MOVE    ip, a1
+
+# Prep for forwarding, pop stack frame and call imp
+	teq	v1, v1			/* set nonstret (eq) */
 	ldmfd	sp!, {a1-a4,r7,lr}
 	ldr     a1, [a1, #RECEIVER]    @ fetch real receiver
 	bx	ip
@@ -529,46 +617,35 @@ _objc_msgSendSuper_uncached:
  *		a3 is the selector
  ********************************************************************/
 
-	ENTRY objc_msgSendSuper2_stret
-	@ objc_super->class is superclass of the class to search
-	ldr	r12, [a2, #CLASS]
-	ldr	r12, [r12, #4]		@ xx = cls->super_class
-	str	r12, [a2, #CLASS]
-	b	_objc_msgSendSuper_stret
-	END_ENTRY
-
 	ENTRY objc_msgSendSuper_stret
 
 # save registers and load super class for CacheLookup
-	stmfd   sp!, {a4,v1-v3}
+	stmfd   sp!, {a4,v1}
 	ldr     v1, [a2, #CLASS]
 
 # search the cache
-	CacheLookup a3, LMsgSendSuperStretCacheMiss
+	CacheLookup a3, v1, LMsgSendSuperStretCacheMiss
 
 # cache hit (imp in ip) - prep for forwarding, restore registers and call
 	tst     v1, v1		/* set stret (ne); v1 is nonzero (triplet) */
-	ldmfd   sp!, {a4,v1-v3}
+	ldmfd   sp!, {a4,v1}
 	ldr     a2, [a2, #RECEIVER]      @ fetch real receiver
 	bx    	ip
 
 # cache miss: go search the method lists
 LMsgSendSuperStretCacheMiss:
-	ldmfd   sp!, {a4,v1-v3}
+	ldmfd   sp!, {a4,v1}
 	b	_objc_msgSendSuper_stret_uncached
 
 LMsgSendSuperStretExit:
 	END_ENTRY objc_msgSendSuper_stret
 
 
-	.text
-	.align 2
-_objc_msgSendSuper_stret_uncached:
+	STATIC_ENTRY objc_msgSendSuper_stret_uncached
 
 # Push stack frame
 	stmfd	sp!, {a1-a4,r7,lr}
 	add     r7, sp, #16
-	SAVE_VFP
 
 # Load class and selector
 	ldr     a1, [a2, #CLASS]        /* class = super->class */
@@ -580,8 +657,59 @@ _objc_msgSendSuper_stret_uncached:
 
 # Prep for forwarding, pop stack frame and call imp
 	tst     v1, v1		/* set stret (ne); v1 is nonzero (triplet) */
+	
+	ldmfd	sp!, {a1-a4,r7,lr}
+	ldr     a2, [a2, #RECEIVER]	@ fetch real receiver
+	bx      ip
 
-	RESTORE_VFP
+	
+/********************************************************************
+ * id objc_msgSendSuper2_stret
+ ********************************************************************/
+
+	ENTRY objc_msgSendSuper2_stret
+
+# save registers and load super class for CacheLookup
+	stmfd   sp!, {a4,v1}
+	ldr     v1, [a2, #CLASS]
+	ldr     v1, [v1, #SUPERCLASS]
+
+# search the cache
+	CacheLookup a3, v1, LMsgSendSuper2StretCacheMiss
+
+# cache hit (imp in ip) - prep for forwarding, restore registers and call
+	tst     v1, v1		/* set stret (ne); v1 is nonzero (triplet) */
+	ldmfd   sp!, {a4,v1}
+	ldr     a2, [a2, #RECEIVER]      @ fetch real receiver
+	bx    	ip
+
+# cache miss: go search the method lists
+LMsgSendSuper2StretCacheMiss:
+	ldmfd   sp!, {a4,v1}
+	b	_objc_msgSendSuper2_stret_uncached
+
+LMsgSendSuper2StretExit:
+	END_ENTRY objc_msgSendSuper2_stret
+
+
+	STATIC_ENTRY objc_msgSendSuper2_stret_uncached
+
+# Push stack frame
+	stmfd	sp!, {a1-a4,r7,lr}
+	add     r7, sp, #16
+
+# Load class and selector
+	ldr     a1, [a2, #CLASS]        /* class = super->class */
+	ldr     a1, [a1, #SUPERCLASS]   /* class = class->superclass */
+	MOVE	a2, a3			/* selector */
+
+# Do the lookup
+	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache)
+	MOVE    ip, a1
+
+# Prep for forwarding, pop stack frame and call imp
+	tst     v1, v1		/* set stret (ne); v1 is nonzero (triplet) */
+	
 	ldmfd	sp!, {a1-a4,r7,lr}
 	ldr     a2, [a2, #RECEIVER]	@ fetch real receiver
 	bx      ip
@@ -617,9 +745,6 @@ _objc_msgSendSuper_stret_uncached:
  * stack args...
  * 
  * typedef struct objc_sendv_margs {
- * #ifdef VFP_ARGS
- *	double		vfp[8];
- * #endif
  *	int		a[4];
  *	int		stackArgs[...];
  * };
@@ -640,8 +765,7 @@ __objc_forward_stret_handler:
 	.long 0
 
 
-	ENTRY   _objc_msgForward_internal
-	.private_extern __objc_msgForward_internal
+	STATIC_ENTRY   _objc_msgForward_internal
 	// Method cache version
 
 	// THIS IS NOT A CALLABLE C FUNCTION
@@ -660,13 +784,11 @@ __objc_forward_stret_handler:
 	MI_GET_ADDRESS(ip, __objc_forward_handler)
 	ldr	ip, [ip]
 	teq	ip, #0
+	it	ne
 	bxne	ip
 
 # build marg_list
 	stmfd   sp!, {a1-a4}             @ push args to marg_list
-#ifdef VFP_ARGS
-	fstmfdd sp!, {d0-d7}             @ push fp args to marg_list
-#endif
 
 # build forward::'s parameter list  (self, forward::, original sel, marg_list)
 	# a1 already is self
@@ -687,11 +809,7 @@ __objc_forward_stret_handler:
 
 # pop stack frame and return
 	ldr	lr, [sp]
-#ifdef VFP_ARGS
-	add	sp, sp, #(4 + 4 + 4*4 + 8*8)	@ skip lr, pad, a1..a4, d0..d7
-#else
 	add	sp, sp, #(4 + 4 + 4*4) 		@ skip lr, pad, a1..a4
-#endif
 	bx	lr
 
 	END_ENTRY _objc_msgForward
@@ -699,18 +817,16 @@ __objc_forward_stret_handler:
 
 	ENTRY   _objc_msgForward_stret
 	// Struct-return version
-	
+
 # check for user-installed forwarding handler
 	MI_GET_ADDRESS(ip, __objc_forward_stret_handler)
 	ldr	ip, [ip]
 	teq	ip, #0
+	it	ne
 	bxne	ip
 
 # build marg_list
 	stmfd   sp!, {a1-a4}             @ push args to marg_list
-#ifdef VFP_ARGS
-	fstmfdd sp!, {d0-d7}             @ push fp args to marg_list
-#endif
 
 # build forward::'s parameter list  (self, forward::, original sel, marg_list)
 	MOVE    a1, a2                   @ self
@@ -731,11 +847,7 @@ __objc_forward_stret_handler:
 
 # pop stack frame and return
 	ldr	lr, [sp]
-#ifdef VFP_ARGS
-	add	sp, sp, #(4 + 4 + 4*4 + 8*8)	@ skip lr, pad, a1..a4, d0..d7
-#else
 	add	sp, sp, #(4 + 4 + 4*4) 		@ skip lr, pad, a1..a4
-#endif
 	bx	lr
 	
 	END_ENTRY _objc_msgForward_stret
@@ -748,152 +860,21 @@ LMsgForwardError:
 	.ascii "Does not recognize selector %s\0"
 
 
-/********************************************************************
- * id		objc_msgSendv(id	self,
- *			SEL		op,
- *			unsigned	arg_size,
- *			marg_list	arg_frame);
- *
- * typedef struct objc_sendv_margs {
- * #ifdef VFP_ARGS
- *	double		vfp[8];
- * #endif
- *	int		a[4];
- *	int		stackArgs[...];
- * };
- *
- * arg_frame is the number of bytes used in a[] plus stackArgs.
- * It does not include vfp[].
- * 
- ********************************************************************/
+	ENTRY objc_msgSend_debug
+	b	_objc_msgSend
+	END_ENTRY objc_msgSend_debug
 
-	ENTRY   objc_msgSendv
+	ENTRY objc_msgSendSuper2_debug
+	b	_objc_msgSendSuper2
+	END_ENTRY objc_msgSendSuper2_debug
 
-# Push stack frame
-	SAVE_VFP
-	stmfd	sp!, {a4,v1-v3,r7,lr}	@ a4 saved for stack alignment only
-	add     r7, sp, #16
+	ENTRY objc_msgSend_stret_debug
+	b	_objc_msgSend_stret
+	END_ENTRY objc_msgSend_stret_debug
 
-# save sendv's parameters
-	# self stays in a1
-	# sel stays in a2
-	MOVE    v1, a3              @ v1 is arg count in bytes
-	MOVE    v2, a4              @ v2 is marg_list
-
-# load FP from marg_list
-#ifdef VFP_ARGS
-	fldmfdd v2!, {d0-d7}
-#endif
-
-# load arg registers from marg_list
-# v1 is remaining count, v2 is pointer into marg_list
-	# self already in a1
-	# sel already in a2
-	cmp     v1, #12
-	ldrhs   a3, [v2, #8]        @ pop a3 if arg bytes is at least 12
-	ldrhi   a4, [v2, #12]       @ pop a4 if arg bytes is more than 12
-	subs    v1, v1, #16         @ skip past register args
-	ble     LMsgSendvCall       @ call now if no args remain
-	add     v2, v2, #16         @ skip past register args
-
-# copy stack args from marg_list
-# v1 is remaining bytes, v2 is pointer into marg_list, sp is pointer into stack
-	tst     v1, #4
-	subne   sp, sp, #4	    @ push 4-byte pad if word count is odd
-
-	sub     sp, sp, v1          @ move sp to end and copy backwards
-                                    @ (this preserves ABI's stack constraints)
-LMsgSendvArgLoop:
-	subs    v1, v1, #4
-	ldr     v3, [v2, v1]
-	str     v3, [sp, v1]
-	bne     LMsgSendvArgLoop
-
-LMsgSendvCall:	
-	bl      _objc_msgSend
-
-# Pop stack frame and return
-	MOVE	sp, r7
-	ldmfd	sp!, {a4,v1-v3,r7,pc}
-#ifdef VFP_ARGS
-#error broken for vfp
-#endif
-
-	END_ENTRY objc_msgSendv
-
-
-
-/********************************************************************
- * struct_type		objc_msgSendv_stret(id	self,
- *			SEL		op,
- *			unsigned	arg_size,
- *			marg_list	arg_frame);
- *
- * typedef struct objc_sendv_margs {
- * #ifdef VFP_ARGS
- *	double		vfp[8];
- * #endif
- *	int		a[4];
- *	int		stackArgs[...];
- * };
- *
- * arg_frame is the number of bytes used in a[] plus stackArgs.
- * It does not include vfp[].
- ********************************************************************/
-
-	ENTRY   objc_msgSendv_stret
-
-# Push stack frame
-	stmfd	sp!, {a4,v1-v3,r7,lr}	@ a4 saved for stack alignment only
-	add     r7, sp, #16
-	SAVE_VFP
-
-# save sendv's parameters
-	# stret address stays in a1
-	# self stays in a2
-	# sel stays in a3
-	MOVE    v1, a4              	@ v1 is arg count in bytes
-	ldr     v2, [r7, #24]		@ v2 is marg_list
-
-# load FP from marg_list
-#ifdef VFP_ARGS
-	fldmfdd v2!, {d0-d7}
-#endif
-
-# load arg registers from marg_list
-# v1 is remaining count, v2 is pointer into marg_list
-	# stret already in a1
-	# self already in a2
-	# sel already in a3
-	subs    v1, v1, #16         @ skip past register args
-	ldrhs   a4, [v2, #12]       @ pop a4 if arg bytes is at least 16
-	beq     LMsgSendvStretCall  @ call now if no args remain
-	add     v2, v2, #16         @ skip past register args
-
-# copy stack args from marg_list
-# v1 is remaining count, v2 is pointer into marg_list, sp is pointer into stack
-	tst     v1, #4
-	subne   sp, sp, #4	    @ push 4-byte pad if word count is odd
-
-	sub     sp, sp, v1          @ move pointers to end and copy backwards
-                                    @ (this preserves ABI's stack constraints)
-LMsgSendvStretArgLoop:
-	subs    v1, v1, #4
-	ldr     v3, [v2, v1]
-	str     v3, [sp, v1]
-	bne     LMsgSendvStretArgLoop
-
-LMsgSendvStretCall:	
-	bl      _objc_msgSend_stret
-
-# Pop stack frame and return
-	MOVE	sp, r7
-	ldmfd   sp!, {a4,v1-v3,r7,pc}
-#ifdef VFP_ARGS
-#error broken for vfp
-#endif
-
-	END_ENTRY objc_msgSendv_stret
+	ENTRY objc_msgSendSuper2_stret_debug
+	b	_objc_msgSendSuper2_stret
+	END_ENTRY objc_msgSendSuper2_stret_debug
 
 
 	ENTRY method_invoke
@@ -911,4 +892,12 @@ LMsgSendvStretCall:
 	bx	ip
 	END_ENTRY method_invoke_stret
 
+
+	STATIC_ENTRY _objc_ignored_method
+
+	# self is already in a0
+	bx	lr
+
+	END_ENTRY _objc_ignored_method
+	
 #endif

@@ -32,6 +32,7 @@
 
 /* Warning: All of these methods will disappear in 64-bit. */
 
+__OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0)
 @interface Protocol : Object
 {
 @private
@@ -51,8 +52,10 @@
 
 /* Looking up information specific to a protocol */
 
-- (struct objc_method_description *) descriptionForInstanceMethod:(SEL)aSel DEPRECATED_IN_MAC_OS_X_VERSION_10_5_AND_LATER;
-- (struct objc_method_description *) descriptionForClassMethod:(SEL)aSel DEPRECATED_IN_MAC_OS_X_VERSION_10_5_AND_LATER;
+- (struct objc_method_description *) descriptionForInstanceMethod:(SEL)aSel
+    DEPRECATED_IN_MAC_OS_X_VERSION_10_5_AND_LATER;
+- (struct objc_method_description *) descriptionForClassMethod:(SEL)aSel 
+    DEPRECATED_IN_MAC_OS_X_VERSION_10_5_AND_LATER;
 
 @end
 

@@ -1,16 +1,16 @@
+// TEST_CFLAGS -framework Foundation
+
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <objc/objc-abi.h>
 #include "test.h"
-
-extern id objc_getProperty(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic);
-extern void objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, BOOL shouldCopy);
 
 @interface Test : NSObject {
     NSString *_value;
     // _object is at the last optimized property offset
     id _object __attribute__((aligned(64)));
 }
-@property(readonly) Class class;
+@property(readonly) Class cls;
 @property(copy) NSString *value;
 @property(assign) id object;
 @end
@@ -32,7 +32,7 @@ typedef struct {
     [super dealloc];
 }
 
-- (Class)class { return objc_getProperty(self, _cmd, 0, YES); }
+- (Class)cls { return objc_getProperty(self, _cmd, 0, YES); }
 
 - (NSString*)value { return (NSString*) objc_getProperty(self, _cmd, offsetof(TestDefs, _value), YES); }
 - (void)setValue:(NSString*)inValue { objc_setProperty(self, _cmd, offsetof(TestDefs, _value), inValue, YES, YES); }
@@ -58,9 +58,9 @@ int main() {
     testassert([t.value isEqualToString:@"test"]);
 
     Class testClass = [Test class];
-    Class cls = t.class;
+    Class cls = t.cls;
     testassert(testClass == cls);
-    cls = t.class;
+    cls = t.cls;
     testassert(testClass == cls);
 
     t.object = object;

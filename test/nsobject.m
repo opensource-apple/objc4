@@ -1,3 +1,5 @@
+// TEST_CFLAGS -framework Foundation
+
 #include "test.h"
 
 #import <Foundation/Foundation.h>

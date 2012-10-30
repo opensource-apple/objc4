@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <objc/runtime.h>
 #include <objc/message.h>

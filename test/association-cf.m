@@ -1,3 +1,5 @@
+// TEST_CFLAGS -framework CoreFoundation
+
 #include <CoreFoundation/CoreFoundation.h>
 #include <objc/runtime.h>
 

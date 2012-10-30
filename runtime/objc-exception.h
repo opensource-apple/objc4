@@ -31,11 +31,16 @@
 
 // compiler reserves a setjmp buffer + 4 words as localExceptionData
 
-OBJC_EXPORT void objc_exception_throw(id exception);
-OBJC_EXPORT void objc_exception_try_enter(void *localExceptionData);
-OBJC_EXPORT void objc_exception_try_exit(void *localExceptionData);
-OBJC_EXPORT id objc_exception_extract(void *localExceptionData);
-OBJC_EXPORT int objc_exception_match(Class exceptionClass, id exception);
+OBJC_EXPORT void objc_exception_throw(id exception)
+    __OSX_AVAILABLE_STARTING(__MAC_10_3, __IPHONE_NA);
+OBJC_EXPORT void objc_exception_try_enter(void *localExceptionData)
+    __OSX_AVAILABLE_STARTING(__MAC_10_3, __IPHONE_NA);
+OBJC_EXPORT void objc_exception_try_exit(void *localExceptionData)
+    __OSX_AVAILABLE_STARTING(__MAC_10_3, __IPHONE_NA);
+OBJC_EXPORT id objc_exception_extract(void *localExceptionData)
+    __OSX_AVAILABLE_STARTING(__MAC_10_3, __IPHONE_NA);
+OBJC_EXPORT int objc_exception_match(Class exceptionClass, id exception)
+    __OSX_AVAILABLE_STARTING(__MAC_10_3, __IPHONE_NA);
 
 
 typedef struct {
@@ -45,14 +50,15 @@ typedef struct {
     void (*try_exit)(void *);	// version 0
     id	 (*extract)(void *);	// version 0
     int	(*match)(Class, id);	// version 0
-}
-    objc_exception_functions_t;
+} objc_exception_functions_t;
 
 // get table; version tells how many
-OBJC_EXPORT void objc_exception_get_functions(objc_exception_functions_t *table);
+OBJC_EXPORT void objc_exception_get_functions(objc_exception_functions_t *table)
+    __OSX_AVAILABLE_STARTING(__MAC_10_3, __IPHONE_NA);
 
 // set table
-OBJC_EXPORT void objc_exception_set_functions(objc_exception_functions_t *table);
+OBJC_EXPORT void objc_exception_set_functions(objc_exception_functions_t *table)
+    __OSX_AVAILABLE_STARTING(__MAC_10_3, __IPHONE_NA);
 
 
 // !__OBJC2__
@@ -64,19 +70,27 @@ typedef int (*objc_exception_matcher)(Class catch_type, id exception);
 typedef void (*objc_uncaught_exception_handler)(id exception);
 typedef void (*objc_exception_handler)(id unused, void *context);
 
-OBJC_EXPORT void objc_exception_throw(id exception);
-OBJC_EXPORT void objc_exception_rethrow(void);
-OBJC_EXPORT id objc_begin_catch(void *exc_buf);
-OBJC_EXPORT void objc_end_catch(void);
+OBJC_EXPORT void objc_exception_throw(id exception)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+OBJC_EXPORT void objc_exception_rethrow(void)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+OBJC_EXPORT id objc_begin_catch(void *exc_buf)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+OBJC_EXPORT void objc_end_catch(void)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 
-OBJC_EXPORT objc_exception_preprocessor objc_setExceptionPreprocessor(objc_exception_preprocessor fn);
-OBJC_EXPORT objc_exception_matcher objc_setExceptionMatcher(objc_exception_matcher fn);
-OBJC_EXPORT objc_uncaught_exception_handler objc_setUncaughtExceptionHandler(objc_uncaught_exception_handler fn);
+OBJC_EXPORT objc_exception_preprocessor objc_setExceptionPreprocessor(objc_exception_preprocessor fn)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+OBJC_EXPORT objc_exception_matcher objc_setExceptionMatcher(objc_exception_matcher fn)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+OBJC_EXPORT objc_uncaught_exception_handler objc_setUncaughtExceptionHandler(objc_uncaught_exception_handler fn)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 
-#ifndef __arm__
-OBJC_EXPORT uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context);
-OBJC_EXPORT void objc_removeExceptionHandler(uintptr_t token);
-#endif
+// Not for iOS.
+OBJC_EXPORT uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
+OBJC_EXPORT void objc_removeExceptionHandler(uintptr_t token)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
 
 // __OBJC2__
 #endif

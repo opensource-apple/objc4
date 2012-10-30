@@ -1,14 +1,21 @@
 /* resolve.m
  * Test +resolveClassMethod: and +resolveInstanceMethod:
  */
+
+// TEST_CFLAGS -Wno-deprecated-declarations
+
+/* 
+TEST_RUN_OUTPUT
+objc\[\d+\]: \+\[Sub resolveClassMethod:lyingClassMethod\] returned YES, but no new implementation of \+\[Sub lyingClassMethod\] was found
+objc\[\d+\]: \+\[Sub resolveInstanceMethod:lyingInstanceMethod\] returned YES, but no new implementation of -\[Sub lyingInstanceMethod\] was found
+OK: resolve\.m
+END
+*/
   
 #include "test.h"
 #include <objc/objc.h>
 #include <objc/objc-runtime.h>
 #include <unistd.h>
-
-// fixme new API?
-extern void _objc_flush_caches(Class cls, BOOL flushMeta);
 
 static int state = 0;
 
@@ -51,7 +58,7 @@ static int state = 0;
         return nil;
     }
     fail("forward:: shouldn't be called (sel %s)", sel_getName(sel));
-    return args;  // unused
+    return (id)args;  // unused
 }
 @end
 
@@ -169,7 +176,7 @@ int main()
     testassert(state == 11);
     testassert(ret == [Super class]);
 
-    _objc_flush_caches([Sub class]->isa, NO);
+    _objc_flush_caches([Sub class]->isa);
 
     // Call a method that won't get resolved
     state = 20;
@@ -184,7 +191,7 @@ int main()
     testassert(state == 26);
     testassert(ret == nil);
 
-    _objc_flush_caches([Sub class]->isa, NO);
+    _objc_flush_caches([Sub class]->isa);
 
     // Call a method that won't get resolved but the resolver lies about it
     state = 30;
@@ -199,7 +206,7 @@ int main()
     testassert(state == 36);
     testassert(ret == nil);
 
-    _objc_flush_caches([Sub class]->isa, NO);
+    _objc_flush_caches([Sub class]->isa);
 
 
     // Resolve an instance method
@@ -216,7 +223,7 @@ int main()
     testassert(state == 51);
     testassert(ret == [Sub class]);
 
-    _objc_flush_caches([Sub class], NO);
+    _objc_flush_caches([Sub class]);
 
     // Call a method that won't get resolved
     state = 60;
@@ -231,7 +238,7 @@ int main()
     testassert(state == 66);
     testassert(ret == nil);
 
-    _objc_flush_caches([Sub class], NO);
+    _objc_flush_caches([Sub class]);
     
     // Call a method that won't get resolved but the resolver lies about it
     state = 70;
@@ -246,7 +253,7 @@ int main()
     testassert(state == 76);
     testassert(ret == nil);
 
-    _objc_flush_caches([Sub class], NO);
+    _objc_flush_caches([Sub class]);
 
     // Call a missing method on a class that doesn't support resolving
     state = 80;

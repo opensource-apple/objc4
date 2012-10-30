@@ -25,6 +25,7 @@
 #define _OBJC_AUTO_H_
 
 #include <objc/objc.h>
+#include <malloc/malloc.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -48,14 +49,8 @@
 
 /* GC is unsupported on some architectures. */
 
-#if TARGET_OS_EMBEDDED  ||  TARGET_OS_WIN32
+#if TARGET_OS_EMBEDDED  ||  TARGET_OS_IPHONE  ||  TARGET_OS_WIN32
 #   define OBJC_NO_GC 1
-#endif
-
-#ifdef OBJC_NO_GC
-#   define OBJC_GC_EXPORT static
-#else
-#   define OBJC_GC_EXPORT OBJC_EXPORT
 #endif
 
 
@@ -76,90 +71,147 @@ enum {
     OBJC_CLEAR_RESIDENT_STACK = (1 << 0)
 };
 
+#ifndef OBJC_NO_GC
+
+
+/* GC declarations */
 
 /* Collection utilities */
 
-OBJC_GC_EXPORT void objc_collect(unsigned long options);
-OBJC_GC_EXPORT BOOL objc_collectingEnabled(void);
-
+OBJC_EXPORT void objc_collect(unsigned long options)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA);
+OBJC_EXPORT BOOL objc_collectingEnabled(void)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
+OBJC_EXPORT malloc_zone_t *objc_collectableZone(void) 
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_NA);
 
 /* GC configuration */
 
 /* Tells collector to wait until specified bytes have been allocated before trying to collect again. */
-OBJC_GC_EXPORT void objc_setCollectionThreshold(size_t threshold);
+OBJC_EXPORT void objc_setCollectionThreshold(size_t threshold)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
 
 /* Tells collector to run a full collection for every ratio generational collections. */
-OBJC_GC_EXPORT void objc_setCollectionRatio(size_t ratio);
+OBJC_EXPORT void objc_setCollectionRatio(size_t ratio)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
 
-/* Tells collector to start collecting on dedicated thread */
-OBJC_GC_EXPORT void objc_startCollectorThread(void);
+// 
+// GC-safe compare-and-swap
+//
 
 /* Atomic update, with write barrier. */
-OBJC_GC_EXPORT BOOL objc_atomicCompareAndSwapPtr(id predicate, id replacement, volatile id *objectLocation) __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA);
+OBJC_EXPORT BOOL objc_atomicCompareAndSwapPtr(id predicate, id replacement, volatile id *objectLocation) 
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA) OBJC_ARC_UNAVAILABLE;
 /* "Barrier" version also includes memory barrier. */
-OBJC_GC_EXPORT BOOL objc_atomicCompareAndSwapPtrBarrier(id predicate, id replacement, volatile id *objectLocation) __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA);
+OBJC_EXPORT BOOL objc_atomicCompareAndSwapPtrBarrier(id predicate, id replacement, volatile id *objectLocation) 
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA) OBJC_ARC_UNAVAILABLE;
 
 // atomic update of a global variable
-OBJC_GC_EXPORT BOOL objc_atomicCompareAndSwapGlobal(id predicate, id replacement, volatile id *objectLocation);
-OBJC_GC_EXPORT BOOL objc_atomicCompareAndSwapGlobalBarrier(id predicate, id replacement, volatile id *objectLocation);
+OBJC_EXPORT BOOL objc_atomicCompareAndSwapGlobal(id predicate, id replacement, volatile id *objectLocation)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA) OBJC_ARC_UNAVAILABLE;
+OBJC_EXPORT BOOL objc_atomicCompareAndSwapGlobalBarrier(id predicate, id replacement, volatile id *objectLocation)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA) OBJC_ARC_UNAVAILABLE;
 // atomic update of an instance variable
-OBJC_GC_EXPORT BOOL objc_atomicCompareAndSwapInstanceVariable(id predicate, id replacement, volatile id *objectLocation);
-OBJC_GC_EXPORT BOOL objc_atomicCompareAndSwapInstanceVariableBarrier(id predicate, id replacement, volatile id *objectLocation);
+OBJC_EXPORT BOOL objc_atomicCompareAndSwapInstanceVariable(id predicate, id replacement, volatile id *objectLocation)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA) OBJC_ARC_UNAVAILABLE;
+OBJC_EXPORT BOOL objc_atomicCompareAndSwapInstanceVariableBarrier(id predicate, id replacement, volatile id *objectLocation)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA) OBJC_ARC_UNAVAILABLE;
 
 
-/* Write barriers.  Used by the compiler.  */
-OBJC_GC_EXPORT id objc_assign_strongCast(id val, id *dest);
-OBJC_GC_EXPORT id objc_assign_global(id val, id *dest);
-OBJC_GC_EXPORT id objc_assign_ivar(id value, id dest, ptrdiff_t offset);
-OBJC_GC_EXPORT void *objc_memmove_collectable(void *dst, const void *src, size_t size);
+// 
+// Read and write barriers
+// 
 
-OBJC_GC_EXPORT id objc_read_weak(id *location);
-OBJC_GC_EXPORT id objc_assign_weak(id value, id *location);
+OBJC_EXPORT id objc_assign_strongCast(id val, id *dest)
+    __OSX_AVAILABLE_STARTING(__MAC_10_4, __IPHONE_NA);
+OBJC_EXPORT id objc_assign_global(id val, id *dest)
+    __OSX_AVAILABLE_STARTING(__MAC_10_4, __IPHONE_NA);
+OBJC_EXPORT id objc_assign_threadlocal(id val, id *dest)
+    __OSX_AVAILABLE_STARTING(__MAC_10_7, __IPHONE_NA);
+OBJC_EXPORT id objc_assign_ivar(id value, id dest, ptrdiff_t offset)
+    __OSX_AVAILABLE_STARTING(__MAC_10_4, __IPHONE_NA);
+OBJC_EXPORT void *objc_memmove_collectable(void *dst, const void *src, size_t size)
+    __OSX_AVAILABLE_STARTING(__MAC_10_4, __IPHONE_NA);
+
+OBJC_EXPORT id objc_read_weak(id *location)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
+OBJC_EXPORT id objc_assign_weak(id value, id *location)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
 
 
 //
-// SPI. The following routines are available as debugging and transitional aides.
-//
+// Thread management
+// 
 
-/* Tells runtime to issue finalize calls on the main thread only. */
-OBJC_GC_EXPORT void objc_finalizeOnMainThread(Class cls)
-    AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER_BUT_DEPRECATED;
+/* Register the calling thread with the garbage collector. */
+OBJC_EXPORT void objc_registerThreadWithCollector(void)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA);
 
-
-/* Returns true if object has been scheduled for finalization.  Can be used to avoid operations that may lead to resurrection, which are fatal. */
-OBJC_GC_EXPORT BOOL objc_is_finalized(void *ptr);
-
-/* Stack management */
-OBJC_GC_EXPORT void objc_clear_stack(unsigned long options);
-
-//
-// Obsolete.  Present only until all uses can be migrated to newer API.
-//
-
-OBJC_GC_EXPORT BOOL objc_collecting_enabled(void);
-OBJC_GC_EXPORT void objc_set_collection_threshold(size_t threshold);
-OBJC_GC_EXPORT void objc_set_collection_ratio(size_t ratio);
-OBJC_GC_EXPORT void objc_start_collector_thread(void);
-
-/* Memory management */
-OBJC_EXPORT id objc_allocate_object(Class cls, int extra);
-
-/* Register/unregister the current thread with the garbage collector. */
-OBJC_GC_EXPORT void objc_registerThreadWithCollector();
-OBJC_GC_EXPORT void objc_unregisterThreadWithCollector();
+/* Unregisters the calling thread with the garbage collector. 
+   Unregistration also happens automatically at thread exit. */
+OBJC_EXPORT void objc_unregisterThreadWithCollector(void)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA);
 
 /* To be called from code which must only execute on a registered thread. */
 /* If the calling thread is unregistered then an error message is emitted and the thread is implicitly registered. */
-OBJC_GC_EXPORT void objc_assertRegisteredThreadWithCollector();
+OBJC_EXPORT void objc_assertRegisteredThreadWithCollector(void)
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_NA);
 
-#ifdef OBJC_NO_GC
+/* Erases any stale references in unused parts of the stack. */
+OBJC_EXPORT void objc_clear_stack(unsigned long options)
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
 
-/* Non-GC versions */
 
-static OBJC_INLINE void objc_collect(unsigned long options) { }
+//
+// Finalization
+// 
+
+/* Returns true if object has been scheduled for finalization.  Can be used to avoid operations that may lead to resurrection, which are fatal. */
+OBJC_EXPORT BOOL objc_is_finalized(void *ptr)
+    __OSX_AVAILABLE_STARTING(__MAC_10_4, __IPHONE_NA);
+
+// Deprcated. Tells runtime to issue finalize calls on the main thread only.
+OBJC_EXPORT void objc_finalizeOnMainThread(Class cls)
+    AVAILABLE_MAC_OS_X_VERSION_10_5_AND_LATER_BUT_DEPRECATED;
+
+
+//
+// Deprecated names. 
+//
+
+/* Deprecated. Use objc_collectingEnabled() instead. */
+OBJC_EXPORT BOOL objc_collecting_enabled(void)
+    __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_4,__MAC_10_5, __IPHONE_NA,__IPHONE_NA);
+/* Deprecated. Use objc_setCollectionThreshold() instead. */
+OBJC_EXPORT void objc_set_collection_threshold(size_t threshold)
+    __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_4,__MAC_10_5, __IPHONE_NA,__IPHONE_NA);
+/* Deprecated. Use objc_setCollectionRatio() instead. */
+OBJC_EXPORT void objc_set_collection_ratio(size_t ratio)
+    __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_4,__MAC_10_5, __IPHONE_NA,__IPHONE_NA);
+/* Deprecated. Use objc_startCollectorThread() instead. */
+OBJC_EXPORT void objc_start_collector_thread(void)
+    __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_4,__MAC_10_5, __IPHONE_NA,__IPHONE_NA);
+/* Deprecated. No replacement. Formerly told the collector to run using a dedicated background thread. */
+OBJC_EXPORT void objc_startCollectorThread(void)
+__OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_5,__MAC_10_7, __IPHONE_NA,__IPHONE_NA);
+
+
+/* Deprecated. Use class_createInstance() instead. */
+OBJC_EXPORT id objc_allocate_object(Class cls, int extra)
+    AVAILABLE_MAC_OS_X_VERSION_10_4_AND_LATER_BUT_DEPRECATED;
+
+
+/* !defined(OBJC_NO_GC) */
+#else
+/* defined(OBJC_NO_GC) */
+
+
+/* Non-GC declarations */
+
+static OBJC_INLINE void objc_collect(unsigned long options __unused) { }
 static OBJC_INLINE BOOL objc_collectingEnabled(void) { return NO; }
-static OBJC_INLINE void objc_setCollectionThreshold(size_t threshold) { }
-static OBJC_INLINE void objc_setCollectionRatio(size_t ratio) { }
+static OBJC_INLINE void objc_setCollectionThreshold(size_t threshold __unused) { }
+static OBJC_INLINE void objc_setCollectionRatio(size_t ratio __unused) { }
 static OBJC_INLINE void objc_startCollectorThread(void) { }
 
 #if TARGET_OS_WIN32
@@ -207,17 +259,17 @@ static OBJC_INLINE id objc_read_weak(id *location)
 static OBJC_INLINE id objc_assign_weak(id value, id *location) 
     { return (*location = value); }
 
-
-static OBJC_INLINE void objc_finalizeOnMainThread(Class cls) { }
-static OBJC_INLINE BOOL objc_is_finalized(void *ptr) { return NO; }
-static OBJC_INLINE void objc_clear_stack(unsigned long options) { }
+static OBJC_INLINE void objc_finalizeOnMainThread(Class cls __unused) { }
+static OBJC_INLINE BOOL objc_is_finalized(void *ptr __unused) { return NO; }
+static OBJC_INLINE void objc_clear_stack(unsigned long options __unused) { }
 
 static OBJC_INLINE BOOL objc_collecting_enabled(void) { return NO; }
-static OBJC_INLINE void objc_set_collection_threshold(size_t threshold) { } 
-static OBJC_INLINE void objc_set_collection_ratio(size_t ratio) { } 
+static OBJC_INLINE void objc_set_collection_threshold(size_t threshold __unused) { } 
+static OBJC_INLINE void objc_set_collection_ratio(size_t ratio __unused) { } 
 static OBJC_INLINE void objc_start_collector_thread(void) { }
 
-OBJC_EXPORT id class_createInstance(Class cls, size_t extraBytes);
+OBJC_EXPORT id class_createInstance(Class cls, size_t extraBytes)
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 static OBJC_INLINE id objc_allocate_object(Class cls, int extra) 
     { return class_createInstance(cls, extra); }
 
@@ -225,5 +277,16 @@ static OBJC_INLINE void objc_registerThreadWithCollector() { }
 static OBJC_INLINE void objc_unregisterThreadWithCollector() { }
 static OBJC_INLINE void objc_assertRegisteredThreadWithCollector() { }
 
+/* defined(OBJC_NO_GC) */
 #endif
+
+
+#if TARGET_OS_EMBEDDED
+enum {
+    OBJC_GENERATIONAL = (1 << 0)
+};
+static OBJC_INLINE void objc_collect_if_needed(unsigned long options) __attribute__((deprecated));
+static OBJC_INLINE void objc_collect_if_needed(unsigned long options __unused) { }
+#endif
+
 #endif

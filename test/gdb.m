@@ -1,4 +1,16 @@
+// TEST_CFLAGS -Wno-deprecated-declarations
+
 #include "test.h"
+
+#if TARGET_OS_IPHONE
+
+int main()
+{
+    succeed(__FILE__);
+}
+
+#else
+
 #include <objc/objc-gdb.h>
 #include <objc/runtime.h>
 
@@ -24,28 +36,30 @@ int main()
     [Super class];
     // Now class should be realized
 
-    result = NXMapGet(gdb_objc_realized_classes, "Super");
+    result = (Class)NXMapGet(gdb_objc_realized_classes, "Super");
     testassert(result);
     testassert(result == [Super class]);
 
-    result = NXMapGet(gdb_objc_realized_classes, "DoesNotExist");
+    result = (Class)NXMapGet(gdb_objc_realized_classes, "DoesNotExist");
     testassert(!result);
 
 #else
 
     struct objc_class query;
-    struct objc_class *result;
+    Class result;
 
     query.name = "Super";
-    result = NXHashGet(_objc_debug_class_hash, &query);
+    result = (Class)NXHashGet(_objc_debug_class_hash, &query);
     testassert(result);
-    testassert(result == [Super class]);
+    testassert((id)result == [Super class]);
 
     query.name = "DoesNotExist";
-    result = NXHashGet(_objc_debug_class_hash, &query);
+    result = (Class)NXHashGet(_objc_debug_class_hash, &query);
     testassert(!result);
 
 #endif
 
     succeed(__FILE__);
 }
+
+#endif

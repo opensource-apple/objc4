@@ -157,6 +157,8 @@
 **********************************************************************/
 
 #include "objc-private.h"
+#include "objc-abi.h"
+#include "objc-auto.h"
 #include <objc/message.h>
 
 
@@ -197,6 +199,7 @@ static ObjCLogProc	objcMsgLogProc		= &LogObjCMessageSend;
 static int			objcMsgLogEnabled	= 0;
 #endif
 
+
 /***********************************************************************
 * Information about multi-thread support:
 *
@@ -211,11 +214,11 @@ static int			objcMsgLogEnabled	= 0;
 
 /***********************************************************************
 * object_getClass.
+* Locking: None. If you add locking, tell gdb (rdar://7516456).
 **********************************************************************/
 Class object_getClass(id obj)
 {
-    if (obj) return obj->isa;
-    else return Nil;
+    return _object_getClass(obj);
 }
 
 
@@ -229,6 +232,11 @@ Class object_setClass(id obj, Class cls)
         do {
             old = obj->isa;
         } while (! OSAtomicCompareAndSwapPtrBarrier(old, cls, (void*)&obj->isa));
+
+        if (old  &&  _class_instancesHaveAssociatedObjects(old)) {
+            _class_setInstancesHaveAssociatedObjects(cls);
+        }
+
         return old;
     }
     else return Nil;
@@ -240,7 +248,8 @@ Class object_setClass(id obj, Class cls)
 **********************************************************************/
 const char *object_getClassName(id obj)
 {
-    if (obj) return _class_getName(obj->isa);
+    Class isa = _object_getClass(obj);
+    if (isa) return _class_getName(isa);
     else return "nil";
 }
 
@@ -250,7 +259,7 @@ const char *object_getClassName(id obj)
 void *object_getIndexedIvars(id obj)
 {
     // ivars are tacked onto the end of the object
-    if (obj) return ((char *) obj) + _class_getInstanceSize(obj->isa);
+    if (obj) return ((char *) obj) + _class_getInstanceSize(_object_getClass(obj));
     else return NULL;
 }
 
@@ -260,11 +269,8 @@ Ivar object_setInstanceVariable(id obj, const char *name, void *value)
     Ivar ivar = NULL;
 
     if (obj && name) {
-        if ((ivar = class_getInstanceVariable(obj->isa, name))) {
-            objc_assign_ivar_internal(
-                             (id)value, 
-                             obj, 
-                             ivar_getOffset(ivar));
+        if ((ivar = class_getInstanceVariable(_object_getClass(obj), name))) {
+            object_setIvar(obj, ivar, (id)value);
         }
     }
     return ivar;
@@ -274,10 +280,8 @@ Ivar object_getInstanceVariable(id obj, const char *name, void **value)
 {
     if (obj && name) {
         Ivar ivar;
-        void **ivaridx;
-        if ((ivar = class_getInstanceVariable(obj->isa, name))) {
-            ivaridx = (void **)((char *)obj + ivar_getOffset(ivar));
-            if (value) *value = *ivaridx;
+        if ((ivar = class_getInstanceVariable(_object_getClass(obj), name))) {
+            if (value) *value = (void *)object_getIvar(obj, ivar);
             return ivar;
         }
     }
@@ -285,11 +289,70 @@ Ivar object_getInstanceVariable(id obj, const char *name, void **value)
     return NULL;
 }
 
+static BOOL is_scanned_offset(ptrdiff_t ivar_offset, const uint8_t *layout) {
+    ptrdiff_t index = 0, ivar_index = ivar_offset / sizeof(void*);
+    uint8_t byte;
+    while ((byte = *layout++)) {
+        unsigned skips = (byte >> 4);
+        unsigned scans = (byte & 0x0F);
+        index += skips;
+        while (scans--) {
+            if (index == ivar_index) return YES;
+            if (index > ivar_index) return NO;
+            ++index;
+        }
+    }
+    return NO;
+}
+
+// FIXME:  this could be optimized.
+
+static Class _ivar_getClass(Class cls, Ivar ivar) {
+    Class ivar_class = NULL;
+    const char *ivar_name = ivar_getName(ivar);
+    Ivar named_ivar = _class_getVariable(cls, ivar_name, &ivar_class);
+    if (named_ivar) {
+        // the same ivar name can appear multiple times along the superclass chain.
+        while (named_ivar != ivar && ivar_class != NULL) {
+            ivar_class = class_getSuperclass(ivar_class);
+            named_ivar = _class_getVariable(cls, ivar_getName(ivar), &ivar_class);
+        }
+    }
+    return ivar_class;
+}
 
 void object_setIvar(id obj, Ivar ivar, id value)
 {
-    if (obj  &&  ivar) {
-        objc_assign_ivar_internal(value, obj, ivar_getOffset(ivar));
+    if (obj && ivar) {
+        Class cls = _ivar_getClass(object_getClass(obj), ivar);
+        ptrdiff_t ivar_offset = ivar_getOffset(ivar);
+        // if this ivar is a member of an ARR compiled class, then issue the correct barrier according to the layout.
+        if (_class_usesAutomaticRetainRelease(cls)) {
+            // for ARR, layout strings are relative to the instance start.
+            uint32_t instanceStart = _class_getInstanceStart(cls);
+            id *location = (id *)((char *)obj + ivar_offset);
+            const uint8_t *weak_layout = class_getWeakIvarLayout(cls);
+            if (weak_layout && is_scanned_offset(ivar_offset - instanceStart, weak_layout)) {
+                // use the weak system to write to this variable.
+                objc_storeWeak(location, value);
+                return;
+            }
+            const uint8_t *strong_layout = class_getIvarLayout(cls);
+            if (strong_layout && is_scanned_offset(ivar_offset - instanceStart, strong_layout)) {
+                objc_storeStrong(location, value);
+                return;
+            }
+        }
+#if SUPPORT_GC
+        if (UseGC) {
+            // for GC, check for weak references.
+            const uint8_t *weak_layout = class_getWeakIvarLayout(cls);
+            if (weak_layout && is_scanned_offset(ivar_offset, weak_layout)) {
+                objc_assign_weak(value, (id *)((char *)obj + ivar_offset));
+            }
+        }
+#endif
+        objc_assign_ivar_internal(value, obj, ivar_offset);
     }
 }
 
@@ -297,7 +360,27 @@ void object_setIvar(id obj, Ivar ivar, id value)
 id object_getIvar(id obj, Ivar ivar)
 {
     if (obj  &&  ivar) {
-        id *idx = (id *)((char *)obj + ivar_getOffset(ivar));
+        Class cls = _object_getClass(obj);
+        ptrdiff_t ivar_offset = ivar_getOffset(ivar);
+        if (_class_usesAutomaticRetainRelease(cls)) {
+            // for ARR, layout strings are relative to the instance start.
+            uint32_t instanceStart = _class_getInstanceStart(cls);
+            const uint8_t *weak_layout = class_getWeakIvarLayout(cls);
+            if (weak_layout && is_scanned_offset(ivar_offset - instanceStart, weak_layout)) {
+                // use the weak system to read this variable.
+                id *location = (id *)((char *)obj + ivar_offset);
+                return objc_loadWeak(location);
+            }
+        }
+        id *idx = (id *)((char *)obj + ivar_offset);
+#if SUPPORT_GC
+        if (UseGC) {
+            const uint8_t *weak_layout = class_getWeakIvarLayout(cls);
+            if (weak_layout && is_scanned_offset(ivar_offset, weak_layout)) {
+                return objc_read_weak(idx);
+            }
+        }
+#endif
         return *idx;
     }
     return NULL;
@@ -318,7 +401,7 @@ static void object_cxxDestructFromClass(id obj, Class cls)
     // Call cls's dtor first, then superclasses's dtors.
 
     for ( ; cls != NULL; cls = _class_getSuperclass(cls)) {
-        if (!_class_hasCxxStructorsNoSuper(cls)) continue; 
+        if (!_class_hasCxxStructors(cls)) return; 
         dtor = (void(*)(id))
             lookupMethodInClassAndLoadCache(cls, SEL_cxx_destruct);
         if (dtor != (void(*)(id))&_objc_msgForward_internal) {
@@ -337,10 +420,11 @@ static void object_cxxDestructFromClass(id obj, Class cls)
 * Call C++ destructors on obj, if any.
 * Uses methodListLock and cacheUpdateLock. The caller must hold neither.
 **********************************************************************/
-__private_extern__ void object_cxxDestruct(id obj)
+PRIVATE_EXTERN void object_cxxDestruct(id obj)
 {
     if (!obj) return;
-    object_cxxDestructFromClass(obj, obj->isa);
+    if (OBJC_IS_TAGGED_PTR(obj)) return;
+    object_cxxDestructFromClass(obj, obj->isa);  // need not be object_getClass
 }
 
 
@@ -361,7 +445,12 @@ __private_extern__ void object_cxxDestruct(id obj)
 static BOOL object_cxxConstructFromClass(id obj, Class cls)
 {
     id (*ctor)(id);
-    Class supercls = _class_getSuperclass(cls);
+    Class supercls;
+
+    // Stop if neither this class nor any superclass has ctors.
+    if (!_class_hasCxxStructors(cls)) return YES;  // no ctor - ok
+
+    supercls = _class_getSuperclass(cls);
 
     // Call superclasses' ctors first, if any.
     if (supercls) {
@@ -370,7 +459,6 @@ static BOOL object_cxxConstructFromClass(id obj, Class cls)
     }
 
     // Find this class's ctor, if any.
-    if (!_class_hasCxxStructorsNoSuper(cls)) return YES;  // no ctor - ok
     ctor = (id(*)(id))lookupMethodInClassAndLoadCache(cls, SEL_cxx_construct);
     if (ctor == (id(*)(id))&_objc_msgForward_internal) return YES;  // no ctor - ok
     
@@ -395,10 +483,11 @@ static BOOL object_cxxConstructFromClass(id obj, Class cls)
 *   caught and discarded. Any partial construction is destructed.
 * Uses methodListLock and cacheUpdateLock. The caller must hold neither.
 **********************************************************************/
-__private_extern__ BOOL object_cxxConstruct(id obj)
+PRIVATE_EXTERN BOOL object_cxxConstruct(id obj)
 {
     if (!obj) return YES;
-    return object_cxxConstructFromClass(obj, obj->isa);
+    if (OBJC_IS_TAGGED_PTR(obj)) return YES;
+    return object_cxxConstructFromClass(obj, obj->isa);  // need not be object_getClass
 }
 
 
@@ -498,7 +587,7 @@ static Method _class_resolveInstanceMethod(Class cls, SEL sel)
 * the method added or NULL. 
 * Assumes the method doesn't exist already.
 **********************************************************************/
-__private_extern__ Method _class_resolveMethod(Class cls, SEL sel)
+PRIVATE_EXTERN Method _class_resolveMethod(Class cls, SEL sel)
 {
     Method meth = NULL;
 
@@ -579,7 +668,7 @@ Ivar class_getInstanceVariable(Class cls, const char *name)
 {
     if (!cls  ||  !name) return NULL;
 
-    return _class_getVariable(cls, name);
+    return _class_getVariable(cls, name, NULL);
 }
 
 
@@ -594,67 +683,14 @@ Ivar class_getClassVariable(Class cls, const char *name)
 }
 
 
-__private_extern__ Property 
-property_list_nth(const struct objc_property_list *plist, uint32_t i)
-{
-    return (Property)(i*plist->entsize + (char *)&plist->first);
-}
-
-__private_extern__ size_t 
-property_list_size(const struct objc_property_list *plist)
-{
-    return sizeof(struct objc_property_list) + (plist->count-1)*plist->entsize;
-}
-
-__private_extern__ Property *
-copyPropertyList(struct objc_property_list *plist, unsigned int *outCount)
-{
-    Property *result = NULL;
-    unsigned int count = 0;
-
-    if (plist) {
-        count = plist->count;
-    }
-
-    if (count > 0) {
-        unsigned int i;
-        result = malloc((count+1) * sizeof(Property));
-        
-        for (i = 0; i < count; i++) {
-            result[i] = property_list_nth(plist, i);
-        }
-        result[i] = NULL;
-    }
-
-    if (outCount) *outCount = count;
-    return result;
-}
-
-const char *property_getName(Property prop)
-{
-    return prop->name;
-}
-
-
-const char *property_getAttributes(Property prop)
-{
-    return prop->attributes;
-}
-
-
 /***********************************************************************
 * gdb_objc_class_changed
 * Tell gdb that a class changed. Currently used for OBJC2 ivar layouts only
+* Does nothing; gdb sets a breakpoint on it.
 **********************************************************************/
-void gdb_objc_class_changed(Class cls, unsigned long changes, const char *classname)
-{
-    // do nothing; gdb sets a breakpoint here to listen
-#if TARGET_OS_WIN32
-    __asm { }
-#else
-    asm("");
-#endif
-}
+BREAKPOINT_FUNCTION( 
+    void gdb_objc_class_changed(Class cls, unsigned long changes, const char *classname)
+);
 
 
 /***********************************************************************
@@ -666,6 +702,13 @@ void gdb_objc_class_changed(Class cls, unsigned long changes, const char *classn
 void _objc_flush_caches(Class cls)
 {
     flush_caches (cls, YES);
+
+    if (!cls) {
+        // collectALot if cls==nil
+        mutex_lock(&cacheUpdateLock);
+        _cache_collect(true);
+        mutex_unlock(&cacheUpdateLock);
+    }
 }
 
 
@@ -739,14 +782,14 @@ IMP class_getMethodImplementation_stret(Class cls, SEL sel)
 }
 
 
-// Ignored selectors get method->imp = &_objc_ignored_method
-__private_extern__ id _objc_ignored_method(id self, SEL _cmd) { return self; }
-
-
 /***********************************************************************
 * instrumentObjcMessageSends/logObjcMessageSends.
 **********************************************************************/
-#if defined(MESSAGE_LOGGING)
+#if !defined(MESSAGE_LOGGING)  &&  defined(__arm__)
+void	instrumentObjcMessageSends       (BOOL		flag)
+{
+}
+#elif defined(MESSAGE_LOGGING)
 static int	LogObjCMessageSend (BOOL			isClassMethod,
                                const char *	objectsClass,
                                const char *	implementingClass,
@@ -772,7 +815,7 @@ static int	LogObjCMessageSend (BOOL			isClassMethod,
             isClassMethod ? '+' : '-',
             objectsClass,
             implementingClass,
-            (char *) selector);
+            sel_getName(selector));
 
     static OSSpinLock lock = OS_SPINLOCK_INIT;
     OSSpinLockLock(&lock);
@@ -802,7 +845,7 @@ void	instrumentObjcMessageSends       (BOOL		flag)
     objcMsgLogEnabled = enabledValue;
 }
 
-__private_extern__ void	logObjcMessageSends      (ObjCLogProc	logProc)
+PRIVATE_EXTERN void	logObjcMessageSends      (ObjCLogProc	logProc)
 {
     if (logProc)
     {
@@ -826,7 +869,7 @@ __private_extern__ void	logObjcMessageSends      (ObjCLogProc	logProc)
 * cls is the method whose cache should be filled. 
 * implementer is the class that owns the implementation in question.
 **********************************************************************/
-__private_extern__ void
+PRIVATE_EXTERN void
 log_and_fill_cache(Class cls, Class implementer, Method meth, SEL sel)
 {
 #if defined(MESSAGE_LOGGING)
@@ -850,8 +893,12 @@ log_and_fill_cache(Class cls, Class implementer, Method meth, SEL sel)
 * This lookup avoids optimistic cache scan because the dispatcher 
 * already tried that.
 **********************************************************************/
-__private_extern__ IMP _class_lookupMethodAndLoadCache(Class cls, SEL sel)
-{
+PRIVATE_EXTERN IMP _class_lookupMethodAndLoadCache3(id obj, SEL sel, Class cls)
+{        
+    return lookUpMethod(cls, sel, YES/*initialize*/, NO/*cache*/);
+}
+PRIVATE_EXTERN IMP _class_lookupMethodAndLoadCache(Class cls, SEL sel)
+{        
     return lookUpMethod(cls, sel, YES/*initialize*/, NO/*cache*/);
 }
 
@@ -865,8 +912,8 @@ __private_extern__ IMP _class_lookupMethodAndLoadCache(Class cls, SEL sel)
 * May return _objc_msgForward_internal. IMPs destined for external use 
 *   must be converted to _objc_msgForward or _objc_msgForward_stret.
 **********************************************************************/
-__private_extern__ IMP lookUpMethod(Class cls, SEL sel, 
-                                    BOOL initialize, BOOL cache)
+PRIVATE_EXTERN IMP lookUpMethod(Class cls, SEL sel, 
+                                BOOL initialize, BOOL cache)
 {
     Class curClass;
     IMP methodPC = NULL;
@@ -890,6 +937,12 @@ __private_extern__ IMP lookUpMethod(Class cls, SEL sel,
     // with the old value after the cache flush on behalf of the category.
  retry:
     lockForMethodLookup();
+
+    // Ignore GC selectors
+    if (ignoreSelector(sel)) {
+        methodPC = _cache_addIgnoredEntry(cls, sel);
+        goto done;
+    }
 
     // Try this class's cache.
 
@@ -956,7 +1009,7 @@ __private_extern__ IMP lookUpMethod(Class cls, SEL sel,
     unlockForMethodLookup();
 
     // paranoia: look for ignored selectors with non-ignored implementations
-    assert(!(sel == (SEL)kIgnore  &&  methodPC != (IMP)&_objc_ignored_method));
+    assert(!(ignoreSelector(sel)  &&  methodPC != (IMP)&_objc_ignored_method));
 
     return methodPC;
 }
@@ -998,16 +1051,6 @@ static IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel)
 
 
 /***********************************************************************
-* _objc_create_zone.
-**********************************************************************/
-
-void *_objc_create_zone(void)
-{
-    return malloc_default_zone();
-}
-
-
-/***********************************************************************
 * _malloc_internal
 * _calloc_internal
 * _realloc_internal
@@ -1017,22 +1060,22 @@ void *_objc_create_zone(void)
 * _free_internal
 * Convenience functions for the internal malloc zone.
 **********************************************************************/
-__private_extern__ void *_malloc_internal(size_t size) 
+PRIVATE_EXTERN void *_malloc_internal(size_t size) 
 {
     return malloc_zone_malloc(_objc_internal_zone(), size);
 }
 
-__private_extern__ void *_calloc_internal(size_t count, size_t size) 
+PRIVATE_EXTERN void *_calloc_internal(size_t count, size_t size) 
 {
     return malloc_zone_calloc(_objc_internal_zone(), count, size);
 }
 
-__private_extern__ void *_realloc_internal(void *ptr, size_t size)
+PRIVATE_EXTERN void *_realloc_internal(void *ptr, size_t size)
 {
     return malloc_zone_realloc(_objc_internal_zone(), ptr, size);
 }
 
-__private_extern__ char *_strdup_internal(const char *str)
+PRIVATE_EXTERN char *_strdup_internal(const char *str)
 {
     size_t len;
     char *dup;
@@ -1043,8 +1086,13 @@ __private_extern__ char *_strdup_internal(const char *str)
     return dup;
 }
 
+PRIVATE_EXTERN uint8_t *_ustrdup_internal(const uint8_t *str)
+{
+    return (uint8_t *)_strdup_internal((char *)str);
+}
+
 // allocate a new string that concatenates s1+s2.
-__private_extern__ char *_strdupcat_internal(const char *s1, const char *s2)
+PRIVATE_EXTERN char *_strdupcat_internal(const char *s1, const char *s2)
 {
     size_t len1 = strlen(s1);
     size_t len2 = strlen(s2);
@@ -1054,22 +1102,27 @@ __private_extern__ char *_strdupcat_internal(const char *s1, const char *s2)
     return dup;
 }
 
-__private_extern__ void *_memdup_internal(const void *mem, size_t len)
+PRIVATE_EXTERN void *_memdup_internal(const void *mem, size_t len)
 {
     void *dup = malloc_zone_malloc(_objc_internal_zone(), len);
     memcpy(dup, mem, len);
     return dup;
 }
 
-__private_extern__ void _free_internal(void *ptr)
+PRIVATE_EXTERN void _free_internal(void *ptr)
 {
     malloc_zone_free(_objc_internal_zone(), ptr);
 }
 
-
-__private_extern__ Class _calloc_class(size_t size)
+PRIVATE_EXTERN size_t _malloc_size_internal(void *ptr)
 {
-#if !defined(NO_GC)
+    malloc_zone_t *zone = _objc_internal_zone();
+    return zone->size(zone, ptr);
+}
+
+PRIVATE_EXTERN Class _calloc_class(size_t size)
+{
+#if SUPPORT_GC
     if (UseGC) return (Class) malloc_zone_calloc(gc_zone, 1, size);
 #endif
     return (Class) _calloc_internal(1, size);
@@ -1108,24 +1161,6 @@ unsigned int method_getNumberOfArguments(Method m)
 }
 
 
-unsigned int method_getSizeOfArguments(Method m)
-{
-    OBJC_WARN_DEPRECATED;
-    if (!m) return 0;
-    return encoding_getSizeOfArguments(method_getTypeEncoding(m));
-}
-
-
-unsigned int method_getArgumentInfo(Method m, int arg,
-                                    const char **type, int *offset)
-{
-    OBJC_WARN_DEPRECATED;
-    if (!m) return 0;
-    return encoding_getArgumentInfo(method_getTypeEncoding(m), 
-                                    arg, type, offset);
-}
-
-
 void method_getReturnType(Method m, char *dst, size_t dst_len)
 {
     encoding_getReturnType(method_getTypeEncoding(m), dst, dst_len);
@@ -1160,16 +1195,15 @@ char * method_copyArgumentType(Method m, unsigned int index)
 * The new object's isa is set. Any C++ constructors are called.
 * Returns `bytes` if successful. Returns nil if `cls` or `bytes` is 
 *   NULL, or if C++ constructors fail.
+* Note: class_createInstance() and class_createInstances() preflight this.
 **********************************************************************/
-id objc_constructInstance(Class cls, void *bytes) 
+static id 
+_objc_constructInstance(Class cls, void *bytes) 
 {
-    id obj;
-
-    if (!cls  ||  !bytes) return nil;
-    obj = (id)bytes;
+    id obj = (id)bytes;
 
     // Set the isa pointer
-    obj->isa = cls;
+    obj->isa = cls;  // need not be object_setClass
 
     // Call C++ constructors, if any.
     if (!object_cxxConstruct(obj)) {
@@ -1181,105 +1215,91 @@ id objc_constructInstance(Class cls, void *bytes)
 }
 
 
-/***********************************************************************
-* objc_destructInstance
-* Destroys an instance without freeing memory. 
-* Any C++ destructors are called. Any associative references are removed.
-* Returns `obj`. Does nothing if `obj` is nil.
-**********************************************************************/
-void *objc_destructInstance(id obj) 
+id 
+objc_constructInstance(Class cls, void *bytes) 
 {
-    if (obj) {
-        object_cxxDestruct(obj);
-
-        // don't call this if the class has never had associative references.
-        if (_class_instancesHaveAssociatedObjects(obj->isa)) {
-            _object_remove_assocations(obj);
-        }
-    }
-
-    return obj;
+    if (!cls  ||  !bytes) return nil;
+    return _objc_constructInstance(cls, bytes);
 }
 
 
-/***********************************************************************
-* _internal_class_createInstanceFromZone.  Allocate an instance of the
-* specified class with the specified number of bytes for indexed
-* variables, in the specified zone.  The isa field is set to the
-* class, C++ default constructors are called, and all other fields are zeroed.
-**********************************************************************/
-__private_extern__ id 
-_internal_class_createInstanceFromZone(Class cls, size_t extraBytes,
-                                       void *zone)
+PRIVATE_EXTERN id
+_objc_constructOrFree(Class cls, void *bytes)
 {
-    void *bytes;
-    id obj;
-    size_t size;
-
-    // Can't create something for nothing
-    if (!cls) return nil;
-
-    // Allocate and initialize
-    size = _class_getInstanceSize(cls) + extraBytes;
-
-    // CF requires all objects be at least 16 bytes.
-    if (size < 16) size = 16;
-
-#if !defined(NO_GC)
-    if (UseGC) {
-        bytes = auto_zone_allocate_object(gc_zone, size,
-                                          AUTO_OBJECT_SCANNED, 0, 1);
-    } else 
-#endif
-    if (zone) {
-        bytes = malloc_zone_calloc (zone, 1, size);
-    } else {
-        bytes = calloc(1, size);
-    }
-    if (!bytes) return nil;
-
-    obj = objc_constructInstance(cls, bytes);
+    id obj = _objc_constructInstance(cls, bytes);
     if (!obj) {
-#if !defined(NO_GC)
+#if SUPPORT_GC
         if (UseGC) {
             auto_zone_retain(gc_zone, bytes);  // gc free expects rc==1
         }
 #endif
         free(bytes);
-        return nil;
     }
 
     return obj;
 }
 
 
-__private_extern__ id 
-_internal_object_dispose(id anObject) 
+/***********************************************************************
+* _class_createInstancesFromZone
+* Batch-allocating version of _class_createInstanceFromZone.
+* Attempts to allocate num_requested objects, each with extraBytes.
+* Returns the number of allocated objects (possibly zero), with 
+* the allocated pointers in *results.
+**********************************************************************/
+PRIVATE_EXTERN unsigned
+_class_createInstancesFromZone(Class cls, size_t extraBytes, void *zone, 
+                               id *results, unsigned num_requested)
 {
-    if (anObject==nil) return nil;
+    unsigned num_allocated;
+    if (!cls) return 0;
 
-    objc_destructInstance(anObject);
-    
-#if !defined(NO_GC)
+    size_t size = _class_getInstanceSize(cls) + extraBytes;
+    // CF requires all objects be at least 16 bytes.
+    if (size < 16) size = 16;
+
+#if SUPPORT_GC
     if (UseGC) {
-        auto_zone_retain(gc_zone, anObject); // gc free expects rc==1
+        num_allocated = 
+            auto_zone_batch_allocate(gc_zone, size, AUTO_OBJECT_SCANNED, 0, 1, 
+                                     (void**)results, num_requested);
     } else 
 #endif
     {
-#if !__OBJC2__
-        // only clobber isa for non-gc
-        anObject->isa = _objc_getFreedObjectClass (); 
-#endif
+        unsigned i;
+        num_allocated = 
+            malloc_zone_batch_malloc(zone ? zone : malloc_default_zone(), 
+                                     size, (void**)results, num_requested);
+        for (i = 0; i < num_allocated; i++) {
+            bzero(results[i], size);
+        }
     }
-    free(anObject);
-    return nil;
+
+    // Construct each object, and delete any that fail construction.
+
+    unsigned shift = 0;
+    unsigned i;
+    BOOL ctor = _class_hasCxxStructors(cls);
+    for (i = 0; i < num_allocated; i++) {
+        id obj = results[i];
+        if (ctor) obj = _objc_constructOrFree(cls, obj);
+        else if (obj) obj->isa = cls;  // need not be object_setClass
+
+        if (obj) {
+            results[i-shift] = obj;
+        } else {
+            shift++;
+        }
+    }
+
+    return num_allocated - shift;    
 }
 
 
 /***********************************************************************
 * inform_duplicate. Complain about duplicate class implementations.
 **********************************************************************/
-__private_extern__ void 
+PRIVATE_EXTERN void 
 inform_duplicate(const char *name, Class oldCls, Class cls)
 {
 #if TARGET_OS_WIN32
@@ -1295,4 +1315,260 @@ inform_duplicate(const char *name, Class oldCls, Class cls)
                   "Which one is undefined.",
                   name, oldName, newName);
 #endif
+}
+
+#if SUPPORT_TAGGED_POINTERS
+/***********************************************************************
+ * _objc_insert_tagged_isa
+ * Insert an isa into a particular slot in the tagged isa table.
+ * Will error & abort if slot already has an isa that is different.
+ **********************************************************************/
+void _objc_insert_tagged_isa(unsigned char slotNumber, Class isa) {
+    unsigned char actualSlotNumber = (slotNumber << 1) + 1;
+    Class previousIsa = _objc_tagged_isa_table[actualSlotNumber];
+    
+    if (actualSlotNumber & 0xF0) {
+        _objc_fatal("%s -- Slot number %uc is too large. Aborting.", __FUNCTION__, slotNumber);
+    }
+    
+    if (actualSlotNumber == 0) {
+        _objc_fatal("%s -- Slot number 0 doesn't make sense. Aborting.", __FUNCTION__);
+    }
+    
+    if (isa && previousIsa && (previousIsa != isa)) {
+        _objc_fatal("%s -- Tagged pointer table already had an item in that slot (%s). "
+                     "Not putting (%s) in table. Aborting instead",
+                    __FUNCTION__, class_getName(previousIsa), class_getName(isa));
+    }
+    _objc_tagged_isa_table[actualSlotNumber] = isa;
+}
+#endif
+
+
+PRIVATE_EXTERN const char *
+copyPropertyAttributeString(const objc_property_attribute_t *attrs,
+                            unsigned int count)
+{
+    char *result;
+    unsigned int i;
+    if (count == 0) return strdup("");
+    
+#ifndef NDEBUG
+    // debug build: sanitize input
+    for (i = 0; i < count; i++) {
+        assert(attrs[i].name);
+        assert(strlen(attrs[i].name) > 0);
+        assert(! strchr(attrs[i].name, ','));
+        assert(! strchr(attrs[i].name, '"'));
+        if (attrs[i].value) assert(! strchr(attrs[i].value, ','));
+    }
+#endif
+
+    size_t len = 0;
+    for (i = 0; i < count; i++) {
+        if (attrs[i].value) {
+            size_t namelen = strlen(attrs[i].name);
+            if (namelen > 1) namelen += 2;  // long names get quoted
+            len += namelen + strlen(attrs[i].value) + 1;
+        }
+    }
+
+    result = malloc(len + 1);
+    char *s = result;
+    for (i = 0; i < count; i++) {
+        if (attrs[i].value) {
+            size_t namelen = strlen(attrs[i].name);
+            if (namelen > 1) {
+                s += sprintf(s, "\"%s\"%s,", attrs[i].name, attrs[i].value);
+            } else {
+                s += sprintf(s, "%s%s,", attrs[i].name, attrs[i].value);
+            }
+        }
+    }
+
+    // remove trailing ',' if any
+    if (s > result) s[-1] = '\0';
+
+    return result;
+}
+
+/*
+  Property attribute string format:
+  - Comma-separated name-value pairs. 
+  - Name and value may not contain ,
+  - Name may not contain "
+  - Value may be empty
+  - Name is single char, value follows
+  - OR Name is double-quoted string of 2+ chars, value follows
+*/
+static unsigned int 
+iteratePropertyAttributes(const char *attrs, 
+                          BOOL (*fn)(unsigned int index, 
+                                     void *ctx1, void *ctx2, 
+                                     const char *name, size_t nlen, 
+                                     const char *value, size_t vlen), 
+                          void *ctx1, void *ctx2)
+{
+    if (!attrs) return 0;
+
+#ifndef NDEBUG
+    const char *attrsend = attrs + strlen(attrs);
+#endif
+    unsigned int attrcount = 0;
+
+    while (*attrs) {
+        // Find the next comma-separated attribute
+        const char *start = attrs;
+        const char *end = start + strcspn(attrs, ",");
+
+        // Move attrs past this attribute and the comma (if any)
+        attrs = *end ? end+1 : end;
+
+        assert(attrs <= attrsend);
+        assert(start <= attrsend);
+        assert(end <= attrsend);
+        
+        // Skip empty attribute
+        if (start == end) continue;
+
+        // Process one non-empty comma-free attribute [start,end)
+        const char *nameStart;
+        const char *nameEnd;
+
+        assert(start < end);
+        assert(*start);
+        if (*start != '\"') {
+            // single-char short name
+            nameStart = start;
+            nameEnd = start+1;
+            start++;
+        }
+        else {
+            // double-quoted long name
+            nameStart = start+1;
+            nameEnd = nameStart + strcspn(nameStart, "\",");
+            start++;                       // leading quote
+            start += nameEnd - nameStart;  // name
+            if (*start == '\"') start++;   // trailing quote, if any
+        }
+
+        // Process one possibly-empty comma-free attribute value [start,end)
+        const char *valueStart;
+        const char *valueEnd;
+
+        assert(start <= end);
+
+        valueStart = start;
+        valueEnd = end;
+
+        BOOL more = (*fn)(attrcount, ctx1, ctx2, 
+                          nameStart, nameEnd-nameStart, 
+                          valueStart, valueEnd-valueStart);
+        attrcount++;
+        if (!more) break;
+    }
+
+    return attrcount;
+}
+
+
+static BOOL 
+copyOneAttribute(unsigned int index, void *ctxa, void *ctxs, 
+                 const char *name, size_t nlen, const char *value, size_t vlen)
+{
+    objc_property_attribute_t **ap = (objc_property_attribute_t**)ctxa;
+    char **sp = (char **)ctxs;
+
+    objc_property_attribute_t *a = *ap;
+    char *s = *sp;
+
+    a->name = s;
+    memcpy(s, name, nlen);
+    s += nlen;
+    *s++ = '\0';
+    
+    a->value = s;
+    memcpy(s, value, vlen);
+    s += vlen;
+    *s++ = '\0';
+
+    a++;
+    
+    *ap = a;
+    *sp = s;
+
+    return YES;
+}
+
+                 
+PRIVATE_EXTERN objc_property_attribute_t *
+copyPropertyAttributeList(const char *attrs, unsigned int *outCount)
+{
+    if (!attrs) {
+        if (outCount) *outCount = 0;
+        return NULL;
+    }
+
+    // Result size:
+    //   number of commas plus 1 for the attributes (upper bound)
+    //   plus another attribute for the attribute array terminator
+    //   plus strlen(attrs) for name/value string data (upper bound)
+    //   plus count*2 for the name/value string terminators (upper bound)
+    unsigned int attrcount = 1;
+    const char *s;
+    for (s = attrs; s && *s; s++) {
+        if (*s == ',') attrcount++;
+    }
+
+    size_t size = 
+        attrcount * sizeof(objc_property_attribute_t) + 
+        sizeof(objc_property_attribute_t) + 
+        strlen(attrs) + 
+        attrcount * 2;
+    objc_property_attribute_t *result = calloc(size, 1);
+
+    objc_property_attribute_t *ra = result;
+    char *rs = (char *)(ra+attrcount+1);
+
+    attrcount = iteratePropertyAttributes(attrs, copyOneAttribute, &ra, &rs);
+
+    assert((uint8_t *)(ra+1) <= (uint8_t *)result+size);
+    assert((uint8_t *)rs <= (uint8_t *)result+size);
+
+    if (attrcount == 0) {
+        free(result);
+        result = NULL;
+    }
+
+    if (outCount) *outCount = attrcount;
+    return result;
+}
+
+
+static BOOL 
+findOneAttribute(unsigned int index, void *ctxa, void *ctxs, 
+                 const char *name, size_t nlen, const char *value, size_t vlen)
+{
+    const char *query = (char *)ctxa;
+    char **resultp = (char **)ctxs;
+
+    if (strlen(query) == nlen  &&  0 == strncmp(name, query, nlen)) {
+        char *result = calloc(vlen+1, 1);
+        memcpy(result, value, vlen);
+        result[vlen] = '\0';
+        *resultp = result;
+        return NO;
+    }
+
+    return YES;
+}
+
+PRIVATE_EXTERN
+char *copyPropertyAttributeValue(const char *attrs, const char *name)
+{
+    char *result = NULL;
+
+    iteratePropertyAttributes(attrs, findOneAttribute, (void*)name, &result);
+
+    return result;
 }

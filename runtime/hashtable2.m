@@ -52,7 +52,7 @@ static unsigned log2u (unsigned x) { return (x<2) ? 0 : log2u (x>>1)+1; };
 
 #define	PTRSIZE		sizeof(void *)
 
-#ifdef NO_ZONES
+#if !SUPPORT_ZONES
 #   define	DEFAULT_ZONE	 NULL
 #   define	ZONE_FROM_PTR(p) NULL
 #   define	ALLOCTABLE(z)	((NXHashTable *) malloc (sizeof (NXHashTable)))
@@ -66,7 +66,7 @@ static unsigned log2u (unsigned x) { return (x<2) ? 0 : log2u (x>>1)+1; };
 #   define	ALLOCPAIRS(z,nb) ((const void **) malloc_zone_calloc (z, nb, sizeof (void *)))
 #endif
 
-#ifdef NO_MOD
+#if !SUPPORT_MOD
     /* nbBuckets must be a power of 2 */
 #   define BUCKETOF(table, data) (((HashBucket *)table->buckets)+((*table->prototype->hash)(table->info, data) & (table->nbBuckets-1)))
 #   define GOOD_CAPACITY(c) (c <= 1 ? 1 : 1 << (log2u (c-1)+1))
@@ -107,7 +107,7 @@ static NXHashTablePrototype protoPrototype = {
     hashPrototype, isEqualPrototype, NXNoEffectFree, 0
     };
 
-static NXHashTable *prototypes NOBSS = NULL;
+static NXHashTable *prototypes = NULL;
 	/* table of all prototypes */
 
 static void bootstrap (void) {
@@ -283,11 +283,11 @@ void *NXHashGet (NXHashTable *table, const void *data) {
     return NULL;
     }
 
-__private_extern__ unsigned _NXHashCapacity (NXHashTable *table) {
+PRIVATE_EXTERN unsigned _NXHashCapacity (NXHashTable *table) {
     return table->nbBuckets;
     }
 
-__private_extern__ void _NXHashRehashToCapacity (NXHashTable *table, unsigned newCapacity) {
+PRIVATE_EXTERN void _NXHashRehashToCapacity (NXHashTable *table, unsigned newCapacity) {
     /* Rehash: we create a pseudo table pointing really to the old guys,
     extend self, copy the old pairs, and free the pseudo table */
     NXHashTable	*old;
@@ -632,7 +632,7 @@ NXAtom NXUniqueStringWithLength (const char *buffer, int length) {
     };
 
 char *NXCopyStringBufferFromZone (const char *str, void *z) {
-#ifdef NO_ZONES
+#if !SUPPORT_ZONES
     return strdup(str);
 #else
     return strcpy ((char *) malloc_zone_malloc(z, strlen (str) + 1), str);

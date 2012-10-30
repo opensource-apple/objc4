@@ -1,8 +1,13 @@
+// TEST_CFLAGS -Wno-deprecated-declarations
+
 #include "test.h"
 
 #include <string.h>
-#include <objc/Protocol.h>
 #include <objc/objc-runtime.h>
+
+#if !__OBJC2__
+#include <objc/Protocol.h>
+#endif
 
 @protocol Proto1 
 +proto1ClassMethod;
@@ -52,7 +57,7 @@
 int main()
 {
     Class cls;
-    Protocol **list;
+    Protocol * const *list;
     Protocol *protocol, *empty;
 #if !__OBJC2__
     struct objc_method_description *desc;
@@ -134,7 +139,7 @@ int main()
     testassert(count == 1);
     testassert(protocol_isEqual(list[0], @protocol(Proto2)));
     testassert(!list[1]);
-    free(list);    
+    free((void*)list);    
 
     count = 100;
     cls = objc_getClass("Super");
@@ -144,7 +149,7 @@ int main()
     testassert(list[count] == NULL);
     testassert(count == 1);
     testassert(0 == strcmp(protocol_getName(list[0]), "Proto1"));
-    free(list);
+    free((void*)list);
 
     count = 100;
     cls = objc_getClass("SuperNoProtocols");
@@ -170,7 +175,7 @@ int main()
     testassert(cls);
     list = class_copyProtocolList(cls, NULL);
     testassert(list);
-    free(list);
+    free((void*)list);
 
     count = 100;
     list = class_copyProtocolList(NULL, &count);
@@ -188,7 +193,7 @@ int main()
     testassert(count == 1);
     testassert(0 == strcmp(protocol_getName(list[0]), "Proto4"));
     testassert(list[1] == NULL);
-    free(list);
+    free((void*)list);
 
     count = 100;
     proplist = class_copyPropertyList(cls, &count);
@@ -196,7 +201,7 @@ int main()
     testassert(count == 1);
     testassert(0 == strcmp(property_getName(proplist[0]), "i"));
     testassert(proplist[1] == NULL);
-    free(proplist);    
+    free(proplist);
 
     succeed(__FILE__);
 }

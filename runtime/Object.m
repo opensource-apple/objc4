@@ -50,7 +50,6 @@
 #import <string.h> 
 #import <malloc/malloc.h>
 
-#define OLD 1
 #import "Object.h"
 #import "Protocol.h"
 #import "objc-runtime.h"

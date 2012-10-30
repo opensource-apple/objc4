@@ -74,13 +74,13 @@ compress_layout(const uint8_t *bits, size_t bitmap_bits, BOOL weak)
 
         // Count one range each of skip and scan.
         while (i < bitmap_bits) {
-            uint8_t bit = (bits[i/8] >> (i % 8)) & 1;
+            uint8_t bit = (uint8_t)((bits[i/8] >> (i % 8)) & 1);
             if (bit) break;
             i++;
             skip++;
         }
         while (i < bitmap_bits) {
-            uint8_t bit = (bits[i/8] >> (i % 8)) & 1;
+            uint8_t bit = (uint8_t)((bits[i/8] >> (i % 8)) & 1);
             if (!bit) break;
             i++;
             scan++;
@@ -95,7 +95,7 @@ compress_layout(const uint8_t *bits, size_t bitmap_bits, BOOL weak)
             skip -= 0xf;
         }
         if (skip || scan) {
-            *l = skip << 4;    // NOT incremented - merges with scan
+            *l = (uint8_t)(skip << 4);    // NOT incremented - merges with scan
             while (scan > 0xf) {
                 *l++ |= 0x0f;  // May merge with short skip; must calloc
                 scan -= 0xf;
@@ -151,15 +151,34 @@ static void move_bits(layout_bitmap bits, size_t src, size_t dst,
                       size_t count)
 {
     // fixme optimize for byte/word at a time
-    // Copy backwards in case of overlap
-    assert(dst >= src);
-    while (count--) {
-        size_t srcbit = src + count;
-        size_t dstbit = dst + count;
-        if (bits.bits[srcbit/8] & (1 << (srcbit % 8))) {
-            bits.bits[dstbit/8] |= 1 << (dstbit % 8);
-        } else {
-            bits.bits[dstbit/8] &= ~(1 << (dstbit % 8));
+
+    if (dst == src) {
+        return;
+    }
+    else if (dst > src) {
+        // Copy backwards in case of overlap
+        size_t pos = count;
+        while (pos--) {
+            size_t srcbit = src + pos;
+            size_t dstbit = dst + pos;
+            if (bits.bits[srcbit/8] & (1 << (srcbit % 8))) {
+                bits.bits[dstbit/8] |= 1 << (dstbit % 8);
+            } else {
+                bits.bits[dstbit/8] &= ~(1 << (dstbit % 8));
+            }
+        }
+    }
+    else {
+        // Copy forwards in case of overlap
+        size_t pos;
+        for (pos = 0; pos < count; pos++) {
+            size_t srcbit = src + pos;
+            size_t dstbit = dst + pos;
+            if (bits.bits[srcbit/8] & (1 << (srcbit % 8))) {
+                bits.bits[dstbit/8] |= 1 << (dstbit % 8);
+            } else {
+                bits.bits[dstbit/8] &= ~(1 << (dstbit % 8));
+            }
         }
     }
 }
@@ -192,7 +211,7 @@ static void decompress_layout(const unsigned char *layout_string, layout_bitmap 
 *   spans an instance size of layoutStringSize); the rest is zero-filled.
 * The returned bitmap must be freed with layout_bitmap_free().
 **********************************************************************/
-__private_extern__ layout_bitmap 
+PRIVATE_EXTERN layout_bitmap 
 layout_bitmap_create(const unsigned char *layout_string,
                      size_t layoutStringInstanceSize, 
                      size_t instanceSize, BOOL weak)
@@ -220,20 +239,60 @@ layout_bitmap_create(const unsigned char *layout_string,
     return result;
 }
 
-__private_extern__ void 
+
+/***********************************************************************
+ * layout_bitmap_create_empty
+ * Allocate a layout bitmap.
+ * The new bitmap spans the given instance size bytes.
+ * The bitmap is empty, to represent an object whose ivars are completely unscanned.
+ * The returned bitmap must be freed with layout_bitmap_free().
+ **********************************************************************/
+PRIVATE_EXTERN layout_bitmap
+layout_bitmap_create_empty(size_t instanceSize, BOOL weak)
+{
+    layout_bitmap result;
+    size_t words = instanceSize / sizeof(id);
+    
+    result.weak = weak;
+    result.bitCount = words;
+    result.bitsAllocated = words;
+    result.bits = _calloc_internal((words+7)/8, 1);
+
+    return result;
+}
+
+PRIVATE_EXTERN void 
 layout_bitmap_free(layout_bitmap bits)
 {
     if (bits.bits) _free_internal(bits.bits);
 }
 
-__private_extern__ const unsigned char * 
+PRIVATE_EXTERN const unsigned char * 
 layout_string_create(layout_bitmap bits)
 {
-    return compress_layout(bits.bits, bits.bitCount, bits.weak);
+    const unsigned char *result =
+        compress_layout(bits.bits, bits.bitCount, bits.weak);
+
+#ifndef NDEBUG
+    // paranoia: cycle to bitmap and back to string again, and compare
+    layout_bitmap check = layout_bitmap_create(result, bits.bitCount*sizeof(id), 
+                                               bits.bitCount*sizeof(id), bits.weak);
+    unsigned char *result2 = 
+        compress_layout(check.bits, check.bitCount, check.weak);
+    if (result != result2  &&  0 != strcmp((char*)result, (char *)result2)) {
+        layout_bitmap_print(bits);
+        layout_bitmap_print(check);
+        _objc_fatal("libobjc bug: mishandled layout bitmap");
+    }
+    free(result2);
+    layout_bitmap_free(check);
+#endif
+
+    return result;
 }
 
 
-__private_extern__ void
+PRIVATE_EXTERN void
 layout_bitmap_set_ivar(layout_bitmap bits, const char *type, size_t offset)
 {
     // fixme only handles some types
@@ -243,6 +302,7 @@ layout_bitmap_set_ivar(layout_bitmap bits, const char *type, size_t offset)
     if (type[0] == '@'  ||  0 == strcmp(type, "^@")) {
         // id
         // id *
+        // Block ("@?")
         set_bits(bits, bit, 1);
     } 
     else if (type[0] == '[') {
@@ -265,7 +325,7 @@ layout_bitmap_set_ivar(layout_bitmap bits, const char *type, size_t offset)
 * Expand a layout bitmap to span newCount bits. 
 * The new bits are undefined.
 **********************************************************************/
-__private_extern__ void 
+PRIVATE_EXTERN void 
 layout_bitmap_grow(layout_bitmap *bits, size_t newCount)
 {
     if (bits->bitCount >= newCount) return;
@@ -289,7 +349,7 @@ layout_bitmap_grow(layout_bitmap *bits, size_t newCount)
 * The bitmap is expanded and bitCount updated if necessary.
 * newPos >= oldPos.
 **********************************************************************/
-__private_extern__ void
+PRIVATE_EXTERN void
 layout_bitmap_slide(layout_bitmap *bits, size_t oldPos, size_t newPos)
 {
     size_t shift;
@@ -307,13 +367,39 @@ layout_bitmap_slide(layout_bitmap *bits, size_t oldPos, size_t newPos)
 
 
 /***********************************************************************
+* layout_bitmap_slide_anywhere
+* Slide the end of a layout bitmap relative to the start.
+* Like layout_bitmap_slide, but can slide backwards too.
+* The end of the bitmap is truncated.
+**********************************************************************/
+PRIVATE_EXTERN void
+layout_bitmap_slide_anywhere(layout_bitmap *bits, size_t oldPos, size_t newPos)
+{
+    size_t shift;
+    size_t count;
+
+    if (oldPos == newPos) return;
+
+    if (oldPos < newPos) {
+        layout_bitmap_slide(bits, oldPos, newPos);
+        return;
+    } 
+
+    shift = oldPos - newPos;
+    count = bits->bitCount - oldPos;
+    move_bits(*bits, oldPos, newPos, count);  // slide
+    bits->bitCount -= shift;
+}
+
+
+/***********************************************************************
 * layout_bitmap_splat
 * Pastes the contents of bitmap src to the start of bitmap dst.
 * dst bits between the end of src and oldSrcInstanceSize are zeroed.
 * dst must be at least as long as src.
 * Returns YES if any of dst's bits were changed.
 **********************************************************************/
-__private_extern__ BOOL
+PRIVATE_EXTERN BOOL
 layout_bitmap_splat(layout_bitmap dst, layout_bitmap src, 
                     size_t oldSrcInstanceSize)
 {
@@ -352,7 +438,7 @@ layout_bitmap_splat(layout_bitmap dst, layout_bitmap src,
 * dst must be at least as long as src.
 * Returns YES if any of dst's bits were changed.
 **********************************************************************/
-__private_extern__ BOOL
+PRIVATE_EXTERN BOOL
 layout_bitmap_or(layout_bitmap dst, layout_bitmap src, const char *msg)
 {
     BOOL changed = NO;
@@ -383,7 +469,7 @@ layout_bitmap_or(layout_bitmap dst, layout_bitmap src, const char *msg)
 * dst must be at least as long as src.
 * Returns YES if any of dst's bits were changed.
 **********************************************************************/
-__private_extern__ BOOL
+PRIVATE_EXTERN BOOL
 layout_bitmap_clear(layout_bitmap dst, layout_bitmap src, const char *msg)
 {
     BOOL changed = NO;
@@ -408,18 +494,17 @@ layout_bitmap_clear(layout_bitmap dst, layout_bitmap src, const char *msg)
 }
 
 
-__private_extern__ void
+PRIVATE_EXTERN void
 layout_bitmap_print(layout_bitmap bits)
 {
     size_t i;
     printf("%zu: ", bits.bitCount);
     for (i = 0; i < bits.bitCount; i++) {
         int set = bits.bits[i/8] & (1 << (i % 8));
-        printf("%c", set ? '#' : '_');
+        printf("%c", set ? '#' : '.');
     }
     printf("\n");
 }
-
 
 #if 0
 // The code below may be useful when interpreting ivar types more precisely.

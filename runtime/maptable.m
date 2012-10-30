@@ -50,13 +50,16 @@ typedef struct _MapPair {
 
 static unsigned log2u(unsigned x) { return (x<2) ? 0 : log2u(x>>1)+1; };
 
-static INLINE unsigned exp2m1(unsigned x) { return (1 << x) - 1; };
+static INLINE unsigned exp2u(unsigned x) { return (1 << x); };
 
-/* iff necessary this modulo can be optimized since the nbBuckets is of the form 2**n-1 */
+static INLINE unsigned xorHash(unsigned hash) { 
+    unsigned xored = (hash & 0xffff) ^ (hash >> 16);
+    return ((xored * 65521) + hash);
+}
+
 static INLINE unsigned bucketOf(NXMapTable *table, const void *key) {
     unsigned	hash = (table->prototype->hash)(table, key);
-    unsigned	xored = (hash & 0xffff) ^ (hash >> 16);
-    return ((xored * 65521) + hash) % table->nbBuckets;
+    return hash & table->nbBucketsMinusOne;
 }
 
 static INLINE int isEqual(NXMapTable *table, const void *key1, const void *key2) {
@@ -64,7 +67,7 @@ static INLINE int isEqual(NXMapTable *table, const void *key1, const void *key2)
 }
 
 static INLINE unsigned nextIndex(NXMapTable *table, unsigned index) {
-    return (index+1 >= table->nbBuckets) ? 0 : index+1;
+    return (index + 1) & table->nbBucketsMinusOne;
 }
 
 static INLINE void *allocBuckets(void *z, unsigned nb) {
@@ -113,8 +116,8 @@ NXMapTable *NXCreateMapTableFromZone(NXMapTablePrototype prototype, unsigned cap
     	(void)NXHashInsert(prototypes, proto);
     }
     table->prototype = proto; table->count = 0;
-    table->nbBuckets = exp2m1(log2u(capacity)+1);
-    table->buckets = allocBuckets(z, table->nbBuckets);
+    table->nbBucketsMinusOne = exp2u(log2u(capacity)+1) - 1;
+    table->buckets = allocBuckets(z, table->nbBucketsMinusOne + 1);
     return table;
 }
 
@@ -131,7 +134,7 @@ void NXFreeMapTable(NXMapTable *table) {
 void NXResetMapTable(NXMapTable *table) {
     MapPair	*pairs = table->buckets;
     void	(*freeProc)(struct _NXMapTable *, void *, void *) = table->prototype->free;
-    unsigned	index = table->nbBuckets;
+    unsigned	index = table->nbBucketsMinusOne + 1;
     while (index--) {
 	if (pairs->key != NX_MAPNOTAKEY) {
 	    freeProc(table, (void *)pairs->key, (void *)pairs->value);
@@ -158,24 +161,17 @@ BOOL NXCompareMapTables(NXMapTable *table1, NXMapTable *table2) {
 
 unsigned NXCountMapTable(NXMapTable *table) { return table->count; }
 
-static int mapSearch = 0;
-static int mapSearchHit = 0;
-static int mapSearchLoop = 0;
-
 static INLINE void *_NXMapMember(NXMapTable *table, const void *key, void **value) {
     MapPair	*pairs = table->buckets;
     unsigned	index = bucketOf(table, key);
     MapPair	*pair = pairs + index;
     if (pair->key == NX_MAPNOTAKEY) return NX_MAPNOTAKEY;
-    mapSearch ++;
     if (isEqual(table, pair->key, key)) {
 	*value = (void *)pair->value;
-	mapSearchHit ++;
 	return (void *)pair->key;
     } else {
 	unsigned	index2 = index;
 	while ((index2 = nextIndex(table, index2)) != index) {
-	    mapSearchLoop ++;
 	    pair = pairs + index2;
 	    if (pair->key == NX_MAPNOTAKEY) return NX_MAPNOTAKEY;
 	    if (isEqual(table, pair->key, key)) {
@@ -196,19 +192,16 @@ void *NXMapGet(NXMapTable *table, const void *key) {
     return (_NXMapMember(table, key, &value) != NX_MAPNOTAKEY) ? value : NULL;
 }
 
-static int mapRehash = 0;
-static int mapRehashSum = 0;
-
 static void _NXMapRehash(NXMapTable *table) {
     MapPair	*pairs = table->buckets;
     MapPair	*pair = pairs;
-    unsigned	index = table->nbBuckets;
+    unsigned	numBuckets = table->nbBucketsMinusOne + 1;
+    unsigned	index = numBuckets;
     unsigned	oldCount = table->count;
-    table->nbBuckets += table->nbBuckets + 1; /* 2 times + 1 */
+    
+    table->nbBucketsMinusOne = 2 * numBuckets - 1;
     table->count = 0; 
-    table->buckets = allocBuckets(malloc_zone_from_ptr(table), table->nbBuckets);
-    mapRehash ++;
-    mapRehashSum += table->count;
+    table->buckets = allocBuckets(malloc_zone_from_ptr(table), table->nbBucketsMinusOne + 1);
     while (index--) {
 	if (pair->key != NX_MAPNOTAKEY) {
 	    (void)NXMapInsert(table, pair->key, pair->value);
@@ -220,10 +213,6 @@ static void _NXMapRehash(NXMapTable *table) {
     free(pairs); 
 }
 
-static int mapInsert = 0;
-static int mapInsertHit = 0;
-static int mapInsertLoop = 0;
-
 void *NXMapInsert(NXMapTable *table, const void *key, const void *value) {
     MapPair	*pairs = table->buckets;
     unsigned	index = bucketOf(table, key);
@@ -232,44 +221,32 @@ void *NXMapInsert(NXMapTable *table, const void *key, const void *value) {
 	_objc_inform("*** NXMapInsert: invalid key: -1\n");
 	return NULL;
     }
-    mapInsert ++;
+
+    unsigned numBuckets = table->nbBucketsMinusOne + 1;
+
     if (pair->key == NX_MAPNOTAKEY) {
-	mapInsertHit ++;
 	pair->key = key; pair->value = value;
 	table->count++;
+	if (table->count * 4 > numBuckets * 3) _NXMapRehash(table);
 	return NULL;
     }
+    
     if (isEqual(table, pair->key, key)) {
 	const void	*old = pair->value;
-	mapInsertHit ++;
 	if (old != value) pair->value = value;/* avoid writing unless needed! */
 	return (void *)old;
-    } else if (table->count == table->nbBuckets) {
+    } else if (table->count == numBuckets) {
 	/* no room: rehash and retry */
 	_NXMapRehash(table);
 	return NXMapInsert(table, key, value);
     } else {
 	unsigned	index2 = index;
 	while ((index2 = nextIndex(table, index2)) != index) {
-	    mapInsertLoop ++;
 	    pair = pairs + index2;
 	    if (pair->key == NX_MAPNOTAKEY) {
-    #if INSERT_TAIL
               pair->key = key; pair->value = value;
-    #else
-              MapPair         current = {key, value};
-              index2 = index;
-              while (current.key != NX_MAPNOTAKEY) {
-                  MapPair             temp;
-                  pair = pairs + index2;
-                  temp = *pair;
-                  *pair = current;
-                  current = temp;
-                  index2 = nextIndex(table, index2);
-              }
-    #endif
 		table->count++;
-		if (table->count * 4 > table->nbBuckets * 3) _NXMapRehash(table);
+		if (table->count * 4 > numBuckets * 3) _NXMapRehash(table);
 		return NULL;
 	    }
 	    if (isEqual(table, pair->key, key)) {
@@ -331,7 +308,7 @@ void *NXMapRemove(NXMapTable *table, const void *key) {
 
 NXMapState NXInitMapState(NXMapTable *table) {
     NXMapState	state;
-    state.index = table->nbBuckets;
+    state.index = table->nbBucketsMinusOne + 1;
     return state;
 }
     
@@ -353,7 +330,7 @@ int NXNextMapState(NXMapTable *table, NXMapState *state, const void **key, const
 * Like NXMapInsert, but strdups the key if necessary.
 * Used to prevent stale pointers when bundles are unloaded.
 **********************************************************************/
-__private_extern__ void *NXMapKeyCopyingInsert(NXMapTable *table, const void *key, const void *value)
+PRIVATE_EXTERN void *NXMapKeyCopyingInsert(NXMapTable *table, const void *key, const void *value)
 {
     void *realKey; 
     void *realValue = NULL;
@@ -373,7 +350,7 @@ __private_extern__ void *NXMapKeyCopyingInsert(NXMapTable *table, const void *ke
 * Like NXMapRemove, but frees the existing key if necessary.
 * Used to prevent stale pointers when bundles are unloaded.
 **********************************************************************/
-__private_extern__ void *NXMapKeyFreeingRemove(NXMapTable *table, const void *key)
+PRIVATE_EXTERN void *NXMapKeyFreeingRemove(NXMapTable *table, const void *key)
 {
     void *realKey;
     void *realValue = NULL;
@@ -393,7 +370,11 @@ __private_extern__ void *NXMapKeyFreeingRemove(NXMapTable *table, const void *ke
 /****		Conveniences		*************************************/
 
 static unsigned _mapPtrHash(NXMapTable *table, const void *key) {
-    return (unsigned)((((uintptr_t) key) >> (sizeof(uintptr_t)/2*8)) ^ ((uintptr_t) key));
+#ifdef __LP64__
+    return ((uintptr_t)key) >> 3;
+#else
+    return ((uintptr_t)key) >> 2;
+#endif
 }
     
 static unsigned _mapStrHash(NXMapTable *table, const void *key) {
@@ -411,7 +392,7 @@ static unsigned _mapStrHash(NXMapTable *table, const void *key) {
 	if (*s == '\0') break;
 	hash ^= *s++ << 24;
     }
-    return hash;
+    return xorHash(hash);
 }
     
 static int _mapPtrIsEqual(NXMapTable *table, const void *key1, const void *key2) {

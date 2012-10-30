@@ -31,19 +31,15 @@
 #include <mach-o/dyld.h>
 #include <mach-o/ldsyms.h>
 
-#define OLD 1
 #import "Protocol.h"
 #import "objc-private.h"
+#import "objc-runtime-old.h"
 
-
-/* some forward declarations */
-
-#if !__OBJC2__
-__private_extern__ struct objc_method_description * lookup_protocol_method(Protocol *proto, SEL aSel, BOOL isRequiredMethod, BOOL isInstanceMethod);
-#else
-__private_extern__ Method _protocol_getMethod(Protocol *p, SEL sel, BOOL isRequiredMethod, BOOL isInstanceMethod);
-#endif
-
+PRIVATE_EXTERN
+@interface __IncompleteProtocol { id isa; } @end
+@implementation __IncompleteProtocol 
++(void) initialize { } 
+@end
 
 @implementation Protocol 
 
@@ -66,7 +62,8 @@ typedef struct {
 - (struct objc_method_description *) descriptionForInstanceMethod:(SEL)aSel
 {
 #if !__OBJC2__
-    return lookup_protocol_method(self,aSel, YES/*required*/, YES/*instance*/);
+    return lookup_protocol_method((struct old_protocol *)self, aSel, 
+                                  YES/*required*/, YES/*instance*/);
 #else
     return method_getDescription(_protocol_getMethod(self, aSel, YES, YES));
 #endif
@@ -75,7 +72,8 @@ typedef struct {
 - (struct objc_method_description *) descriptionForClassMethod:(SEL)aSel
 {
 #if !__OBJC2__
-    return lookup_protocol_method(self, aSel, YES/*required*/, NO/*instance*/);
+    return lookup_protocol_method((struct old_protocol *)self, aSel, 
+                                  YES/*required*/, NO/*instance*/);
 #else
     return method_getDescription(_protocol_getMethod(self, aSel, YES, NO));
 #endif

@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <objc/runtime.h>
 #include <objc/objc-exception.h>
@@ -39,7 +41,7 @@ void pool(void) {  }
 @end
 
 
-#if __OBJC2__
+#if __OBJC2__  &&  !TARGET_OS_EMBEDDED  &&  !TARGET_OS_IPHONE  &&  !TARGET_IPHONE_SIMULATOR
 
 void altHandlerFail(id unused __unused, void *context __unused)
 {
@@ -67,7 +69,7 @@ static void throwWithAltHandler(void)
 {
     @try {
         state++;
-        uintptr_t token = objc_addExceptionHandler(altHandler3, altHandler3);
+        uintptr_t token = objc_addExceptionHandler(altHandler3, (void*)altHandler3);
         // state++ inside alt handler
         @throw [Super new];
         state = BAD;
@@ -85,7 +87,7 @@ static void throwWithAltHandlerAndRethrow(void)
 {
     @try {
         state++;
-        uintptr_t token = objc_addExceptionHandler(altHandler3, altHandler3);
+        uintptr_t token = objc_addExceptionHandler(altHandler3, (void*)altHandler3);
         // state++ inside alt handler
         @throw [Super new];
         state = BAD;
@@ -447,9 +449,11 @@ int main()
                 state++;
                 @throw;
                 state = BAD;
-            } @catch (Sub *e) {
+            } 
+            @catch (Sub *e) {
                 state = BAD;
-            } @finally {
+            } 
+            @finally {
                 state++;
             }
 
@@ -464,7 +468,8 @@ int main()
     }
     testassert(state == 7);
 
-#if __OBJC2__
+
+#if __OBJC2__  &&  !TARGET_OS_EMBEDDED  &&  !TARGET_OS_IPHONE
     // alt handlers
     // run a lot to catch failed unregistration (runtime complains at 1000)
 #define ALT_HANDLER_REPEAT 2000
@@ -503,7 +508,7 @@ int main()
             state++;
             @try {
                 state++;
-                uintptr_t token = objc_addExceptionHandler(altHandler2, altHandler2);
+                uintptr_t token = objc_addExceptionHandler(altHandler2, (void*)altHandler2);
                 // state++ inside alt handler
                 @throw [Super new];
                 state = BAD;
@@ -535,9 +540,9 @@ int main()
             @try {
                 state++;
                 // same-level handlers called in FIFO order (not stack-like)
-                uintptr_t token = objc_addExceptionHandler(altHandler4, altHandler4);
+                uintptr_t token = objc_addExceptionHandler(altHandler4, (void*)altHandler4);
                 // state++ inside alt handler
-                uintptr_t token2 = objc_addExceptionHandler(altHandler5, altHandler5);
+                uintptr_t token2 = objc_addExceptionHandler(altHandler5, (void*)altHandler5);
                 // state++ inside alt handler
                 throwWithAltHandler();  // state += 2 inside
                 state = BAD;
@@ -570,9 +575,9 @@ int main()
             @try {
                 state++;
                 // same-level handlers called in FIFO order (not stack-like)
-                uintptr_t token = objc_addExceptionHandler(altHandler5, altHandler5);
+                uintptr_t token = objc_addExceptionHandler(altHandler5, (void*)altHandler5);
                 // state++ inside alt handler
-                uintptr_t token2 = objc_addExceptionHandler(altHandler6, altHandler6);
+                uintptr_t token2 = objc_addExceptionHandler(altHandler6, (void*)altHandler6);
                 // state++ inside alt handler
                 throwWithAltHandlerAndRethrow();  // state += 3 inside
                 state = BAD;
@@ -633,3 +638,4 @@ int main()
     succeed("exc.m");
 #endif
 }
+

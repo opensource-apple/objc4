@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 #include <stdint.h>
 #include <string.h>

@@ -1,3 +1,12 @@
+/*
+TEST_BUILD
+    $C{COMPILE} $DIR/cacheflush0.m -o cacheflush0.dylib -dynamiclib
+    $C{COMPILE} $DIR/cacheflush2.m -x none cacheflush0.dylib -o cacheflush2.dylib -dynamiclib
+    $C{COMPILE} $DIR/cacheflush3.m -x none cacheflush0.dylib -o cacheflush3.dylib -dynamiclib
+    $C{COMPILE} $DIR/cacheflush.m  -x none cacheflush0.dylib -o cacheflush.out
+END
+*/
+
 #include "test.h"
 #include <objc/runtime.h>
 #include <dlfcn.h>
@@ -27,7 +36,7 @@ int main()
     testassert(1 == [(Sub *)buf2 instanceMethod]);
 
     // Dynamically load a category
-    dlopen("cacheflush2.out", 0);
+    dlopen("cacheflush2.dylib", 0);
 
     // Make sure old cache results are gone
     testassert(2 == [Super classMethod]);
@@ -37,7 +46,7 @@ int main()
     testassert(2 == [(Sub *)buf2 instanceMethod]);
 
     // Dynamically load another category
-    dlopen("cacheflush3.out", 0);
+    dlopen("cacheflush3.dylib", 0);
 
     // Make sure old cache results are gone
     testassert(3 == [Super classMethod]);

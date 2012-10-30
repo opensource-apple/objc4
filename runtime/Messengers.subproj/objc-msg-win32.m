@@ -5,16 +5,16 @@
 #define kFwdMsgSendStret 0
 
 // objc_msgSend parameters
-#define self 4
-#define super 4
-#define selector 8
-#define first_arg 12
+#define SELF 8[ebp]
+#define SUPER 8[ebp]
+#define SELECTOR 12[ebp]
+#define FIRST_ARG 16[ebp]
 
 // objc_msgSend_stret parameters
-#define struct_addr 4
-#define self_stret 8
-#define super_stret 8
-#define selector_stret 12
+#define STRUCT_ADDR 8[ebp]
+#define SELF_STRET 12[ebp]
+#define SUPER_STRET 12[ebp]
+#define SELECTOR_STRET 16[ebp]
 
 // objc_super parameter to sendSuper
 #define super_receiver 0
@@ -39,8 +39,11 @@ void *_objc_forward_stret_handler = NULL;
 __declspec(naked) Method _cache_getMethod(Class cls, SEL sel, IMP objc_msgForward_imp)
 {
     __asm {
-        mov ecx, selector[esp]
-        mov edx, self[esp]
+        push ebp
+        mov ebp, esp
+
+        mov ecx, SELECTOR
+        mov edx, SELF
 
 // CacheLookup WORD_RETURN, CACHE_GET
         push edi
@@ -64,14 +67,16 @@ MISS:
         xor eax, eax
         pop esi
         pop edi
+        leave
         ret
 
 HIT:
-        mov ecx, 8+first_arg[esp]
+        mov ecx, FIRST_ARG
         cmp ecx, method_imp[eax]
         je MISS
         pop esi
         pop edi
+        leave
         ret
     }
 }
@@ -79,8 +84,11 @@ HIT:
 __declspec(naked) IMP _cache_getImp(Class cls, SEL sel)
 {
     __asm {
-        mov ecx, selector[esp]
-        mov edx, self[esp]
+        push ebp
+        mov ebp, esp
+
+        mov ecx, SELECTOR
+        mov edx, SELF
 
 // CacheLookup WORD_RETURN, CACHE_GET
         push edi
@@ -104,14 +112,15 @@ MISS:
         pop esi
         pop edi
         xor eax, eax
+        leave
         ret
 
 HIT:
         pop esi
         pop edi
         mov eax, method_imp[eax]
+        leave
         ret
-
     }
 }
 
@@ -119,11 +128,14 @@ HIT:
 OBJC_EXPORT __declspec(naked) id objc_msgSend(id a, SEL b, ...)
 {
     __asm {
-        // load receiver and selector
-        mov ecx, selector[esp]
-        mov eax, self[esp]
+        push ebp
+        mov ebp, esp
 
-#if !defined(NO_GC)
+        // load receiver and selector
+        mov ecx, SELECTOR
+        mov eax, SELF
+
+#if SUPPORT_GC
         // check whether selector is ignored
 #error oops
 #endif
@@ -157,29 +169,30 @@ HIT:
         pop esi
         pop edi
         mov edx, kFwdMsgSend
+        leave
         jmp eax
 
         // cache miss: search method lists
 MISS:
         pop esi
         pop edi
-        mov eax, self[esp]
+        mov eax, SELF
         mov eax, isa[eax]
 
         // MethodTableLookup WORD_RETURN, MSG_SEND
-        sub esp, 4
         push ecx
         push eax
         call _class_lookupMethodAndLoadCache
-        add esp, 12
 
         mov edx, kFwdMsgSend
+        leave
         jmp eax
 
         // message send to nil: return zero
 NIL:
         // eax is already zero
         mov edx, 0
+        leave
         ret
     }
 }
@@ -188,11 +201,14 @@ NIL:
 OBJC_EXPORT __declspec(naked) double objc_msgSend_fpret(id a, SEL b, ...)
 {
     __asm {
-        // load receiver and selector
-        mov ecx, selector[esp]
-        mov eax, self[esp]
+        push ebp
+        mov ebp, esp
 
-#if !defined(NO_GC)
+        // load receiver and selector
+        mov ecx, SELECTOR
+        mov eax, SELF
+
+#if SUPPORT_GC
         // check whether selector is ignored
 #error oops
 #endif
@@ -226,28 +242,29 @@ HIT:
         pop esi
         pop edi
         mov edx, kFwdMsgSend
+        leave
         jmp eax
 
         // cache miss: search method lists
 MISS:
         pop esi
         pop edi
-        mov eax, self[esp]
+        mov eax, SELF
         mov eax, isa[eax]
 
         // MethodTableLookup WORD_RETURN, MSG_SEND
-        sub esp, 4
         push ecx
         push eax
         call _class_lookupMethodAndLoadCache
-        add esp, 12
 
         mov edx, kFwdMsgSend
+        leave
         jmp eax
 
         // message send to nil: return zero
 NIL:
         fldz
+        leave
         ret
     }
 }
@@ -256,12 +273,15 @@ NIL:
 OBJC_EXPORT __declspec(naked) id objc_msgSendSuper(struct objc_super *a, SEL b, ...)
 {
     __asm {
+        push ebp
+        mov ebp, esp
+
         // load class and selector
-        mov eax, super[esp]
-        mov ecx, selector[esp]
+        mov eax, SUPER
+        mov ecx, SELECTOR
         mov edx, super_class[eax]
 
-#if !defined(NO_GC)
+#if SUPPORT_GC
         // check whether selector is ignored
 #error oops
 #endif
@@ -288,10 +308,11 @@ HIT:
         mov eax, method_imp[eax]
         pop esi
         pop edi
-        mov edx, super[esp]
+        mov edx, SUPER
         mov edx, super_receiver[edx]
-        mov super[esp], edx
+        mov SUPER, edx
         mov edx, kFwdMsgSend
+        leave
         jmp eax
 
         // cache miss: search method lists
@@ -299,19 +320,18 @@ MISS:
 
         pop esi
         pop edi
-        mov edx, super[esp]
+        mov edx, SUPER
         mov eax, super_receiver[edx]
-        mov super[esp], eax
+        mov SUPER, eax
         mov eax, super_class[edx]
 
         // MethodTableLookup WORD_RETURN, MSG_SENDSUPER
-        sub esp, 4
         push ecx
         push eax
         call _class_lookupMethodAndLoadCache
-        add esp, 12
 
         mov edx, kFwdMsgSend
+        leave
         jmp eax
     }
 }
@@ -320,11 +340,14 @@ MISS:
 OBJC_EXPORT __declspec(naked) void objc_msgSend_stret(void)
 {
     __asm {
-        // load receiver and selector
-        mov ecx, selector_stret[esp]
-        mov eax, self_stret[esp]
+        push ebp
+        mov ebp, esp
 
-#if !defined(NO_GC)
+        // load receiver and selector
+        mov ecx, SELECTOR_STRET
+        mov eax, SELF_STRET
+
+#if SUPPORT_GC
         // check whether selector is ignored
 #error oops
 #endif
@@ -358,29 +381,30 @@ HIT:
         pop esi
         pop edi
         mov edx, kFwdMsgSendStret
+        leave
         jmp eax
 
         // cache miss: search method lists
 MISS:
         pop esi
         pop edi
-        mov eax, self_stret[esp]
+        mov eax, SELF_STRET
         mov eax, isa[eax]
 
         // MethodTableLookup WORD_RETURN, MSG_SEND
-        sub esp, 4
         push ecx
         push eax
         call _class_lookupMethodAndLoadCache
-        add esp, 12
 
         mov edx, kFwdMsgSendStret
+        leave
         jmp eax
 
         // message send to nil: return zero
 NIL:
         // eax is already zero
         mov edx, 0
+        leave
         ret
     }
 }
@@ -389,12 +413,15 @@ NIL:
 OBJC_EXPORT __declspec(naked) id objc_msgSendSuper_stret(struct objc_super *a, SEL b, ...)
 {
     __asm {
+        push ebp
+        mov ebp, esp
+
         // load class and selector
-        mov eax, super_stret[esp]
-        mov ecx, selector_stret[esp]
+        mov eax, SUPER_STRET
+        mov ecx, SELECTOR_STRET
         mov edx, super_class[eax]
 
-#if !defined(NO_GC)
+#if SUPPORT_GC
         // check whether selector is ignored
 #error oops
 #endif
@@ -421,10 +448,11 @@ HIT:
         mov eax, method_imp[eax]
         pop esi
         pop edi
-        mov edx, super[esp]
+        mov edx, SUPER_STRET
         mov edx, super_receiver[edx]
-        mov super[esp], edx
+        mov SUPER_STRET, edx
         mov edx, kFwdMsgSendStret
+        leave
         jmp eax
 
         // cache miss: search method lists
@@ -432,19 +460,18 @@ MISS:
 
         pop esi
         pop edi
-        mov edx, super_stret[esp]
+        mov edx, SUPER_STRET
         mov eax, super_receiver[edx]
-        mov super_stret[esp], eax
+        mov SUPER_STRET, eax
         mov eax, super_class[edx]
 
         // MethodTableLookup WORD_RETURN, MSG_SENDSUPER
-        sub esp, 4
         push ecx
         push eax
         call _class_lookupMethodAndLoadCache
-        add esp, 12
 
         mov edx, kFwdMsgSendStret
+        leave
         jmp eax
     }
 }
@@ -484,10 +511,15 @@ STRET:
 OBJC_EXPORT __declspec(naked) void method_invoke(void)
 {
     __asm {
-        mov ecx, selector[esp]
+        push ebp
+        mov ebp, esp
+
+        mov ecx, SELECTOR
         mov edx, method_name[ecx]
         mov eax, method_imp[ecx]
-        mov selector[esp], edx
+        mov SELECTOR, edx
+
+        leave
         jmp eax
     }
 }
@@ -496,10 +528,21 @@ OBJC_EXPORT __declspec(naked) void method_invoke(void)
 OBJC_EXPORT __declspec(naked) void method_invoke_stret(void)
 {
     __asm {
-        mov ecx, selector_stret[esp]
+        push ebp
+        mov ebp, esp
+
+        mov ecx, SELECTOR_STRET
         mov edx, method_name[ecx]
         mov eax, method_imp[ecx]
-        mov selector_stret[esp], edx
+        mov SELECTOR_STRET, edx
+
+        leave
         jmp eax
     }
+}
+
+
+__declspec(naked) id _objc_ignored_method(id obj, SEL sel)
+{
+    return obj;
 }

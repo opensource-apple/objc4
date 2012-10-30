@@ -1,3 +1,5 @@
+// TEST_CONFIG
+
 #include "test.h"
 
 #import <objc/runtime.h>

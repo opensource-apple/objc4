@@ -21,7 +21,8 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#ifdef __i386__
+#include <TargetConditionals.h>
+#if defined(__i386__)  &&  !TARGET_IPHONE_SIMULATOR
 
 /********************************************************************
  ********************************************************************
@@ -31,9 +32,8 @@
  ********************************************************************
  ********************************************************************/
 
-#undef  OBJC_ASM
-#define OBJC_ASM
-#include "objc-rtp.h"
+// for kIgnore
+#include "objc-config.h"
 
 
 /********************************************************************
@@ -74,58 +74,6 @@ _objc_exitPoints:
 	.long	LMsgSendSuperExit
 	.long	LMsgSendSuperStretExit
 	.long	0
-
-
-/*
- * Handcrafted dyld stubs for each external call.
- * They should be converted into a local branch after linking. aB.
- */
-
-/* asm_help.h version is not what we want */
-#undef CALL_EXTERN
-
-#if defined(__DYNAMIC__)
-
-#define CALL_EXTERN(name)	call    L ## name ## $stub
-
-#define LAZY_PIC_FUNCTION_STUB(name) \
-.data                         ;\
-.picsymbol_stub               ;\
-L ## name ## $stub:           ;\
-	.indirect_symbol name     ;\
-	call    L0$ ## name ;\
-L0$ ## name:                  ;\
-	popl    %edx          ;\
-	movl    L ## name ## $lz-L0$ ## name(%edx),%ecx ;\
-	jmp     *%ecx              ;\
-L ## name ## $stub_binder:    ;\
-    lea     L ## name ## $lz-L0$ ## name(%edx),%eax ;\
-    pushl   %eax              ;\
-    jmp     dyld_stub_binding_helper ;\
-.data                         ;\
-.lazy_symbol_pointer          ;\
-L ## name ## $lz:             ;\
-	.indirect_symbol name     ;\
-	.long L ## name ## $stub_binder
-
-#else /* __DYNAMIC__ */
-
-#define CALL_EXTERN(name)	call    name
-
-#define LAZY_PIC_FUNCTION_STUB(name)
-
-#endif /* __DYNAMIC__ */
-
-// _class_lookupMethodAndLoadCache
-LAZY_PIC_FUNCTION_STUB(__class_lookupMethodAndLoadCache)
-
-// __objc_error
-LAZY_PIC_FUNCTION_STUB(___objc_error) /* No stub needed */
-
-#if defined(PROFILE)
-// mcount
-LAZY_PIC_FUNCTION_STUB(mcount)
-#endif /* PROFILE */
 
 
 /********************************************************************
@@ -273,6 +221,13 @@ EXTERNAL_SYMBOL	= 1
 $0:
 .endmacro
 
+.macro STATIC_ENTRY
+	.text
+	.private_extern	$0
+	.align	4, 0x90
+$0:
+.endmacro
+
 //////////////////////////////////////////////////////////////////////
 //
 // END_ENTRY	functionName
@@ -302,7 +257,7 @@ $0:
 	movl	%esp,%ebp
 	subl	$$8,%esp
 	// Current stack contents: ret, ebp, pad, pad
-	CALL_EXTERN(mcount)
+	call	mcount
 	movl	%ebp,%esp
 	popl	%ebp
 #endif
@@ -554,7 +509,7 @@ LMsgSendHitInstrumentDone_$0_$1_$2:
 	// push args (class, selector)
 	pushl	%ecx
 	pushl	%eax
-	CALL_EXTERN(__class_lookupMethodAndLoadCache)
+	call	__class_lookupMethodAndLoadCache
 	addl    $$12, %esp		// pop parameters and alignment
 .endmacro
 
@@ -574,8 +529,7 @@ LMsgSendHitInstrumentDone_$0_$1_$2:
  * efficient to do the (PIC) lookup once in the caller than repeatedly here.
  ********************************************************************/
         
-	.private_extern __cache_getMethod
-	ENTRY __cache_getMethod
+	STATIC_ENTRY __cache_getMethod
 
 // load the class and selector
 	movl	selector(%esp), %ecx
@@ -608,8 +562,7 @@ LGetMethodExit:
  * If not found, returns NULL.
  ********************************************************************/
 
-	.private_extern __cache_getImp
-	ENTRY __cache_getImp
+	STATIC_ENTRY __cache_getImp
 
 // load the class and selector
 	movl    selector(%esp), %ecx
@@ -636,14 +589,6 @@ LGetImpExit:
  * id objc_msgSend(id self, SEL	_cmd,...);
  *
  ********************************************************************/
-
-	ENTRY _objc_msgSend_fixup_rtp
-// selector(%esp) is address of message ref instead of SEL
-	movl	selector(%esp), %edx
-	movl	4(%edx), %ecx
-	movl	%ecx, selector(%esp)	// convert selector
-	jmp	_objc_msgSend
-	END_ENTRY _objc_msgSend_fixup_rtp
 
 	ENTRY	_objc_msgSend
 	CALL_MCOUNTER
@@ -706,19 +651,6 @@ LMsgSendExit:
  *		Class	class;
  * };
  ********************************************************************/
-
-	ENTRY _objc_msgSendSuper2_fixup_rtp
-	// super(%esp) is objc_super struct with subclass instead of superclass
-	mov	super(%esp), %edx	// edx = objc_super
-	mov	class(%edx), %eax	// eax = objc_super->class
-	mov	4(%eax), %eax		// eax = objc_super->class->super_class
-	mov	%eax, class(%edx)	// objc_super->class = eax
-	// selector(%esp) is address of message ref instead of SEL
-	mov	selector(%esp), %eax
-	mov	4(%eax), %eax
-	mov	%eax, selector(%esp)
-	jmp	_objc_msgSendSuper
-	END_ENTRY _objc_msgSendSuper2_fixedup_rtp
 
 	ENTRY	_objc_msgSendSuper
 	CALL_MCOUNTER
@@ -809,14 +741,6 @@ LMsgSendvArgsOK:
  * double objc_msgSend_fpret(id self, SEL _cmd,...);
  *
  ********************************************************************/
-
-	ENTRY _objc_msgSend_fpret_fixup_rtp
-// selector(%esp) is address of message ref instead of SEL
-	movl	selector(%esp), %edx
-	movl	4(%edx), %ecx
-	movl	%ecx, selector(%esp)	// convert selector
-	jmp	_objc_msgSend_fpret
-	END_ENTRY _objc_msgSend_fpret_fixup_rtp
 
 	ENTRY	_objc_msgSend_fpret
 	CALL_MCOUNTER
@@ -929,14 +853,6 @@ LMsgSendvFpretArgsOK:
  *		(sp+12) is the selector
  ********************************************************************/
 
-	ENTRY _objc_msgSend_stret_fixup_rtp
-// selector_stret(%esp) is address of message ref instead of SEL
-	movl	selector_stret(%esp), %edx
-	movl	4(%edx), %ecx
-	movl	%ecx, selector_stret(%esp)	// convert selector
-	jmp	_objc_msgSend_stret
-	END_ENTRY _objc_msgSend_stret_fixup_rtp
-
 	ENTRY	_objc_msgSend_stret
 	CALL_MCOUNTER
 
@@ -1001,19 +917,6 @@ LMsgSendStretExit:
  *		(sp+12) is the selector
  *
  ********************************************************************/
-
-	ENTRY _objc_msgSendSuper2_stret_fixup_rtp
-	// super_stret(%esp) is objc_super with subclass instead of superclass
-	mov	super_stret(%esp), %edx	// edx = objc_super
-	mov	class(%edx), %eax	// eax = objc_super->class
-	mov	4(%eax), %eax		// eax = objc_super->class->super_class
-	mov	%eax, class(%edx)	// objc_super->class = eax
-	// selector_stret(%esp) is address of message ref instead of SEL
-	mov	selector_stret(%esp), %eax
-	mov	4(%eax), %eax
-	mov	%eax, selector_stret(%esp)
-	jmp	_objc_msgSendSuper_stret
-	END_ENTRY _objc_msgSendSuper2_stret_fixedup_rtp
 
 	ENTRY	_objc_msgSendSuper_stret
 	CALL_MCOUNTER
@@ -1124,8 +1027,7 @@ __objc_forward_handler:	.long 0
 	.private_extern __objc_forward_stret_handler
 __objc_forward_stret_handler:	.long 0
 
-	ENTRY	__objc_msgForward_internal
-	.private_extern __objc_msgForward_internal
+	STATIC_ENTRY	__objc_msgForward_internal
 	// Method cache version
 	
 	// THIS IS NOT A CALLABLE C FUNCTION
@@ -1187,7 +1089,7 @@ LMsgForwardError:
 	leal	LUnkSelStr-L__objc_msgForward$pic_base(%edx),%eax
 	pushl 	%eax
 	pushl   (self+4)(%ebp)
-	CALL_EXTERN(___objc_error)	// never returns
+	call	___objc_error	// never returns
 
 	END_ENTRY	__objc_msgForward
 
@@ -1240,7 +1142,7 @@ LMsgForwardStretError:
 	leal	LUnkSelStr-L__objc_msgForwardStret$pic_base(%edx),%eax
 	pushl 	%eax
 	pushl   (self_stret+4)(%ebp)
-	CALL_EXTERN(___objc_error)	// never returns
+	call	___objc_error	// never returns
 
 	END_ENTRY	__objc_msgForward_stret
 
@@ -1266,4 +1168,12 @@ LMsgForwardStretError:
 	
 	END_ENTRY _method_invoke_stret
 
+	
+	STATIC_ENTRY __objc_ignored_method
+	
+	movl	self(%esp), %eax
+	ret
+	
+	END_ENTRY __objc_ignored_method
+	
 #endif

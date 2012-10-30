@@ -1,3 +1,5 @@
+// TEST_CFLAGS -framework Foundation
+
 #include "test.h"
 #include <objc/objc-exception.h>
 #include <Foundation/Foundation.h>
@@ -27,6 +29,7 @@ static int state;
 
 static id exc;
 
+static void handler(id unused, void *ctx) __attribute__((used));
 static void handler(id unused __unused, void *ctx __unused)
 {
     testassert(state == 3); state++;
@@ -35,8 +38,13 @@ static void handler(id unused __unused, void *ctx __unused)
 +(BOOL) resolveClassMethod:(SEL)__unused name
 {
     testassert(state == 1); state++;
+#if !TARGET_OS_EMBEDDED  &&  !TARGET_OS_IPHONE  &&  !TARGET_IPHONE_SIMULATOR
     objc_addExceptionHandler(&handler, 0);
-    testassert(state == 2); state++;
+    testassert(state == 2); 
+#else
+    state++;  // handler would have done this
+#endif
+    state++;
     exc = [Foo new];
     @throw exc;
 }
@@ -46,6 +54,10 @@ static void handler(id unused __unused, void *ctx __unused)
 
 int main()
 {
+#if TARGET_IPHONE_SIMULATOR
+    testwarn("<rdar://problem/7965763> Simulator: cannot throw exceptions across objc_msgSend");
+    succeed(__FILE__);
+#else
     int i;
 
     // unwind exception and alt handler through objc_msgSend()
@@ -78,6 +90,7 @@ int main()
     [pool drain];
 
     succeed(__FILE__);
+#endif
 }
 
 #endif
