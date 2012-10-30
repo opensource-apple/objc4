@@ -47,7 +47,7 @@ static SEL _objc_search_builtins(const char *key) {
 #if defined(DUMP_SELECTORS)
     if (NULL != key) printf("\t\"%s\",\n", key);
 #endif
-    /* The builtin table contains only sels starting with '[A-z]' */
+    /* The builtin table contains only sels starting with '[A-z]', including '_' */
     if (!key) return (SEL)0;
     if ('\0' == *key) return (SEL)_objc_empty_selector;
     if (*key < 'A' || 'z' < *key) return (SEL)0;
@@ -69,7 +69,7 @@ static CFMutableSetRef _objc_selectors = NULL;
 
 static Boolean _objc_equal_selector(const void *v1, const void *v2) {
     if (v1 == v2) return TRUE;
-    if ((!v1 && v2) || (v1 && !v2)) return FALSE;
+    if ((v1 == NULL) || (v2 == NULL)) return FALSE;
     return ((*(char *)v1 == *(char *)v2) && (0 == _objc_strcmp(v1, v2))) ? TRUE : FALSE;
 }
 

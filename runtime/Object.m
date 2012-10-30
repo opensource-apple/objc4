@@ -26,14 +26,6 @@
 	Copyright 1988-1996 NeXT Software, Inc.
 */
 
-#ifdef WINNT
-#include <winnt-pdo.h>
-#endif
-
-#ifdef NeXT_PDO			// pickup BUG fix flags
-#import <pdo.h>
-#endif
-
 #import <objc/Object.h>
 #import "objc-private.h"
 #import <objc/objc-runtime.h>
@@ -44,7 +36,6 @@
 OBJC_EXPORT id (*_cvtToId)(const char *);
 OBJC_EXPORT id (*_poseAs)();
 
-#define ISMETA(cls)		(((struct objc_class *)cls)->info & CLS_META) 
 
 // Error Messages
 static const char

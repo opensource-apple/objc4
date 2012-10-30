@@ -87,10 +87,6 @@ typedef struct _PendingClass
 * Exports.
 **********************************************************************/
 
-// Mask which specifies whether we are multi-threaded or not.
-// A value of (-1) means single-threaded, 0 means multi-threaded.
-int		_objc_multithread_mask = (-1);
-
 // Function to call when message sent to nil object.
 void		(*_objc_msgNil)(id, SEL) = NULL;
 
@@ -105,6 +101,9 @@ OBJC_DECLARE_LOCK (classLock);
 
 // Condition for logging load progress
 static int LaunchingDebug = -1;
+
+// objc's key for pthread_getspecific
+pthread_key_t _objc_pthread_key;
 
 /***********************************************************************
 * Function prototypes internal to this module.
@@ -128,7 +127,6 @@ static void				map_selrefs							(SEL * sels, unsigned int cnt);
 static void				map_method_descs					(struct objc_method_description_list * methods);
 static void				_objc_fixup_protocol_objects_for_image	(header_info * hi);
 static void				_objc_bindModuleContainingCategory(Category cat);
-static const char *	libraryNameForMachHeader				(const headerType * themh);
 static void				_objc_fixup_selector_refs			(const header_info * hi);
 static void				_objc_call_loads_for_image			(header_info * header);
 static void				_objc_checkForPendingClassReferences	       (struct objc_class *	cls);
@@ -151,6 +149,9 @@ static NXHashTablePrototype	classHashPrototype =
     NXNoEffectFree, 0
 };
 
+// Exported copy of class_hash variable (hook for debugging tools)
+NXHashTable *_objc_debug_class_hash = NULL;
+
 // Function pointer objc_getClass calls through when class is not found
 static int			(*objc_classHandler) (const char *) = _objc_defaultClassHandler;
 
@@ -169,14 +170,14 @@ void	objc_dump_class_hash	       (void)
 {
     NXHashTable *	table;
     unsigned		count;
-    struct objc_class *	*		data;
+    struct objc_class 	*		data;
     NXHashState		state;
 
     table = class_hash;
     count = 0;
     state = NXInitHashState (table);
     while (NXNextHashState (table, &state, (void **) &data))
-        printf ("class %d: %s\n", ++count, (*data)->name);
+        printf ("class %d: %s\n", ++count, data->name);
 }
 
 /***********************************************************************
@@ -226,6 +227,7 @@ void	_objc_init_class_hash	       (void)
                                             1024,
                                             nil,
                                             _objc_create_zone ());
+    _objc_debug_class_hash = class_hash;
 }
 
 /***********************************************************************
@@ -291,6 +293,7 @@ void	objc_setClassHandler	(int	(*userSuppliedHandler) (const char *))
 * If the objc_classHandler returns a non-zero value, try once more to
 * find the class.  Default objc_classHandler always returns zero.
 * objc_setClassHandler is how someone can install a non-default routine.
+* Warning: doesn't work if aClassName is the name of a posed-for class's isa!
 **********************************************************************/
 id		objc_getClass	       (const char *	aClassName)
 {
@@ -340,6 +343,7 @@ id		objc_lookUpClass       (const char *	aClassName)
 
 /***********************************************************************
 * objc_getMetaClass.  Return the id of the meta class the named class.
+* Warning: doesn't work if aClassName is the name of a posed-for class's isa!
 **********************************************************************/
 id		objc_getMetaClass       (const char *	aClassName)
 {
@@ -1073,7 +1077,7 @@ static void _objc_fixup_protocol_objects_for_image (header_info * hi)
     OBJC_PROTOCOL_PTR	protos;
     unsigned int	index;
 
-    // Locate protocals in the image
+    // Locate protocols in the image
     protos = (OBJC_PROTOCOL_PTR) _getObjcProtocols ((headerType *) hi->mhdr, &size);
     if (!protos)
         return;
@@ -1120,7 +1124,6 @@ void _objc_bindModuleContainingList() {
 ***********************************************************************/
 static void _objc_bind_symbol(const char *name)
 {
-    int i;
     static header_info *lastHeader = NULL;
     header_info *hInfo;
     const headerType	*imageHeader = lastHeader ? lastHeader->mhdr : NULL;
@@ -1225,6 +1228,24 @@ void _objc_bindModuleContainingClass (struct objc_class * cls) {
 
 
 /***********************************************************************
+* _objc_bindClassIfNeeded.
+* If the given class is still marked as needs-bind, bind the module 
+*   containing it.
+* Called during _objc_call_loads_for_image just before sending +load, 
+*   and during class_initialize just before sending +initialize.
+**********************************************************************/
+void _objc_bindClassIfNeeded(struct objc_class *cls)
+{
+    // Clear NEED_BIND *after* binding to prevent race
+    // This assumes that simultaneous binding of one module by two threads is ok.
+    if (cls->info & CLS_NEED_BIND) {
+        _objc_bindModuleContainingClass(cls);
+        cls->info &= ~CLS_NEED_BIND;
+    }
+}
+
+
+/***********************************************************************
 * _objc_addHeader.
 *
 **********************************************************************/
@@ -1273,7 +1294,7 @@ static header_info * _objc_addHeader(const headerType *header, unsigned long	vma
 *
 * If we have it we're in trouble
 **************************************************************************/
-void	_objc_fatalHeader(const headerType *header)
+static void	_objc_fatalHeader(const headerType *header)
 {
     header_info *hInfo;
     
@@ -1285,40 +1306,14 @@ void	_objc_fatalHeader(const headerType *header)
 }
 
 /***********************************************************************
-* libraryNameForMachHeader.
-**********************************************************************/
-static const char *	libraryNameForMachHeader  (const headerType * themh)
-{
-    unsigned long	index;
-    unsigned long	imageCount;
-    headerType *	mh;
-
-    // Search images for matching type
-    imageCount = _dyld_image_count ();
-    for (index = 0; index < imageCount ; index += 1)
-    {
-        // Return name of image with matching type
-        mh = _dyld_get_image_header (index);
-        if (mh == themh)
-            return _dyld_get_image_name (index);
-    }
-
-    // Not found
-    return 0;
-}
-
-/***********************************************************************
 * _objc_fixup_selector_refs.  Register all of the selectors in each
 * image, and fix them all up.
 *
 **********************************************************************/
 static void _objc_fixup_selector_refs   (const header_info *	hi)
 {
-    unsigned int	midx;
     unsigned int	size;
-    OBJC_PROTOCOL_PTR	protos;
     Module		mods;
-    unsigned int	index;
     SEL *		messages_refs;
 
     mods = (Module) ((unsigned long) hi->mod_ptr + hi->image_slide);
@@ -1370,10 +1365,7 @@ static void _objc_call_loads_for_image (header_info * header)
                 // +initialize and cache fill on class that is not even loaded yet
                 load_method = class_lookupNamedMethodInMethodList (*mlistp, "load");
                 if (load_method) {
-                    if (cls->info & CLS_NEED_BIND) {
-                        cls->info &= ~CLS_NEED_BIND;
-                        _objc_bindModuleContainingClass(cls);
-                    }
+                    _objc_bindClassIfNeeded(cls);
                     (*load_method) ((id) cls, @selector(load));
                 }
             }
@@ -1421,11 +1413,30 @@ static void objc_setConfiguration() {
 **********************************************************************/
 void objc_setMultithreaded (BOOL flag)
 {
-    if (flag == YES)
-        _objc_multithread_mask = 0;
-    else
-        _objc_multithread_mask = (-1);
+    // Nothing here. Thread synchronization in the runtime is always active.
 }
+
+
+
+/***********************************************************************
+* _objc_pthread_destroyspecific
+* Destructor for objc's per-thread data.
+* arg shouldn't be NULL, but we check anyway.
+**********************************************************************/
+extern void _destroyInitializingClassList(struct _objc_initializing_classes *list);
+void _objc_pthread_destroyspecific(void *arg)
+{
+    _objc_pthread_data *data = (_objc_pthread_data *)arg;
+    if (data != NULL) {
+        _destroyInitializingClassList(data->initializingClasses);
+
+        // add further cleanup here...
+
+        free(data);
+    }
+}
+
+
 /***********************************************************************
 * _objcInit.
 * Library initializer called by dyld & from crt0
@@ -1448,6 +1459,8 @@ void _objcInit(void) {
     // make sure CF is initialized before we go further;
     // someday this can be removed, as it'll probably be automatic
     __CFInitialize();
+    
+    pthread_key_create(&_objc_pthread_key, _objc_pthread_destroyspecific);
 
     // Create the class lookup table
     _objc_init_class_hash ();
@@ -1545,7 +1558,6 @@ static void	_objc_map_image(headerType *mh, unsigned long	vmaddr_slide)
 {
     static int dumpClasses = -1;
     header_info *hInfo;
-    unsigned int size;
 
     if ( dumpClasses == -1 ) {
         if ( getenv("OBJC_DUMP_CLASSES") ) dumpClasses = 1;

@@ -27,10 +27,6 @@
 	Created by Bertrand Serlet, Feb 89
  */
 
-#if defined(NeXT_PDO)
-#import <pdo.h>
-#endif
-
 #import <objc/hashtable2.h>
 #import "objc-private.h"
 

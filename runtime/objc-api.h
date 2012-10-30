@@ -25,7 +25,11 @@
 
 
 #if !defined(OBJC_EXPORT)
+#if defined(__cplusplus)
+    #define OBJC_EXPORT extern "C" 
+#else
     #define OBJC_EXPORT extern
+#endif
 #endif
 
 #if !defined(OBJC_IMPORT)

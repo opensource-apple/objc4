@@ -27,7 +27,7 @@
     Copyright 1989-1996 NeXT Software, Inc.
 */
 
-#warning the API in this header is obsolete
+#warning The API in this header is obsoleted by NSHashtable.h
 
 #ifndef _OBJC_LITTLE_HASHTABLE_H_
 #define _OBJC_LITTLE_HASHTABLE_H_
@@ -39,7 +39,7 @@
  *************************************************************************/
 
 /* This module allows hashing of arbitrary data.  Such data must be pointers or integers, and client is responsible for allocating/deallocating this data.  A deallocation call-back is provided.
-The objective C class HashTable is prefered when dealing with (key, values) associations because it is easier to use in that situation.
+The objective C class HashTable is preferred when dealing with (key, values) associations because it is easier to use in that situation.
 As well-behaved scalable data structures, hash tables double in size when they start becoming full, thus guaranteeing both average constant time access and linear size. */
 
 typedef struct {

@@ -150,7 +150,6 @@
 
 /* Abstract Protocol for Dynamic Loading */
 
-#if !defined(NeXT_PDO)
 @interface Object (DynamicLoading)
 
 //+ finishLoading:(headerType *)header;
@@ -158,7 +157,6 @@
 + startUnloading;
 
 @end
-#endif
 
 OBJC_EXPORT id object_dispose(Object *anObject);
 OBJC_EXPORT id object_copy(Object *anObject, unsigned nBytes);

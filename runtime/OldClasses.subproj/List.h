@@ -30,7 +30,7 @@
 
 */
 
-#warning the API in this header is obsolete
+#warning The API in this header is obsoleted by NSArray.
 
 #ifndef _OBJC_LIST_H_
 #define _OBJC_LIST_H_

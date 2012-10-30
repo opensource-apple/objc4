@@ -39,7 +39,6 @@
 	kEight			= 8
 #endif
 
-#if defined(OBJC_COLLECTING_CACHE)
 // _objc_entryPoints and _objc_exitPoints are used by objc
 // to get the critical regions for which method caches 
 // cannot be garbage collected.
@@ -47,6 +46,8 @@
 	.data
 .globl		_objc_entryPoints
 _objc_entryPoints:
+	.long	__cache_getImp
+	.long	__cache_getMethod
 	.long	_objc_msgSend
 	.long	_objc_msgSend_stret
 	.long	_objc_msgSendSuper
@@ -55,12 +56,13 @@ _objc_entryPoints:
 
 .globl		_objc_exitPoints
 _objc_exitPoints:
+	.long	LGetImpExit
+	.long	LGetMethodExit
 	.long	LMsgSendExit
 	.long	LMsgSendStretExit
 	.long	LMsgSendSuperExit
 	.long	LMsgSendSuperStretExit
 	.long	0
-#endif
 
 
 /********************************************************************
@@ -271,18 +273,20 @@ $0:
 /////////////////////////////////////////////////////////////////////
 //
 //
-// CacheLookup	WORD_RETURN | STRUCT_RETURN, MSG_SEND | MSG_SENDSUPER, cacheMissLabel
+// CacheLookup	WORD_RETURN | STRUCT_RETURN, MSG_SEND | MSG_SENDSUPER | CACHE_GET, cacheMissLabel
 //
 // Locate the implementation for a selector in a class method cache.
 //
 // Takes: WORD_RETURN	(first parameter is at sp+4)
 //	  STRUCT_RETURN	(struct address is at sp+4, first parameter at sp+8)
-//        MSG_SEND	(first parameter is receiver)
+//	  MSG_SEND	(first parameter is receiver)
 //	  MSG_SENDSUPER	(first parameter is address of objc_super structure)
+//	  CACHE_GET	(first parameter is class; return method triplet)
 //
 //	  cacheMissLabel = label to branch to iff method is not cached
 //
-// On exit:	(found) imp in eax register
+// On exit:	(found) MSG_SEND and MSG_SENDSUPER: return imp in eax
+//		(found) CACHE_GET: return method triplet in eax
 //		(not found) jumps to cacheMissLabel
 //	
 /////////////////////////////////////////////////////////////////////
@@ -295,8 +299,9 @@ STRUCT_RETURN	= 1
 
 // Values to specify to method lookup macros whether the first argument
 // is an object/class reference or a 'objc_super' structure.
-MSG_SEND	= 0
-MSG_SENDSUPER	= 1
+MSG_SEND	= 0	// first argument is receiver, search the isa
+MSG_SENDSUPER	= 1	// first argument is objc_super, search the class
+CACHE_GET	= 2	// first argument is class, search that class
 
 .macro	CacheLookup
 
@@ -306,19 +311,23 @@ MSG_SENDSUPER	= 1
 .if $1 == MSG_SEND			// MSG_SEND
 	movl	isa(%eax), %eax		//   class = self->isa
 	movl	selector(%esp), %ecx	//   get selector
-.else					// MSG_SENDSUPER
+.elseif $1 == MSG_SENDSUPER		// MSG_SENDSUPER
 	movl	super(%esp), %eax	//   get objc_super address
 	movl	class(%eax), %eax	//   class = caller->class
 	movl	selector(%esp), %ecx	//   get selector
+.else					// CACHE_GET
+	movl	selector(%esp), %ecx	//   get selector - class already in eax
 .endif
 .else					// Struct return
 .if $1 == MSG_SEND			// MSG_SEND (stret)
 	movl	isa(%eax), %eax		//   class = self->isa
 	movl	(selector_stret)(%esp), %ecx	//   get selector
-.else					// MSG_SENDSUPER (stret)
+.elseif $1 == MSG_SENDSUPER		// MSG_SENDSUPER (stret)
 	movl	super_stret(%esp), %eax	//   get objc_super address
 	movl	class(%eax), %eax	//   class = caller->class
 	movl	(selector_stret)(%esp), %ecx	//   get selector
+.else					// CACHE_GET
+	!! This should not happen.
 .endif
 .endif
 
@@ -334,9 +343,14 @@ MSG_SENDSUPER	= 1
 	leal	buckets(%eax), %edi	// buckets = &cache->buckets
 	movl	mask(%eax), %esi		// mask = cache->mask
 	movl	%ecx, %edx		// index = selector
+#ifdef NO_MACRO_CONSTS
+	shrl	$kTwo, %edx		// index = selector >> 2
+#else
+	shrl	$2, %edx		// index = selector >> 2
+#endif
 
 // search the receiver's cache
-LMsgSendProbeCache_$0_$1:
+LMsgSendProbeCache_$0_$1_$2:
 #if defined(OBJC_INSTRUMENTED)
 	inc	%ebx			// probeCount += 1
 #endif
@@ -344,19 +358,19 @@ LMsgSendProbeCache_$0_$1:
 	movl	(%edi, %edx, 4), %eax	// method = buckets[index]
 
 	testl	%eax, %eax		// check for end of bucket
-	je	LMsgSendCacheMiss_$0_$1	// go to cache miss code
+	je	LMsgSendCacheMiss_$0_$1_$2	// go to cache miss code
 	cmpl	method_name(%eax), %ecx	// check for method name match
-	je	LMsgSendCacheHit_$0_$1	// go handle cache hit
+	je	LMsgSendCacheHit_$0_$1_$2	// go handle cache hit
 	inc	%edx			// bump index ...
-	jmp	LMsgSendProbeCache_$0_$1// ... and loop
+	jmp	LMsgSendProbeCache_$0_$1_$2 // ... and loop
 
 // not found in cache: restore state and go to callers handler
-LMsgSendCacheMiss_$0_$1:
+LMsgSendCacheMiss_$0_$1_$2:
 #if defined(OBJC_INSTRUMENTED)
 	popl	%edx			// retrieve cache pointer
 	movl	mask(%edx), %esi		// mask = cache->mask
 	testl	%esi, %esi		// a mask of zero is only for the...
-	je	LMsgSendMissInstrumentDone_$0	// ... emptyCache, do not record anything
+	je	LMsgSendMissInstrumentDone_$0_$1_$2	// ... emptyCache, do not record anything
 
 	// locate and update the CacheInstrumentation structure
 	inc	%esi			// entryCount = mask + 1
@@ -376,15 +390,15 @@ LMsgSendCacheMiss_$0_$1:
 	movl	%edi, missProbes(%esi)	// cacheData->missProbes += probeCount
 	movl	maxMissProbes(%esi), %edi// if (cacheData->maxMissProbes < probeCount)
 	cmpl	%ebx, %edi		// 
-	jge	LMsgSendMaxMissProbeOK_$0	// 
+	jge	LMsgSendMaxMissProbeOK_$0_$1_$2	// 
 	movl	%ebx, maxMissProbes(%esi)// cacheData->maxMissProbes = probeCount
-LMsgSendMaxMissProbeOK_$0:
+LMsgSendMaxMissProbeOK_$0_$1_$2:
 
 	// update cache miss probe histogram
 	cmpl	$CACHE_HISTOGRAM_SIZE, %ebx	// pin probeCount to max index
-	jl	LMsgSendMissHistoIndexSet_$0
+	jl	LMsgSendMissHistoIndexSet_$0_$1_$2
 	movl	$(CACHE_HISTOGRAM_SIZE-1), %ebx
-LMsgSendMissHistoIndexSet_$0:
+LMsgSendMissHistoIndexSet_$0_$1_$2:
 	LEA_STATIC_DATA	%esi, _CacheMissHistogram, EXTERNAL_SYMBOL
 #ifdef NO_MACRO_CONSTS
 	shll	$kTwo, %ebx		// convert probeCount to histogram index
@@ -395,7 +409,7 @@ LMsgSendMissHistoIndexSet_$0:
 	movl	0(%esi), %edi		// get current tally
 	inc	%edi			// 
 	movl	%edi, 0(%esi)		// tally += 1
-LMsgSendMissInstrumentDone_$0:
+LMsgSendMissInstrumentDone_$0_$1_$2:
 	popl	%ebx			// restore non-volatile register
 #endif
 
@@ -403,14 +417,17 @@ LMsgSendMissInstrumentDone_$0:
 .if $1 == MSG_SEND			// MSG_SEND
 	popl	%esi			//  restore callers register
 	popl	%edi			//  restore callers register
-	movl	self(%esp), %eax		//  get messaged object
+	movl	self(%esp), %eax	//  get messaged object
 	movl	isa(%eax), %eax		//  get objects class
-.else					// MSG_SENDSUPER
+.elseif $1 == MSG_SENDSUPER		// MSG_SENDSUPER
 	// replace "super" arg with "receiver"
 	movl	super+8(%esp), %edi	//  get super structure
 	movl	receiver(%edi), %esi	//  get messaged object
 	movl	%esi, super+8(%esp)	//  make it the first argument
 	movl	class(%edi), %eax	//  get messaged class
+	popl	%esi			//  restore callers register
+	popl	%edi			//  restore callers register
+.else					// CACHE_GET
 	popl	%esi			//  restore callers register
 	popl	%edi			//  restore callers register
 .endif
@@ -420,7 +437,7 @@ LMsgSendMissInstrumentDone_$0:
 	popl	%edi			//  restore callers register
 	movl	self_stret(%esp), %eax	//  get messaged object
 	movl	isa(%eax), %eax		//  get objects class
-.else					// MSG_SENDSUPER (stret)
+.elseif $1 == MSG_SENDSUPER		// MSG_SENDSUPER (stret)
 	// replace "super" arg with "receiver"
 	movl	super_stret+8(%esp), %edi//  get super structure
 	movl	receiver(%edi), %esi	//  get messaged object
@@ -428,6 +445,8 @@ LMsgSendMissInstrumentDone_$0:
 	movl	class(%edi), %eax	//  get messaged class
 	popl	%esi			//  restore callers register
 	popl	%edi			//  restore callers register
+.else					// CACHE_GET
+	!! This should not happen.
 .endif
 .endif
 
@@ -435,12 +454,12 @@ LMsgSendMissInstrumentDone_$0:
 
 // eax points to matching cache entry
 	.align	4, 0x90
-LMsgSendCacheHit_$0_$1:
+LMsgSendCacheHit_$0_$1_$2:
 #if defined(OBJC_INSTRUMENTED)
 	popl	%edx			// retrieve cache pointer
 	movl	mask(%edx), %esi		// mask = cache->mask
 	testl	%esi, %esi		// a mask of zero is only for the...
-	je	LMsgSendHitInstrumentDone_$0_$1	// ... emptyCache, do not record anything
+	je	LMsgSendHitInstrumentDone_$0_$1_$2	// ... emptyCache, do not record anything
 
 	// locate and update the CacheInstrumentation structure
 	inc	%esi			// entryCount = mask + 1
@@ -460,15 +479,15 @@ LMsgSendCacheHit_$0_$1:
 	movl	%edi, hitProbes(%esi)	// cacheData->hitProbes += probeCount
 	movl	maxHitProbes(%esi), %edi// if (cacheData->maxHitProbes < probeCount)
 	cmpl	%ebx, %edi
-	jge	LMsgSendMaxHitProbeOK_$0_$1
+	jge	LMsgSendMaxHitProbeOK_$0_$1_$2
 	movl	%ebx, maxHitProbes(%esi)// cacheData->maxHitProbes = probeCount
-LMsgSendMaxHitProbeOK_$0_$1:
+LMsgSendMaxHitProbeOK_$0_$1_$2:
 
 	// update cache hit probe histogram
 	cmpl	$CACHE_HISTOGRAM_SIZE, %ebx	// pin probeCount to max index
-	jl	LMsgSendHitHistoIndexSet_$0_$1
+	jl	LMsgSendHitHistoIndexSet_$0_$1_$2
 	movl	$(CACHE_HISTOGRAM_SIZE-1), %ebx
-LMsgSendHitHistoIndexSet_$0_$1:
+LMsgSendHitHistoIndexSet_$0_$1_$2:
 	LEA_STATIC_DATA	%esi, _CacheHitHistogram, EXTERNAL_SYMBOL
 #ifdef NO_MACRO_CONSTS
 	shll	$kTwo, %ebx		// convert probeCount to histogram index
@@ -479,12 +498,16 @@ LMsgSendHitHistoIndexSet_$0_$1:
 	movl	0(%esi), %edi		// get current tally
 	inc	%edi			// 
 	movl	%edi, 0(%esi)		// tally += 1
-LMsgSendHitInstrumentDone_$0_$1:
+LMsgSendHitInstrumentDone_$0_$1_$2:
 	popl	%ebx			// restore non-volatile register
 #endif
 
 // load implementation address, restore state, and we're done
+.if $1 == CACHE_GET
+	// method triplet is already in eax
+.else
 	movl	method_imp(%eax), %eax	// imp = method->method_imp
+.endif
 
 .if $0 == WORD_RETURN			// Regular word return
 .if $1 == MSG_SENDSUPER			// MSG_SENDSUPER
@@ -555,6 +578,73 @@ HAVE_CALL_EXTERN_lookupMethodAndLoadCache = 1
 	PICIFY(func)		      ; \
 	jmp	%edx		      ; 
 
+
+
+
+/********************************************************************
+ * Method _cache_getMethod(Class cls, SEL sel)
+ *
+ * If found, returns method triplet pointer.
+ * If not found, returns NULL.
+ *
+ * NOTE: _cache_getMethod never returns any cache entry whose implementation
+ * is _objc_msgForward. It returns NULL instead. This prevents thread-
+ * safety and memory management bugs in _class_lookupMethodAndLoadCache. 
+ * See _class_lookupMethodAndLoadCache for details. 
+ ********************************************************************/
+        
+        ENTRY __cache_getMethod
+
+// load the class into eax
+	movl	self(%esp), %eax
+
+// do lookup
+        CacheLookup WORD_RETURN, CACHE_GET, LGetMethodMiss
+
+// cache hit, method triplet in %eax
+// check for _objc_msgForward
+        LEA_STATIC_DATA %ecx, __objc_msgForward, LOCAL_SYMBOL // eats edx
+        cmpl    method_imp(%eax), %ecx
+        je      LGetMethodMiss          // if (imp==_objc_msgForward) return nil
+        ret                             // else return method triplet address
+
+LGetMethodMiss:
+// cache miss, return nil
+        xorl    %eax, %eax      // zero %eax
+        ret
+
+LGetMethodExit:
+        END_ENTRY __cache_getMethod
+
+
+/********************************************************************
+ * IMP _cache_getImp(Class cls, SEL sel)
+ *
+ * If found, returns method implementation.
+ * If not found, returns NULL.
+ ********************************************************************/
+
+        ENTRY __cache_getImp
+
+// load the class into eax
+	movl	self(%esp), %eax
+
+// do lookup
+        CacheLookup WORD_RETURN, CACHE_GET, LGetImpMiss
+
+// cache hit, method triplet in %eax
+        movl    method_imp(%eax), %eax  // return method imp
+        ret
+
+LGetImpMiss:
+// cache miss, return nil
+        xorl    %eax, %eax      // zero %eax
+        ret
+
+LGetImpExit:
+        END_ENTRY __cache_getImp
+
+
 /********************************************************************
  *
  * id objc_msgSend(id self, SEL	_cmd,...);
@@ -570,14 +660,7 @@ HAVE_CALL_EXTERN_lookupMethodAndLoadCache = 1
 	testl	%eax, %eax
 	je	LMsgSendNilSelf
 
-#if !defined(OBJC_COLLECTING_CACHE)
-// check whether context is multithreaded
-	EXTERN_TO_REG(__objc_multithread_mask,%ecx)
-	testl	%ecx, %ecx
-	je	LMsgSendMT
-#endif
-
-// single threaded and receiver is non-nil: search the cache
+// receiver is non-nil: search the cache
 	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendCacheMiss
 	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
 	jmp	*%eax			// goto *imp
@@ -587,32 +670,6 @@ LMsgSendCacheMiss:
 	MethodTableLookup WORD_RETURN, MSG_SEND
 	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
 	jmp	*%eax			// goto *imp
-
-#if !defined(OBJC_COLLECTING_CACHE)
-// multithreaded: hold _messageLock while accessing cache
-LMsgSendMT:
-	movl	$1, %ecx			// acquire _messageLock
-	LEA_STATIC_DATA	%eax, _messageLock, EXTERNAL_SYMBOL
-LMsgSendLockSpin:
-	xchgl	%ecx, (%eax)
-	cmpl	$0, %ecx
-	jne	LMsgSendLockSpin
-	movl	self(%esp), %eax		// restore eax
-
-	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendMTCacheMiss
-	LEA_STATIC_DATA	%ecx, _messageLock, EXTERNAL_SYMBOL
-	movl	$0, (%ecx)		// unlock
-	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
-	jmp	*%eax			// goto *imp
-
-// cache miss: go search the method lists
-LMsgSendMTCacheMiss:
-	MethodTableLookup WORD_RETURN, MSG_SEND
-	LEA_STATIC_DATA	%ecx, _messageLock, EXTERNAL_SYMBOL
-	movl	$0, (%ecx)		// unlock
-	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
-	jmp	*%eax			// goto *imp
-#endif
 
 // message sent to nil object: call optional handler and return nil
 LMsgSendNilSelf:
@@ -643,14 +700,7 @@ LMsgSendExit:
 
 	movl	super(%esp), %eax
 
-#if !defined(OBJC_COLLECTING_CACHE)
-// check whether context is multithreaded
-	EXTERN_TO_REG_AGAIN(__objc_multithread_mask,%ecx)
-	testl	%ecx, %ecx
-	je	LMsgSendSuperMT
-#endif
-
-// single threaded and receiver is non-nil: search the cache
+// receiver is non-nil: search the cache
 	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperCacheMiss
 	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
 	jmp	*%eax			// goto *imp
@@ -660,32 +710,6 @@ LMsgSendSuperCacheMiss:
 	MethodTableLookup WORD_RETURN, MSG_SENDSUPER
 	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
 	jmp	*%eax			// goto *imp
-
-#if !defined(OBJC_COLLECTING_CACHE)
-LMsgSendSuperMT:
-// multithreaded: hold _messageLock while accessing cache
-	movl	$1, %ecx			// acquire _messageLock
-	LEA_STATIC_DATA	%eax, _messageLock, EXTERNAL_SYMBOL
-LMsgSendSuperLockSpin:
-	xchgl	%ecx, (%eax)
-	cmpl	$0, %ecx
-	jne	LMsgSendSuperLockSpin
-	movl	super(%esp), %eax	// restore eax
-
-	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperMTCacheMiss
-	LEA_STATIC_DATA	%ecx, _messageLock, EXTERNAL_SYMBOL
-	movl	$0, (%ecx)		// unlock
-	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
-	jmp	*%eax			// goto *imp
-
-// cache miss: go search the method lists
-LMsgSendSuperMTCacheMiss:
-	MethodTableLookup WORD_RETURN, MSG_SENDSUPER
-	LEA_STATIC_DATA	%ecx, _messageLock, EXTERNAL_SYMBOL
-	movl	$0, (%ecx)		// unlock
-	movl	$kFwdMsgSend, %edx	// flag word-return for _objc_msgForward
-	jmp	*%eax			// goto *imp
-#endif
 
 LMsgSendSuperExit:
 	END_ENTRY	_objc_msgSendSuper
@@ -757,14 +781,7 @@ LMsgSendvArgsOK:
 	testl	%eax, %eax
 	je	LMsgSendStretNilSelf
 
-#if !defined(OBJC_COLLECTING_CACHE)
-// check whether context is multithreaded
-	EXTERN_TO_REG_AGAIN(__objc_multithread_mask,%ecx)
-	testl	%ecx, %ecx
-	je	LMsgSendStretMT
-#endif
-
-// single threaded and receiver is non-nil: search the cache
+// receiver is non-nil: search the cache
 	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendStretCacheMiss
 	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
 	jmp	*%eax			// goto *imp
@@ -774,32 +791,6 @@ LMsgSendStretCacheMiss:
 	MethodTableLookup STRUCT_RETURN, MSG_SEND
 	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
 	jmp	*%eax			// goto *imp
-
-#if !defined(OBJC_COLLECTING_CACHE)
-// multithreaded: hold _messageLock while accessing cache
-LMsgSendStretMT:
-	movl	$1, %ecx			// acquire _messageLock
-	LEA_STATIC_DATA	%eax, _messageLock, EXTERNAL_SYMBOL
-LMsgSendStretLockSpin:
-	xchgl	%ecx, (%eax)
-	cmpl	$0, %ecx
-	jne	LMsgSendStretLockSpin
-	movl	self_stret(%esp), %eax	// restore eax
-
-	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendStretMTCacheMiss
-	LEA_STATIC_DATA	%ecx, _messageLock, EXTERNAL_SYMBOL
-	movl	$0, (%ecx)		// unlock
-	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
-	jmp	*%eax			// goto *imp
-
-// cache miss: go search the method lists
-LMsgSendStretMTCacheMiss:
-	MethodTableLookup STRUCT_RETURN, MSG_SEND
-	LEA_STATIC_DATA	%ecx, _messageLock, EXTERNAL_SYMBOL
-	movl	$0, (%ecx)		// unlock
-	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
-	jmp	*%eax			// goto *imp
-#endif
 
 // message sent to nil object: call optional handler and return nil
 LMsgSendStretNilSelf:
@@ -840,14 +831,7 @@ LMsgSendStretExit:
 
 	movl	super_stret(%esp), %eax
 
-#if !defined(OBJC_COLLECTING_CACHE)
-// check whether context is multithreaded
-	EXTERN_TO_REG_AGAIN(__objc_multithread_mask,%ecx)
-	testl	%ecx, %ecx
-	je	LMsgSendSuperStretMT
-#endif
-
-// single threaded and receiver is non-nil: search the cache
+// receiver is non-nil: search the cache
 	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperStretCacheMiss
 	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
 	jmp	*%eax			// goto *imp
@@ -857,32 +841,6 @@ LMsgSendSuperStretCacheMiss:
 	MethodTableLookup STRUCT_RETURN, MSG_SENDSUPER
 	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
 	jmp	*%eax			// goto *imp
-
-#if !defined(OBJC_COLLECTING_CACHE)
-LMsgSendStretSuperMT:
-// multithreaded: hold _messageLock while accessing cache
-	movl	$1, %ecx			// acquire _messageLock
-	LEA_STATIC_DATA	%eax, _messageLock, EXTERNAL_SYMBOL
-LMsgSendSuperStretLockSpin:
-	xchgl	%ecx, (%eax)
-	cmpl	$0, %ecx
-	jne	LMsgSendSuperStretLockSpin
-	movl	super_stret(%esp), %eax	// restore eax
-
-	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperStretMTCacheMiss
-	LEA_STATIC_DATA	%ecx, _messageLock, EXTERNAL_SYMBOL
-	movl	$0, (%ecx)		// unlock
-	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
-	jmp	*%eax			// goto *imp
-
-// cache miss: go search the method lists
-LMsgSendSuperStretMTCacheMiss:
-	MethodTableLookup MSG_SENDSUPER
-	LEA_STATIC_DATA	%ecx, _messageLock, EXTERNAL_SYMBOL
-	movl	$0, (%ecx)		// unlock
-	movl	$kFwdMsgSendStret, %edx	// flag struct-return for _objc_msgForward
-	jmp	*%eax			// goto *imp
-#endif
 
 LMsgSendSuperStretExit:
 	END_ENTRY	_objc_msgSendSuper_stret
@@ -1043,7 +1001,7 @@ L__objc_msgForwardStret$pic_base:
 #endif
 	pushl	%ecx
 	pushl	(self_stret+16)(%esp)
-	call	_objc_msgSend_stret
+	call	_objc_msgSend
 	movl    %ebp,%esp
 	popl    %ebp
 	ret

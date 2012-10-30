@@ -49,7 +49,6 @@
  *		Created from m98k.
  ********************************************************************/
 
-#if defined(OBJC_COLLECTING_CACHE)
 ; _objc_entryPoints and _objc_exitPoints are used by method dispatch
 ; caching code to figure out whether any threads are actively 
 ; in the cache for dispatching.  The labels surround the asm code
@@ -57,6 +56,8 @@
 	.data
 .globl _objc_entryPoints
 _objc_entryPoints:
+	.long	__cache_getImp
+	.long	__cache_getMethod
 	.long	_objc_msgSend
 	.long	_objc_msgSend_stret
 	.long	_objc_msgSendSuper
@@ -69,6 +70,8 @@ _objc_entryPoints:
 
 .globl _objc_exitPoints
 _objc_exitPoints:
+	.long	LGetImpExit
+	.long	LGetMethodExit
 	.long	LMsgSendExit
 	.long	LMsgSendStretExit
 	.long	LMsgSendSuperExit
@@ -78,7 +81,6 @@ _objc_exitPoints:
 	.long	LMsgSendSuperFewExit
 	.long	LMsgSendSuperFewStretExit
 	.long	0
-#endif
 
 /********************************************************************
  *
@@ -157,7 +159,7 @@ EXTERNAL_SYMBOL	= 1
 
 #if defined(__DYNAMIC__)
 	mflr		r0
-	bl		1f
+	bcl		20,31,1f	; 31 is cr7[so]
 1:	mflr		$0
 	mtlr		r0
 .if $2 == EXTERNAL_SYMBOL
@@ -194,7 +196,7 @@ EXTERNAL_SYMBOL	= 1
 .macro	LEA_STATIC_DATA
 #if defined(__DYNAMIC__)
 	mflr		r0
-	bl		1f
+	bcl		20,31,1f	; 31 is cr7[so]
 1:	mflr		$0
 	mtlr		r0
 .if $2 == EXTERNAL_SYMBOL
@@ -291,7 +293,7 @@ $0:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-; CacheLookup	WORD_RETURN | STRUCT_RETURN, MSG_SEND | MSG_SENDSUPER, cacheMissLabel, FEW_ARGS | MANY_ARGS
+; CacheLookup	WORD_RETURN | STRUCT_RETURN, MSG_SEND | MSG_SENDSUPER | CACHE_GET, cacheMissLabel, FEW_ARGS | MANY_ARGS
 ;
 ; Locate the implementation for a selector in a class method cache.
 ;
@@ -299,13 +301,20 @@ $0:
 ;	STRUCT_RETURN	(r3 is structure return address, r4 is first parameter)
 ;	MSG_SEND	(first parameter is receiver)
 ;	MSG_SENDSUPER	(first parameter is address of objc_super structure)
+;	CACHE_GET	(first parameter is class; return method triplet)
 ;
 ;	cacheMissLabel = label to branch to iff method is not cached
 ;
 ; Eats: r0, r11, r12
-; On exit:	(found) imp in ctr register
+; On exit:	(found) MSG_SEND and MSG_SENDSUPER: return imp in r12 and ctr
+;		(found) CACHE_GET: return method triplet in r12
 ;		(not found) jumps to cacheMissLabel
-;	
+;
+; For MSG_SEND and MSG_SENDSUPER, the messenger jumps to the imp 
+; in ctr. The same imp in r12 is used by the method itself for its
+; relative addressing. This saves the usual "jump to next line and 
+; fetch link register" construct inside the method.
+;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Values to specify to method lookup macros whether the return type of
@@ -317,6 +326,7 @@ STRUCT_RETURN	= 1
 ; the method is an integer or structure.
 MSG_SEND	= 0
 MSG_SENDSUPER	= 1
+CACHE_GET	= 2
 
 ; Values to specify to method lookup macros whether this is a "few args" call or not
 ; (number of args < 5 , including self and _cmd)
@@ -332,30 +342,29 @@ MANY_ARGS	= 1
 	li		r7,0			; no probes so far!
 #endif
 
-	stw		r8,44(r1)		; save r8
 .if $3 == MANY_ARGS
 	stw		r9,48(r1)		; save r9 and r10
 	stw		r10,52(r1)		;
 .endif
 
-; locate the cache
-; Locking idea:
-;LGetMask_$0_$1_$2
-
 .if $0 == WORD_RETURN				; WORD_RETURN
 
 .if $1 == MSG_SEND				; MSG_SEND
 	lwz		r12,isa(r3)		; class = receiver->isa
-.else						; MSG_SENDSUPER
+.elseif $1 == MSG_SENDSUPER			; MSG_SENDSUPER
 	lwz		r12,class(r3)		; class = super->class
+.else						; CACHE_GET
+	mr		r12,r3	 		; class = class
 .endif
 
 .else	
 						; STRUCT_RETURN
 .if $1 == MSG_SEND				; MSG_SEND
 	lwz		r12,isa(r4)		; class = receiver->isa
-.else						; MSG_SENDSUPER
+.elseif $1 == MSG_SENDSUPER			; MSG_SENDSUPER
 	lwz		r12,class(r4)		; class = super->class
+.else						; CACHE_GET
+	mr		r12,r4	 		; class = class
 .endif
 
 .endif
@@ -365,21 +374,14 @@ MANY_ARGS	= 1
 #if defined(OBJC_INSTRUMENTED)
 	mr		r6,r12			; save cache pointer
 #endif
-	lwz	r11,mask(r12)		; mask = cache->mask
-
-; Locking idea
-;	lea	r0,mask(r12)		; XXX eliminate this by moving the mask to first position
-;	lwarx	r11,r0			; mask = reserve(cache->mask)
-;	bgt	LGetMask_$0_$1_$2	; if (mask > 0) goto LGetMask  // someone already using it
-;	neg	r11			; mask = -mask
-;	stcwx.	r11,r0			; cache->mask = mask		// store positive to mark in use
-;	bf	LGetMask_$0_$1_$2	; go to the class and get a possibly new one again
+	lwz		r11,mask(r12)		; mask = cache->mask
 
 	addi		r9,r12,buckets		; buckets = cache->buckets
+	slwi		r11,r11,2		; r11 = mask << 2 
 .if $0 == WORD_RETURN				; WORD_RETURN
-	and		r12,r4,r11		; index = selector & mask
+	and		r12,r4,r11		; bytes = sel & (mask<<2)
 .else						; STRUCT_RETURN
-	and		r12,r5,r11		; index = selector & mask
+	and		r12,r5,r11		; bytes = sel & (mask<<2)
 .endif
 
 #if defined(OBJC_INSTRUMENTED)
@@ -391,17 +393,17 @@ LMiss_$0_$1_$2:
 	addi		r9,r9,1			;
 	slwi		r9,r9,2			; tableSize = entryCount * sizeof(entry)
 	addi		r9,r9,buckets		; offset = buckets + tableSize
-	add		r8,r6,r9		; cacheData = &cache->buckets[mask+1]
-	lwz		r9,missCount(r8)	; cacheData->missCount += 1
+	add		r11,r6,r9		; cacheData = &cache->buckets[mask+1]
+	lwz		r9,missCount(r11)	; cacheData->missCount += 1
 	addi		r9,r9,1			; 
-	stw		r9,missCount(r8)	; 
-	lwz		r9,missProbes(r8)	; cacheData->missProbes += probeCount
+	stw		r9,missCount(r11)	; 
+	lwz		r9,missProbes(r11)	; cacheData->missProbes += probeCount
 	add		r9,r9,r7		; 
-	stw		r9,missProbes(r8)	; 
-	lwz		r9,maxMissProbes(r8)	; if (probeCount > cacheData->maxMissProbes)
+	stw		r9,missProbes(r11)	; 
+	lwz		r9,maxMissProbes(r11)	; if (probeCount > cacheData->maxMissProbes)
 	cmplw		r7,r9			; maxMissProbes = probeCount
 	ble		.+8			; 
-	stw		r7,maxMissProbes(r8)	;
+	stw		r7,maxMissProbes(r11)	;
 
 	lwz		r6,36(r1)		; restore r6
 	lwz		r7,40(r1)		; restore r7
@@ -414,8 +416,9 @@ LLoop_$0_$1_$2:
 #if defined(OBJC_INSTRUMENTED)
 	addi		r7,r7,1			; probeCount += 1
 #endif
-	slwi		r0,r12,2		; convert word index into byte count
-	lwzx		r10,r9,r0		; method = cache->buckets[index]
+
+	lwzx		r10,r9,r12		; method = buckets[bytes/4]
+	addi		r12,r12,4		; bytes += 4
 	cmplwi		r10,0			; if (method == NULL)
 #if defined(OBJC_INSTRUMENTED)
 	beq		LMiss_$0_$1_$2
@@ -423,28 +426,25 @@ LLoop_$0_$1_$2:
 	beq		$2			; goto cacheMissLabel
 #endif
 
-	addi		r12,r12,1		; index += 1
-	lwz		r8,method_name(r10)	; name  = method->method_name
-	and		r12,r12,r11		; index &= mask
-	lwz		r10,method_imp(r10)	; imp = method->method_imp
+	lwz		r0,method_name(r10)	; name  = method->method_name
+	and		r12,r12,r11		; bytes &= (mask<<2)
 .if $0 == WORD_RETURN				; WORD_RETURN
-	cmplw		r8,r4			; if (name != selector)
+	cmplw		r0,r4			; if (name != selector)
 .else						; STRUCT_RETURN
-	cmplw		r8,r5			; if (name != selector)
+	cmplw		r0,r5			; if (name != selector)
 .endif
 	bne		LLoop_$0_$1_$2		; goto loop
 
-; Locking idea
-;   clear lock
-;	lwz	r12,isa(r3)	; XXX or r4 or class(r3/4) - use macro
-;	lwz	r12,cache(r12)
-;	neg	r11			; mask = -mask
-;	stwz	r11,mask(r12)		; cache->mask = mask		// store negative to mark free
-
-
-; cache hit, r10 == method implementation address
+; cache hit, r10 == method triplet address
+.if $1 == CACHE_GET
+	;  return method triplet in r12
+	mr		r12,r10
+.else
+	; return method imp in ctr and r12
+	lwz		r10,method_imp(r10)	; imp = method->method_imp
 	mr		r12,r10			; copy implementation to r12
 	mtctr		r10			; ctr = imp
+.endif
 
 #if defined(OBJC_INSTRUMENTED)
 	; r6 = cache, r7 = probeCount
@@ -452,23 +452,22 @@ LLoop_$0_$1_$2:
 	addi		r9,r9,1			;
 	slwi		r9,r9,2			; tableSize = entryCount * sizeof(entry)
 	addi		r9,r9,buckets		; offset = buckets + tableSize
-	add		r8,r6,r9		; cacheData = &cache->buckets[mask+1]
-	lwz		r9,hitCount(r8)		; cache->hitCount += 1
+	add		r11,r6,r9		; cacheData = &cache->buckets[mask+1]
+	lwz		r9,hitCount(r11)	; cache->hitCount += 1
 	addi		r9,r9,1			; 
-	stw		r9,hitCount(r8)		; 
-	lwz		r9,hitProbes(r8)	; cache->hitProbes += probeCount
+	stw		r9,hitCount(r11)	; 
+	lwz		r9,hitProbes(r11)	; cache->hitProbes += probeCount
 	add		r9,r9,r7		; 
-	stw		r9,hitProbes(r8)	; 
-	lwz		r9,maxHitProbes(r8)	; if (probeCount > cache->maxMissProbes)
+	stw		r9,hitProbes(r11)	; 
+	lwz		r9,maxHitProbes(r11)	; if (probeCount > cache->maxMissProbes)
 	cmplw		r7,r9			;maxMissProbes = probeCount
 	ble		.+8			; 
-	stw		r7,maxHitProbes(r8)	; 
+	stw		r7,maxHitProbes(r11)	; 
 
 	lwz		r6,36(r1)		; restore r6
 	lwz		r7,40(r1)		; restore r7
 #endif
 
-	lwz		r8,44(r1)		; restore r8
 .if $3 == MANY_ARGS
 	lwz		r9,48(r1)		; restore r9 and r10
 	lwz		r10,52(r1)		;
@@ -476,19 +475,56 @@ LLoop_$0_$1_$2:
 
 .endmacro
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; CacheLookup cache locking - 2001-11-12
+; The collecting cache mechanism precludes the need for a cache lock 
+; in objc_msgSend. The cost of the collecting cache is small: a few 
+; K of memory for uncollected caches, and less than 1 ms per collection. 
+; A large app will only run collection a few times.
+; Using the code below to lock the cache almost doubles messaging time, 
+; costing several seconds of CPU across several minutes of operation.
+; The code below probably could be improved, but almost all of the 
+; locking slowdown is in the sync and isync.
+;
+; 40 million message test times (G4 1x667):
+;   no lock  4.390u 0.030s 0:04.59 96.2%     0+0k 0+1io 0pf+0w
+; with lock  9.120u 0.010s 0:09.83 92.8%     0+0k 0+0io 0pf+0w
+;
+;; LockCache mask_dest, cache
+;.macro LockCache
+;        ; LOCKED mask is NEGATIVE
+;        lwarx   $0, mask, $1    ; mask = reserve(cache->mask)
+;        cmpwi   $0, 0           ;
+;        blt     .-8             ; try again if mask < 0
+;        neg     r0, $0          ;
+;        stwcx.  r0, mask, $1    ; cache->mask = -mask ($0 keeps +mask)
+;        bne     .-20            ; try again if lost reserve
+;        isync                   ; flush prefetched instructions after locking
+;.endmacro
+;        
+;; UnlockCache (mask<<2), cache
+;.macro UnlockCache
+;        sync                    ; finish previous instructions before unlocking
+;        srwi    r0, $0, 2       ; r0 = (mask<<2) >> 2
+;        stw     r0, mask($1)    ; cache->mask = +mask
+;.endmacro
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
 ;
 ; MethodTableLookup WORD_RETURN | STRUCT_RETURN, MSG_SEND | MSG_SENDSUPER, FEW_ARGS | MANY_ARGS
 ;
-; Takes: WORD_RETURN    (r3 is first parameter)
+; Takes: WORD_RETURN	(r3 is first parameter)
 ;	STRUCT_RETURN	(r3 is structure return address, r4 is first parameter)
 ;	MSG_SEND	(first parameter is receiver)
 ;	MSG_SENDSUPER	(first parameter is address of objc_super structure)
 ;
 ; Eats: r0, r11, r12
-; On exit: restores registers r8 and possibly, r9 and r10, saved by CacheLookup
+; On exit: if MANY_ARGS, restores r9,r10 saved by CacheLookup
 ;	imp in ctr
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -500,7 +536,8 @@ HAVE_CALL_EXTERN_lookupMethodAndLoadCache	= 0
 	stw		r5, 32(r1)		;
 	stw		r6, 36(r1)		;
 	stw		r7, 40(r1)		;
-	; r8 and possibly, r9 and r10, were saved by CacheLookup
+	stw		r8, 44(r1)		;
+	; if MANY_ARGS, r9 and r10 were saved by CacheLookup
 
 	mflr		r0			; save lr
 	stw		r0,8(r1)		;
@@ -585,10 +622,10 @@ HAVE_CALL_EXTERN_lookupMethodAndLoadCache = 1
 	lwz		r5, 32(r1)		;
 	lwz		r6, 36(r1)		;
 	lwz		r7, 40(r1)		;
+	lwz		r8, 44(r1)		;
 
-	lwz		r8, 44(r1)		; restore leftovers from CacheLookup...
 .if $2 == MANY_ARGS
-	lwz		r9, 48(r1)		;
+	lwz		r9, 48(r1)		; restore saves from CacheLookup
 	lwz		r10,52(r1)		;
 .endif
 
@@ -683,6 +720,77 @@ HAVE_CALL_EXTERN_mcount = 1
 #endif
 	.endmacro
 
+
+/********************************************************************
+ * Method _cache_getMethod(Class cls, SEL sel)
+ *
+ * On entry:    r3 = class whose cache is to be searched
+ *              r4 = selector to search for
+ *
+ * If found, returns method triplet pointer.
+ * If not found, returns NULL.
+ *
+ * NOTE: _cache_getMethod never returns any cache entry whose implementation
+ * is _objc_msgForward. It returns NULL instead. This prevents thread-
+ * safety and memory management bugs in _class_lookupMethodAndLoadCache. 
+ * See _class_lookupMethodAndLoadCache for details. 
+ ********************************************************************/
+        
+        ENTRY __cache_getMethod
+; do profiling if enabled
+        CALL_MCOUNT
+
+; do lookup
+        CacheLookup     WORD_RETURN, CACHE_GET, LGetMethodMiss, MANY_ARGS
+        
+; cache hit, method triplet in r12
+; check for _objc_msgForward
+        lwz     r11, method_imp(r12)    ; get the imp
+        LEA_STATIC_DATA r10, __objc_msgForward, LOCAL_SYMBOL
+        cmplw   r11, r10
+        beq     LGetMethodMiss          ; if (imp==_objc_msgForward) return nil
+        mr      r3, r12                 ; else return method triplet address
+        blr
+        
+LGetMethodMiss:
+; cache miss, return nil
+        li      r3, 0           ; return nil
+        blr
+
+LGetMethodExit: 
+        END_ENTRY __cache_getMethod
+
+
+/********************************************************************
+ * IMP _cache_getImp(Class cls, SEL sel)
+ *
+ * On entry:    r3 = class whose cache is to be searched
+ *              r4 = selector to search for
+ *
+ * If found, returns method implementation.
+ * If not found, returns NULL.
+ ********************************************************************/
+
+        ENTRY __cache_getImp
+; do profiling if enabled
+        CALL_MCOUNT
+
+; do lookup
+        CacheLookup WORD_RETURN, CACHE_GET, LGetImpMiss, MANY_ARGS
+        
+; cache hit, method triplet in r12
+        lwz     r3, method_imp(r12)    ; return method imp address
+        blr
+        
+LGetImpMiss:
+; cache miss, return nil
+        li      r3, 0           ; return nil
+        blr
+
+LGetImpExit: 
+        END_ENTRY __cache_getImp
+
+
 /********************************************************************
  * id		objc_msgSend(id	self,
  *			SEL	op,
@@ -709,15 +817,7 @@ L__objc_msgNil:
 	cmplwi		r3,0			; receiver nil?
 	beq		LMsgSendNilSelf		; if so, call handler or return nil
 
-#if !defined(OBJC_COLLECTING_CACHE)
-; check whether context is multithreaded
-	lis		r11,ha16(__objc_multithread_mask)
-	lwz		r11,lo16(__objc_multithread_mask)(r11)
-	cmplwi		r11,0			; objc_multithread_mask zero?
-	beq		LMsgSendMT		; branch to the locking case
-#endif
-
-; single threaded and receiver is non-nil: search the cache
+; receiver is non-nil: search the cache
 	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendCacheMiss, MANY_ARGS
 	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
 	bctr					; goto *imp;
@@ -727,23 +827,6 @@ LMsgSendCacheMiss:
 	MethodTableLookup WORD_RETURN, MSG_SEND, MANY_ARGS
 	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
 	bctr					; goto *imp;
-
-#if !defined(OBJC_COLLECTING_CACHE)
-; multithreaded: hold _messageLock while accessing cache
-LMsgSendMT:
-	PLOCK	r11, _messageLock
-	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendMTCacheMiss, MANY_ARGS
-	PUNLOCK	r11, _messageLock
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendMTCacheMiss:
-	MethodTableLookup WORD_RETURN, MSG_SEND, MANY_ARGS
-	PUNLOCK	r11, _messageLock
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-#endif
 
 ; message sent to nil object call: optional handler and return nil
 LMsgSendNilSelf:
@@ -789,15 +872,7 @@ LMsgSendExit:
 	cmplwi		r4,0			; receiver nil?
 	beq		LMsgSendStretNilSelf	; if so, call handler or just return
 
-#if !defined(OBJC_COLLECTING_CACHE)
-; check whether context is multithreaded
-	lis		r11,ha16(__objc_multithread_mask)
-	lwz		r11,lo16(__objc_multithread_mask)(r11)
-	cmplwi		r11,0			; objc_multithread_mask zero?
-	beq		LMsgSendStretMT		; branch to the locking case
-#endif
-
-; single threaded and receiver is non-nil: search the cache
+; receiver is non-nil: search the cache
 	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendStretCacheMiss, MANY_ARGS
 	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
 	bctr					; goto *imp;
@@ -807,23 +882,6 @@ LMsgSendStretCacheMiss:
 	MethodTableLookup STRUCT_RETURN, MSG_SEND, MANY_ARGS
 	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
 	bctr					; goto *imp;
-
-#if !defined(OBJC_COLLECTING_CACHE)
-; multithreaded: hold _messageLock while accessing cache
-LMsgSendStretMT:	
-	PLOCK	r11, _messageLock
-	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendStretMTCacheMiss, MANY_ARGS
-	PUNLOCK	r11, _messageLock
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendStretMTCacheMiss:
-	MethodTableLookup STRUCT_RETURN, MSG_SEND, MANY_ARGS
-	PUNLOCK	r11, _messageLock
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-#endif
 
 ; message sent to nil object call optional handler and return nil
 LMsgSendStretNilSelf:
@@ -863,15 +921,7 @@ LMsgSendStretExit:
 ; do profiling when enabled
 	CALL_MCOUNT
 
-#if !defined(OBJC_COLLECTING_CACHE)
-; check whether context is multithreaded
-	lis		r11,ha16(__objc_multithread_mask)
-	lwz		r11,lo16(__objc_multithread_mask)(r11)
-	cmplwi		r11,0			; objc_multithread_mask zero?
-	beq		LMsgSendSuperMT		; branch to the locking case
-#endif
-
-; single threaded: search the cache
+; search the cache
 	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperCacheMiss, MANY_ARGS
 	lwz		r3,receiver(r3)		; receiver is the first arg
 	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
@@ -883,25 +933,6 @@ LMsgSendSuperCacheMiss:
 	lwz		r3,receiver(r3)		; receiver is the first arg
 	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
 	bctr					; goto *imp;
-
-#if !defined(OBJC_COLLECTING_CACHE)
-; multithreaded: hold _messageLock while accessing cache
-LMsgSendSuperMT:	
-	PLOCK	r11, _messageLock
-	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperMTCacheMiss, MANY_ARGS
-	PUNLOCK	r11, _messageLock
-	lwz		r3,receiver(r3)		; receiver is the first arg
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendSuperMTCacheMiss:
-	MethodTableLookup WORD_RETURN, MSG_SENDSUPER, MANY_ARGS
-	PUNLOCK	r11, _messageLock
-	lwz		r3,receiver(r3)		; receiver is the first arg
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-#endif
 
 LMsgSendSuperExit:
 	END_ENTRY	_objc_msgSendSuper
@@ -931,15 +962,7 @@ LMsgSendSuperExit:
 ; do profiling when enabled
 	CALL_MCOUNT
 
-#if !defined(OBJC_COLLECTING_CACHE)
-; check whether context is multithreaded
-	lis		r11,ha16(__objc_multithread_mask)
-	lwz		r11,lo16(__objc_multithread_mask)(r11)
-	cmplwi		r11,0			; objc_multithread_mask zero?
-	beq		LMsgSendSuperStretMT	; branch to the locking case
-#endif
-
-; single threaded: search the cache
+; search the cache
 	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperStretCacheMiss, MANY_ARGS
 	lwz		r4,receiver(r4)		; receiver is the first arg
 	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
@@ -951,25 +974,6 @@ LMsgSendSuperStretCacheMiss:
 	lwz		r4,receiver(r4)		; receiver is the first arg
 	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
 	bctr					; goto *imp;
-
-#if !defined(OBJC_COLLECTING_CACHE)
-; multithreaded: hold _messageLock while accessing cache
-LMsgSendSuperStretMT:	
-	PLOCK	r11, _messageLock
-	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperStretMTCacheMiss, MANY_ARGS
-	PUNLOCK	r11, _messageLock
-	lwz		r4,receiver(r4)		; receiver is the first arg
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendSuperStretMTCacheMiss:
-	MethodTableLookup STRUCT_RETURN, MSG_SENDSUPER, MANY_ARGS
-	PUNLOCK	r11, _messageLock
-	lwz		r4,receiver(r4)		; receiver is the first arg
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-#endif
 
 LMsgSendSuperStretExit:
 	END_ENTRY	_objc_msgSendSuper_stret
@@ -1359,15 +1363,7 @@ LMsgSendvStretSendIt:
 	cmplwi		r3,0			; receiver nil?
 	beq		LMsgSendFewNilSelf	; if so, call handler or return nil
 
-#if !defined(OBJC_COLLECTING_CACHE)
-; check whether context is multithreaded
-	lis		r11,ha16(__objc_multithread_mask)
-	lwz		r11,lo16(__objc_multithread_mask)(r11)
-	cmplwi		r11,0			; objc_multithread_mask zero?
-	beq		LMsgSendFewMT		; branch to the locking case
-#endif
-
-; single threaded and receiver is non-nil: search the cache
+; receiver is non-nil: search the cache
 	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendFewCacheMiss, FEW_ARGS
 	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
 	bctr					; goto *imp;
@@ -1377,23 +1373,6 @@ LMsgSendFewCacheMiss:
 	MethodTableLookup WORD_RETURN, MSG_SEND, FEW_ARGS
 	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
 	bctr					; goto *imp;
-
-#if !defined(OBJC_COLLECTING_CACHE)
-; multithreaded: hold _messageLock while accessing cache
-LMsgSendFewMT:
-	PLOCK	r11, _messageLock
-	CacheLookup WORD_RETURN, MSG_SEND, LMsgSendFewMTCacheMiss, FEW_ARGS
-	PUNLOCK	r11, _messageLock
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendFewMTCacheMiss:
-	MethodTableLookup WORD_RETURN, MSG_SEND, FEW_ARGS
-	PUNLOCK	r11, _messageLock
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-#endif
 
 ; message sent to nil object call: optional handler and return nil
 LMsgSendFewNilSelf:
@@ -1439,15 +1418,7 @@ LMsgSendFewExit:
 	cmplwi		r4,0			; receiver nil?
 	beq		LMsgSendFewStretNilSelf	; if so, call handler or just return
 
-#if !defined(OBJC_COLLECTING_CACHE)
-; check whether context is multithreaded
-	lis		r11,ha16(__objc_multithread_mask)
-	lwz		r11,lo16(__objc_multithread_mask)(r11)
-	cmplwi		r11,0			; objc_multithread_mask zero?
-	beq		LMsgSendFewStretMT	; branch to the locking case
-#endif
-
-; single threaded and receiver is non-nil: search the cache
+; receiver is non-nil: search the cache
 	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendFewStretCacheMiss, FEW_ARGS
 	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
 	bctr					; goto *imp;
@@ -1457,23 +1428,6 @@ LMsgSendFewStretCacheMiss:
 	MethodTableLookup STRUCT_RETURN, MSG_SEND, FEW_ARGS
 	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
 	bctr					; goto *imp;
-
-#if !defined(OBJC_COLLECTING_CACHE)
-; multithreaded: hold _messageLock while accessing cache
-LMsgSendFewStretMT:	
-	PLOCK	r11, _messageLock
-	CacheLookup STRUCT_RETURN, MSG_SEND, LMsgSendFewStretMTCacheMiss, FEW_ARGS
-	PUNLOCK	r11, _messageLock
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendFewStretMTCacheMiss:
-	MethodTableLookup STRUCT_RETURN, MSG_SEND, FEW_ARGS
-	PUNLOCK	r11, _messageLock
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-#endif
 
 ; message sent to nil object call optional handler and return nil
 LMsgSendFewStretNilSelf:
@@ -1513,15 +1467,7 @@ LMsgSendFewStretExit:
 ; do profiling when enabled
 	CALL_MCOUNT
 
-#if !defined(OBJC_COLLECTING_CACHE)
-; check whether context is multithreaded
-	lis		r11,ha16(__objc_multithread_mask)
-	lwz		r11,lo16(__objc_multithread_mask)(r11)
-	cmplwi		r11,0			; objc_multithread_mask zero?
-	beq		LMsgSendSuperFewMT	; branch to the locking case
-#endif
-
-; single threaded: search the cache
+; search the cache
 	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperFewCacheMiss, FEW_ARGS
 	lwz		r3,receiver(r3)		; receiver is the first arg
 	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
@@ -1533,25 +1479,6 @@ LMsgSendSuperFewCacheMiss:
 	lwz		r3,receiver(r3)		; receiver is the first arg
 	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
 	bctr					; goto *imp;
-
-#if !defined(OBJC_COLLECTING_CACHE)
-; multithreaded: hold _messageLock while accessing cache
-LMsgSendSuperFewMT:	
-	PLOCK	r11, _messageLock
-	CacheLookup WORD_RETURN, MSG_SENDSUPER, LMsgSendSuperFewMTCacheMiss, FEW_ARGS
-	PUNLOCK	r11, _messageLock
-	lwz		r3,receiver(r3)		; receiver is the first arg
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendSuperFewMTCacheMiss:
-	MethodTableLookup WORD_RETURN, MSG_SENDSUPER, FEW_ARGS
-	PUNLOCK	r11, _messageLock
-	lwz		r3,receiver(r3)		; receiver is the first arg
-	li		r11,kFwdMsgSend		; indicate word-return to _objc_msgForward
-	bctr					; goto *imp;
-#endif
 
 LMsgSendSuperFewExit:
 	END_ENTRY	_objc_msgSendSuperFew
@@ -1581,15 +1508,7 @@ LMsgSendSuperFewExit:
 ; do profiling when enabled
 	CALL_MCOUNT
 
-#if !defined(OBJC_COLLECTING_CACHE)
-; check whether context is multithreaded
-	lis		r11,ha16(__objc_multithread_mask)
-	lwz		r11,lo16(__objc_multithread_mask)(r11)
-	cmplwi		r11,0			; objc_multithread_mask zero?
-	beq		LMsgSendSuperFewStretMT	; branch to the locking case
-#endif
-
-; single threaded: search the cache
+; search the cache
 	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperFewStretCacheMiss, FEW_ARGS
 	lwz		r4,receiver(r4)		; receiver is the first arg
 	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
@@ -1601,25 +1520,6 @@ LMsgSendSuperFewStretCacheMiss:
 	lwz		r4,receiver(r4)		; receiver is the first arg
 	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
 	bctr					; goto *imp;
-
-#if !defined(OBJC_COLLECTING_CACHE)
-; multithreaded: hold _messageLock while accessing cache
-LMsgSendSuperFewStretMT:	
-	PLOCK	r11, _messageLock
-	CacheLookup STRUCT_RETURN, MSG_SENDSUPER, LMsgSendSuperFewStretMTCacheMiss, FEW_ARGS
-	PUNLOCK	r11, _messageLock
-	lwz		r4,receiver(r4)		; receiver is the first arg
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-
-; cache miss: go search the method lists
-LMsgSendSuperFewStretMTCacheMiss:
-	MethodTableLookup STRUCT_RETURN, MSG_SENDSUPER, FEW_ARGS
-	PUNLOCK	r11, _messageLock
-	lwz		r4,receiver(r4)		; receiver is the first arg
-	li		r11,kFwdMsgSendStret	; indicate struct-return to _objc_msgForward
-	bctr					; goto *imp;
-#endif
 
 LMsgSendSuperFewStretExit:
 	END_ENTRY	_objc_msgSendSuperFew_stret

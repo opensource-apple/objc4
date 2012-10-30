@@ -27,6 +27,133 @@
 *	Author:	s. naroff
 **********************************************************************/
 
+
+/***********************************************************************
+ * Method cache locking (GrP 2001-1-14)
+ *
+ * For speed, objc_msgSend does not acquire any locks when it reads 
+ * method caches. Instead, all cache changes are performed so that any 
+ * objc_msgSend running concurrently with the cache mutator will not 
+ * crash or hang or get an incorrect result from the cache. 
+ *
+ * When cache memory becomes unused (e.g. the old cache after cache 
+ * expansion), it is not immediately freed, because a concurrent 
+ * objc_msgSend could still be using it. Instead, the memory is 
+ * disconnected from the data structures and placed on a garbage list. 
+ * The memory is now only accessible to instances of objc_msgSend that 
+ * were running when the memory was disconnected; any further calls to 
+ * objc_msgSend will not see the garbage memory because the other data 
+ * structures don't point to it anymore. The collecting_in_critical
+ * function checks the PC of all threads and returns FALSE when all threads 
+ * are found to be outside objc_msgSend. This means any call to objc_msgSend 
+ * that could have had access to the garbage has finished or moved past the 
+ * cache lookup stage, so it is safe to free the memory.
+ *
+ * All functions that modify cache data or structures must acquire the 
+ * cacheUpdateLock to prevent interference from concurrent modifications.
+ * The function that frees cache garbage must acquire the cacheUpdateLock 
+ * and use collecting_in_critical() to flush out cache readers.
+ *
+ * Cache readers (PC-checked by collecting_in_critical())
+ * objc_msgSend*
+ * _cache_getImp
+ * _cache_getMethod
+ *
+ * Cache writers (hold cacheUpdateLock while reading or writing; not PC-checked)
+ * _cache_fill         (acquires lock)
+ * _cache_expand       (only called from cache_fill)
+ * _cache_create       (only called from cache_expand)
+ * bcopy               (only called from instrumented cache_expand)
+ * flush_caches        (acquires lock)
+ * _cache_flush        (only called from cache_fill and flush_caches)
+ * _cache_collect_free (only called from cache_expand and cache_flush)
+ *
+ * UNPROTECTED cache readers (NOT thread-safe; used for debug info only)
+ * _cache_print
+ * _class_printMethodCaches
+ * _class_printDuplicateCacheEntries
+ * _class_printMethodCacheStatistics
+ *
+ * _class_lookupMethodAndLoadCache is a special case. It may read a 
+ * method triplet out of one cache and store it in another cache. This 
+ * is unsafe if the method triplet is a forward:: entry, because the 
+ * triplet itself could be freed unless _class_lookupMethodAndLoadCache 
+ * were PC-checked or used a lock. Additionally, storing the method 
+ * triplet in both caches would result in double-freeing if both caches 
+ * were flushed or expanded. The solution is for _cache_getMethod to 
+ * ignore all entries whose implementation is _objc_msgForward, so 
+ * _class_lookupMethodAndLoadCache cannot look at a forward:: entry
+ * unsafely or place it in multiple caches.
+ ***********************************************************************/
+
+/***********************************************************************
+ * Thread-safety during class initialization (GrP 2001-9-24)
+ *
+ * Initial state: CLS_INITIALIZING and CLS_INITIALIZED both clear. 
+ * During initialization: CLS_INITIALIZING is set
+ * After initialization: CLS_INITIALIZING clear and CLS_INITIALIZED set.
+ * CLS_INITIALIZING and CLS_INITIALIZED are never set at the same time.
+ * CLS_INITIALIZED is never cleared once set.
+ *
+ * Only one thread is allowed to actually initialize a class and send 
+ * +initialize. Enforced by allowing only one thread to set CLS_INITIALIZING.
+ *
+ * Additionally, threads trying to send messages to a class must wait for 
+ * +initialize to finish. During initialization of a class, that class's 
+ * method cache is kept empty. objc_msgSend will revert to 
+ * class_lookupMethodAndLoadCache, which checks CLS_INITIALIZED before 
+ * messaging. If CLS_INITIALIZED is clear but CLS_INITIALIZING is set, 
+ * the thread must block, unless it is the thread that started 
+ * initializing the class in the first place. 
+ *
+ * Each thread keeps a list of classes it's initializing. 
+ * The global classInitLock is used to synchronize changes to CLS_INITIALIZED 
+ * and CLS_INITIALIZING: the transition to CLS_INITIALIZING must be 
+ * an atomic test-and-set with respect to itself and the transition 
+ * to CLS_INITIALIZED.
+ * The global classInitWaitCond is used to block threads waiting for an 
+ * initialization to complete. The classInitLock synchronizes
+ * condition checking and the condition variable.
+ **********************************************************************/
+
+/***********************************************************************
+ *  +initialize deadlock case when a class is marked initializing while 
+ *  its superclass is initialized. Solved by completely initializing 
+ *  superclasses before beginning to initialize a class.
+ *
+ *  OmniWeb class hierarchy:
+ *                 OBObject 
+ *                     |    ` OBPostLoader
+ *                 OFObject
+ *                 /     \
+ *      OWAddressEntry  OWController
+ *                        | 
+ *                      OWConsoleController
+ *
+ *  Thread 1 (evil testing thread):
+ *    initialize OWAddressEntry
+ *    super init OFObject
+ *    super init OBObject		     
+ *    [OBObject initialize] runs OBPostLoader, which inits lots of classes...
+ *    initialize OWConsoleController
+ *    super init OWController - wait for Thread 2 to finish OWController init
+ *
+ *  Thread 2 (normal OmniWeb thread):
+ *    initialize OWController
+ *    super init OFObject - wait for Thread 1 to finish OFObject init
+ *
+ *  deadlock!
+ *
+ *  Solution: fully initialize super classes before beginning to initialize 
+ *  a subclass. Then the initializing+initialized part of the class hierarchy
+ *  will be a contiguous subtree starting at the root, so other threads 
+ *  can't jump into the middle between two initializing classes, and we won't 
+ *  get stuck while a superclass waits for its subclass which waits for the 
+ *  superclass.
+ **********************************************************************/
+
+
+
 /***********************************************************************
 * Imports.
 **********************************************************************/
@@ -73,6 +200,9 @@ size_t malloc_size (const void * ptr);
 // purpose
 // See radar 2364264 about incorrectly propogating _objc_forward entries
 // and double freeing them, first, before turning this on!
+// (Radar 2364264 is now "inactive".)
+// Double-freeing is also a potential problem when this is off. See 
+// note about _class_lookupMethodAndLoadCache in "Method cache locking".
 //#define PRELOAD_SUPERCLASS_CACHES
 
 /***********************************************************************
@@ -104,12 +234,6 @@ enum {
 // one entry is embedded in the cache structure itself
 #define TABLE_SIZE(count)	((count - 1) * sizeof(Method))
 
-// Class state
-#define ISCLASS(cls)		((((struct objc_class *) cls)->info & CLS_CLASS) != 0)
-#define ISMETA(cls)		((((struct objc_class *) cls)->info & CLS_META) != 0)
-#define GETMETA(cls)		(ISMETA(cls) ? ((struct objc_class *) cls) : ((struct objc_class *) cls)->isa)
-#define ISINITIALIZED(cls)	((GETMETA(cls)->info & CLS_INITIALIZED) != 0)
-#define MARKINITIALIZED(cls)	(GETMETA(cls)->info |= CLS_INITIALIZED)
 
 /***********************************************************************
 * Types internal to this module.
@@ -144,22 +268,19 @@ static void		addClassToOriginalClass	(Class posingClass, Class originalClass);
 static void		_objc_addOrigClass		(Class origClass);
 static void		_freedHandler			(id self, SEL sel);
 static void		_nonexistentHandler		(id self, SEL sel);
-static void		class_initialize		(Class clsDesc);
-static void *	objc_malloc				(int byteCount);
+static void             class_initialize                (Class cls);
 static Cache	_cache_expand			(Class cls);
 static int		LogObjCMessageSend		(BOOL isClassMethod, const char * objectsClass, const char * implementingClass, SEL selector);
-static void		_cache_fill				(Class cls, Method smt, SEL sel);
+static BOOL		_cache_fill				(Class cls, Method smt, SEL sel);
+static void _cache_addForwardEntry(Class cls, SEL sel);
 static void		_cache_flush			(Class cls);
-static Method	_class_lookupMethod		(Class cls, SEL sel);
 static int		SubtypeUntil			(const char * type, char end);
 static const char *	SkipFirstType		(const char * type);
 
-#ifdef OBJC_COLLECTING_CACHE
 static unsigned long	_get_pc_for_thread	(mach_port_t thread);
 static int		_collecting_in_critical	(void);
 static void		_garbage_make_room		(void);
 static void		_cache_collect_free		(void * data, BOOL tryCollect);
-#endif
 
 static void		_cache_print			(Cache cache);
 static unsigned int	log2				(unsigned int x);
@@ -183,23 +304,20 @@ static int	_class_uncache		= 1;
 // caches are grown every time.
 static int	_class_slow_grow	= 1;
 
-// Locks for cache access
-#ifdef OBJC_COLLECTING_CACHE
-// Held when adding an entry to the cache
+// Lock for cache access.
+// Held when modifying a cache in place.
+// Held when installing a new cache on a class. 
+// Held when adding to the cache garbage list.
+// Held when disposing cache garbage.
+// See "Method cache locking" above for notes about cache locking.
 static OBJC_DECLARE_LOCK(cacheUpdateLock);
 
-// Held when freeing memory from garbage
-static OBJC_DECLARE_LOCK(cacheCollectionLock);
-#endif
-
-// Held when looking in, adding to, or freeing the cache.
-#ifdef OBJC_COLLECTING_CACHE
-// For speed, messageLock is not held by the method dispatch code.
-// Instead the cache freeing code checks thread PCs to ensure no
-// one is dispatching.  messageLock is held, though, during less
-// time critical operations.
-#endif
-OBJC_DECLARE_LOCK(messageLock);
+// classInitLock protects classInitWaitCond and examination and modification 
+// of CLS_INITIALIZED and CLS_INITIALIZING.
+OBJC_DECLARE_LOCK(classInitLock);
+// classInitWaitCond is signalled when any class is done initializing. 
+// Threads that are waiting for a class to finish initializing wait on this.
+pthread_cond_t classInitWaitCond = PTHREAD_COND_INITIALIZER;
 
 CFMutableDictionaryRef _classIMPTables = NULL;
 
@@ -207,11 +325,9 @@ CFMutableDictionaryRef _classIMPTables = NULL;
 // being encached is already there.  The number of times it finds a match
 // is tallied in cacheFillDuplicates.  When traceDuplicatesVerbose is
 // non-zero, each duplication is logged when found in this way.
-#ifdef OBJC_COLLECTING_CACHE
 static int	traceDuplicates		= 0;
 static int	traceDuplicatesVerbose	= 0;
 static int	cacheFillDuplicates	= 0;
-#endif
 
 #ifdef OBJC_INSTRUMENTED
 // Instrumentation
@@ -604,8 +720,7 @@ Ivar	class_getInstanceVariable	       (Class		aClass,
 *
 * Specifying Nil for the class "all classes."
 **********************************************************************/
-static void	flush_caches	       (Class		cls,
-                                 BOOL		flush_meta)
+static void flush_caches(Class cls, BOOL flush_meta)
 {
     int		numClasses = 0, newNumClasses;
     struct objc_class * *		classes = NULL;
@@ -617,6 +732,7 @@ static void	flush_caches	       (Class		cls,
 #endif
 
     // Do nothing if class has no cache
+    // This check is safe to do without any cache locks.
     if (cls && !((struct objc_class *) cls)->cache)
         return;
 
@@ -627,6 +743,8 @@ static void	flush_caches	       (Class		cls,
         newNumClasses = objc_getClassList((Class *)classes, numClasses);
     }
     numClasses = newNumClasses;
+
+    OBJC_LOCK(&cacheUpdateLock);
 
     // Handle nil and root instance class specially: flush all
     // instance and class method caches.  Nice that this
@@ -651,19 +769,20 @@ static void	flush_caches	       (Class		cls,
             // (the isa pointer of any meta class points to the meta class
             // of the root).
             // NOTE: When is an isa pointer of a hash tabled class ever nil?
-            metaClsObject = ((struct objc_class *) clsObject)->isa;
-            if (cls && metaClsObject && (((struct objc_class *) metaClsObject)->isa != ((struct objc_class *) metaClsObject)->isa))
+            metaClsObject = clsObject->isa;
+            if (cls  &&  metaClsObject  &&  cls->isa != metaClsObject->isa)
+            {
                 continue;
+            }
 
 #ifdef OBJC_INSTRUMENTED
             subclassCount += 1;
 #endif
 
-            // Be careful of classes that do not yet have caches
-            if (((struct objc_class *) clsObject)->cache)
-                _cache_flush (clsObject);
-            if (flush_meta && metaClsObject && ((struct objc_class *) metaClsObject)->cache)
-                _cache_flush (((struct objc_class *) clsObject)->isa);
+            _cache_flush (clsObject);
+            if (flush_meta  &&  metaClsObject != NULL) {
+                _cache_flush (metaClsObject);
+            }
         }
 #ifdef OBJC_INSTRUMENTED
         LinearFlushCachesVisitedCount += classesVisited;
@@ -674,6 +793,7 @@ static void	flush_caches	       (Class		cls,
             MaxIdealFlushCachesCount = subclassCount;
 #endif
 
+        OBJC_UNLOCK(&cacheUpdateLock);
         free(classes);
         return;
     }
@@ -753,14 +873,14 @@ static void	flush_caches	       (Class		cls,
         MaxIdealFlushCachesCount = subclassCount;
 #endif
 
-    // Relinquish access to class hash table
+    OBJC_UNLOCK(&cacheUpdateLock);
     free(classes);
 }
 
 /***********************************************************************
 * _objc_flush_caches.  Flush the caches of the specified class and any
 * of its subclasses.  If cls is a meta-class, only meta-class (i.e.
-                                                               * class method) caches are flushed.  If cls is an instance-class, both
+* class method) caches are flushed.  If cls is an instance-class, both
 * instance-class and meta-class caches are flushed.
 **********************************************************************/
 void		_objc_flush_caches	       (Class		cls)
@@ -940,7 +1060,6 @@ Class		class_poseAs	       (Class		imposter,
                             Class		original)
 {
     struct objc_class * clsObject;
-    char			imposterName[256];
     char *			imposterNamePtr;
     NXHashTable *		class_hash;
     NXHashState		state;
@@ -955,21 +1074,20 @@ Class		class_poseAs	       (Class		imposter,
 
     // Imposter must be an immediate subclass of the original
     if (((struct objc_class *)imposter)->super_class != original) {
-        // radar 2203635
         __objc_error(imposter, _errNotSuper, ((struct objc_class *)imposter)->name, ((struct objc_class *)original)->name);
     }
 
     // Can't pose when you have instance variables (how could it work?)
     if (((struct objc_class *)imposter)->ivars) {
-        // radar 2203635
         __objc_error(imposter, _errNewVars, ((struct objc_class *)imposter)->name, ((struct objc_class *)original)->name, ((struct objc_class *)imposter)->name);
     }
 
     // Build a string to use to replace the name of the original class.
-    strcpy (imposterName, "_%");
-    strcat (imposterName, ((struct objc_class *)original)->name);
-    imposterNamePtr = objc_malloc (strlen (imposterName)+1);
-    strcpy (imposterNamePtr, imposterName);
+    #define imposterNamePrefix "_%"
+    imposterNamePtr = malloc_zone_malloc(_objc_create_zone(), strlen(((struct objc_class *)original)->name) + strlen(imposterNamePrefix) + 1);
+    strcpy(imposterNamePtr, imposterNamePrefix);
+    strcat(imposterNamePtr, ((struct objc_class *)original)->name);
+    #undef imposterNamePrefix
 
     // We lock the class hashtable, so we are thread safe with respect to
     // calls to objc_getClass ().  However, the class names are not
@@ -1086,83 +1204,6 @@ static void	_nonexistentHandler    (id		self,
 }
 
 /***********************************************************************
-* class_initialize.  Send the '+initialize' message on demand to any
-* uninitialized class. Force initialization of superclasses first.
-*
-* Called only from _class_lookupMethodAndLoadCache (or itself).
-*
-* #ifdef OBJC_COLLECTING_CACHE
-*    The messageLock can be in either state.
-* #else
-*    The messageLock is already assumed to be taken out.
-*    It is temporarily released while the initialize method is sent.
-* #endif
-**********************************************************************/
-static void	class_initialize	       (Class		clsDesc)
-{
-    struct objc_class *	super;
-
-    // Skip if someone else beat us to it
-    if (ISINITIALIZED(((struct objc_class *)clsDesc)))
-        return;
-
-    // Force initialization of superclasses first
-    super = ((struct objc_class *)clsDesc)->super_class;
-    if ((super != Nil) && (!ISINITIALIZED(super)))
-        class_initialize (super);
-
-    // Initializing the super class might have initialized us,
-    // or another thread might have initialized us during this time.
-    if (ISINITIALIZED(((struct objc_class *)clsDesc)))
-        return;
-
-
-    // bind the module in - if it came from a bundle or dynamic library
-    if (((struct objc_class *)clsDesc)->info & CLS_NEED_BIND) {
-        ((struct objc_class *)clsDesc)->info &= ~CLS_NEED_BIND;
-        _objc_bindModuleContainingClass(clsDesc);
-    }
-
-    // by loading things we might get initialized (maybe) ((paranoia))
-    if (ISINITIALIZED(((struct objc_class *)clsDesc)))
-        return;
-
-    // chain on the categories and bind them if necessary
-    _objc_resolve_categories_for_class(clsDesc);
-
-    // by loading things we might get initialized (maybe) ((paranoia))
-    if (ISINITIALIZED(((struct objc_class *)clsDesc)))
-        return;
-
-    // Mark the class initialized so it can receive the "initialize"
-    // message.  This solution to the catch-22 is the source of a
-    // bug: the class is able to receive messages *from anyone* now
-    // that it is marked, even though initialization is not complete.
-    
-    MARKINITIALIZED(((struct objc_class *)clsDesc));
-    // But the simple solution is to ask if this class itself implements
-    // initialize (!) and only send it then!!
-
-#ifndef OBJC_COLLECTING_CACHE
-    // Release the message lock so that messages can be sent.
-    OBJC_UNLOCK(&messageLock);
-#endif
-
-    // Send the initialize method.
-    // Of course, if this class doesn't implement initialize but
-    // the super class does, we send initialize to the super class
-    // twice, thrice...
-    [(id)clsDesc initialize];
-
-#ifndef OBJC_COLLECTING_CACHE
-    // Re-acquire the lock
-    OBJC_LOCK(&messageLock);
-#endif
-
-    return;
-}
-
-/***********************************************************************
 * _class_install_relationships.  Fill in the class pointers of a class
 * that was loaded before some or all of the classes it needs to point to.
 * The deal here is that the class pointer fields have been usurped to
@@ -1242,21 +1283,6 @@ Error:
 }
 
 /***********************************************************************
-* objc_malloc.
-**********************************************************************/
-static void *		objc_malloc		   (int		byteCount)
-{
-    void *		space;
-
-    space = malloc_zone_malloc (_objc_create_zone (), byteCount);
-    if (!space && byteCount)
-        _objc_fatal ("unable to allocate space");
-
-    return space;
-}
-
-
-/***********************************************************************
 * class_respondsToMethod.
 *
 * Called from -[Object respondsTo:] and +[Object instancesRespondTo:]
@@ -1264,60 +1290,31 @@ static void *		objc_malloc		   (int		byteCount)
 BOOL	class_respondsToMethod	       (Class		cls,
                                     SEL		sel)
 {
-    struct objc_class *				thisCls;
-    arith_t				index;
-    arith_t				mask;
-    Method *			buckets;
     Method				meth;
+    IMP imp;
 
     // No one responds to zero!
     if (!sel)
         return NO;
 
-    // Synchronize access to caches
-    OBJC_LOCK(&messageLock);
-
-    // Look in the cache of the specified class
-    mask	= ((struct objc_class *)cls)->cache->mask;
-    buckets	= ((struct objc_class *)cls)->cache->buckets;
-    index	= ((uarith_t) sel & mask);
-    while (CACHE_BUCKET_VALID(buckets[index])) {
-        if (CACHE_BUCKET_NAME(buckets[index]) == sel) {
-            if (CACHE_BUCKET_IMP(buckets[index]) == &_objc_msgForward) {
-                OBJC_UNLOCK(&messageLock);
-                return NO;
-            } else {
-                OBJC_UNLOCK(&messageLock);
-                return YES;
-            }
-        }
-
-        index += 1;
-        index &= mask;
+    imp = _cache_getImp(cls, sel);
+    if (imp) {
+        // Found method in cache. 
+        // If the cache entry is forward::, the class does not respond to sel.
+        return (imp != &_objc_msgForward);
     }
 
     // Handle cache miss
     meth = _getMethod(cls, sel);
     if (meth) {
-        OBJC_UNLOCK(&messageLock);
-        _cache_fill (cls, meth, sel);
+        _cache_fill(cls, meth, sel);
         return YES;
     }
 
-    // Not implememted.  Use _objc_msgForward.
-    {
-        Method	smt;
+    // Not implemented.  Use _objc_msgForward.
+    _cache_addForwardEntry(cls, sel);
 
-        smt = malloc_zone_malloc (_objc_create_zone(), sizeof(struct objc_method));
-        smt->method_name	= sel;
-        smt->method_types	= "";
-        smt->method_imp		= &_objc_msgForward;
-        _cache_fill (cls, smt, sel);
-    }
-
-    OBJC_UNLOCK(&messageLock);
     return NO;
-
 }
 
 
@@ -1326,45 +1323,22 @@ BOOL	class_respondsToMethod	       (Class		cls,
 *
 * Called from -[Object methodFor:] and +[Object instanceMethodFor:]
 **********************************************************************/
-
+// GrP is this used anymore?
 IMP		class_lookupMethod	       (Class		cls,
                                 SEL		sel)
 {
-    Method *	buckets;
-    arith_t		index;
-    arith_t		mask;
-    IMP		result;
+    IMP imp;
 
     // No one responds to zero!
     if (!sel) {
-        // radar 2203635
         __objc_error(cls, _errBadSel, sel);
     }
 
-    // Synchronize access to caches
-    OBJC_LOCK(&messageLock);
-
-    // Scan the cache
-    mask	= ((struct objc_class *)cls)->cache->mask;
-    buckets	= ((struct objc_class *)cls)->cache->buckets;
-    index	= ((unsigned int) sel & mask);
-    while (CACHE_BUCKET_VALID(buckets[index]))
-    {
-        if (CACHE_BUCKET_NAME(buckets[index]) == sel)
-        {
-            result = CACHE_BUCKET_IMP(buckets[index]);
-            OBJC_UNLOCK(&messageLock);
-            return result;
-        }
-
-        index += 1;
-        index &= mask;
-    }
+    imp = _cache_getImp(cls, sel);
+    if (imp) return imp;
 
     // Handle cache miss
-    result = _class_lookupMethodAndLoadCache (cls, sel);
-    OBJC_UNLOCK(&messageLock);
-    return result;
+    return _class_lookupMethodAndLoadCache (cls, sel);
 }
 
 /***********************************************************************
@@ -1386,49 +1360,48 @@ IMP	class_lookupNamedMethodInMethodList(struct objc_method_list *mlist,
     return (m ? m->method_imp : NULL);
 }
 
+
+/***********************************************************************
+* _cache_malloc.
+*
+* Called from _cache_create() and cache_expand()
+**********************************************************************/
+static Cache _cache_malloc(int slotCount)
+{
+    Cache new_cache;
+    size_t size;
+
+    // Allocate table (why not check for failure?)
+    size = sizeof(struct objc_cache) + TABLE_SIZE(slotCount);
+#ifdef OBJC_INSTRUMENTED
+    size += sizeof(CacheInstrumentation);
+#endif
+    new_cache = malloc_zone_calloc (_objc_create_zone(), size, 1);
+
+    // [c|v]allocated memory is zeroed, so all buckets are invalidated 
+    // and occupied == 0 and all instrumentation is zero.
+
+    new_cache->mask = slotCount - 1;
+
+    return new_cache;
+}
+
+
 /***********************************************************************
 * _cache_create.
 *
-* Called from _cache_expand () and objc_addClass ()
+* Called from _cache_expand().
+* Cache locks: cacheUpdateLock must be held by the caller.
 **********************************************************************/
 Cache		_cache_create		(Class		cls)
 {
     Cache		new_cache;
     int			slotCount;
-    int			index;
 
     // Select appropriate size
     slotCount = (ISMETA(cls)) ? INIT_META_CACHE_SIZE : INIT_CACHE_SIZE;
 
-    // Allocate table (why not check for failure?)
-#ifdef OBJC_INSTRUMENTED
-    new_cache = malloc_zone_malloc (_objc_create_zone(),
-                                    sizeof(struct objc_cache) + TABLE_SIZE(slotCount)
-                                    + sizeof(CacheInstrumentation));
-#else
-    new_cache = malloc_zone_malloc (_objc_create_zone(),
-                                    sizeof(struct objc_cache) + TABLE_SIZE(slotCount));
-#endif
-
-    // Invalidate all the buckets
-    for (index = 0; index < slotCount; index += 1)
-        CACHE_BUCKET_VALID(new_cache->buckets[index]) = NULL;
-
-    // Zero the valid-entry counter
-    new_cache->occupied = 0;
-
-    // Set the mask so indexing wraps at the end-of-table
-    new_cache->mask = slotCount - 1;
-
-#ifdef OBJC_INSTRUMENTED
-    {
-        CacheInstrumentation *	cacheData;
-
-        // Zero out the cache dynamic instrumention data
-        cacheData = CACHE_INSTRUMENTATION(new_cache);
-        bzero ((char *) cacheData, sizeof(CacheInstrumentation));
-    }
-#endif
+    new_cache = _cache_malloc(slotCount);
 
     // Install the cache
     ((struct objc_class *)cls)->cache = new_cache;
@@ -1450,11 +1423,8 @@ Cache		_cache_create		(Class		cls)
 /***********************************************************************
 * _cache_expand.
 *
-* #ifdef OBJC_COLLECTING_CACHE
-*	The cacheUpdateLock is assumed to be taken at this point.
-* #endif
-*
 * Called from _cache_fill ()
+* Cache locks: cacheUpdateLock must be held by the caller.
 **********************************************************************/
 static	Cache		_cache_expand	       (Class		cls)
 {
@@ -1500,11 +1470,7 @@ static	Cache		_cache_expand	       (Class		cls)
                 // Deallocate "forward::" entry
                 if (CACHE_BUCKET_IMP(oldEntry) == &_objc_msgForward)
                 {
-#ifdef OBJC_COLLECTING_CACHE
                     _cache_collect_free (oldEntry, NO);
-#else
-                    malloc_zone_free (_objc_create_zone(), oldEntry);
-#endif
                 }
             }
 
@@ -1520,21 +1486,7 @@ static	Cache		_cache_expand	       (Class		cls)
     // Double the cache size
     slotCount = (old_cache->mask + 1) << 1;
 
-    // Allocate a new cache table
-#ifdef OBJC_INSTRUMENTED
-    new_cache = malloc_zone_malloc (_objc_create_zone(),
-                                    sizeof(struct objc_cache) + TABLE_SIZE(slotCount)
-                                    + sizeof(CacheInstrumentation));
-#else
-    new_cache = malloc_zone_malloc (_objc_create_zone(),
-                                    sizeof(struct objc_cache) + TABLE_SIZE(slotCount));
-#endif
-
-    // Zero out the new cache
-    new_cache->mask = slotCount - 1;
-    new_cache->occupied = 0;
-    for (index = 0; index < slotCount; index += 1)
-        CACHE_BUCKET_VALID(new_cache->buckets[index]) = NULL;
+    new_cache = _cache_malloc(slotCount);
 
 #ifdef OBJC_INSTRUMENTED
     // Propagate the instrumentation data
@@ -1565,7 +1517,8 @@ static	Cache		_cache_expand	       (Class		cls)
                 continue;
 
             // Hash the old entry into the new table
-            index2 = ((unsigned int) CACHE_BUCKET_NAME(old_cache->buckets[index]) & newMask);
+            index2 = CACHE_HASH(CACHE_BUCKET_NAME(old_cache->buckets[index]), 
+                                newMask);
 
             // Find an available spot, at or following the hashed spot;
             // Guaranteed to not infinite loop, because table has grown
@@ -1598,11 +1551,7 @@ static	Cache		_cache_expand	       (Class		cls)
             if (CACHE_BUCKET_VALID(old_cache->buckets[index]) &&
                 CACHE_BUCKET_IMP(old_cache->buckets[index]) == &_objc_msgForward)
             {
-#ifdef OBJC_COLLECTING_CACHE
                 _cache_collect_free (old_cache->buckets[index], NO);
-#else
-                malloc_zone_free (_objc_create_zone(), old_cache->buckets[index]);
-#endif
             }
         }
     }
@@ -1611,11 +1560,7 @@ static	Cache		_cache_expand	       (Class		cls)
     ((struct objc_class *)cls)->cache = new_cache;
 
     // Deallocate old cache, try freeing all the garbage
-#ifdef OBJC_COLLECTING_CACHE
     _cache_collect_free (old_cache, YES);
-#else
-    malloc_zone_free (_objc_create_zone(), old_cache);
-#endif
     return new_cache;
 }
 
@@ -1632,12 +1577,12 @@ static int	LogObjCMessageSend (BOOL			isClassMethod,
     // Create/open the log file
     if (objcMsgLogFD == (-1))
     {
-        sprintf (buf, "/tmp/msgSends-%d", (int) getpid ());
+        snprintf (buf, sizeof(buf), "/tmp/msgSends-%d", (int) getpid ());
         objcMsgLogFD = open (buf, O_WRONLY | O_CREAT, 0666);
     }
 
     // Make the log entry
-    sprintf(buf, "%c %s %s %s\n",
+    snprintf(buf, sizeof(buf), "%c %s %s %s\n",
             isClassMethod ? '+' : '-',
             objectsClass,
             implementingClass,
@@ -1685,52 +1630,42 @@ void	logObjcMessageSends      (ObjCLogProc	logProc)
         fsync (objcMsgLogFD);
 }
 
+
 /***********************************************************************
 * _cache_fill.  Add the specified method to the specified class' cache.
+* Returns NO if the cache entry wasn't added: cache was busy, 
+*  class is still being initialized, new entry is a duplicate.
 *
 * Called only from _class_lookupMethodAndLoadCache and
-* class_respondsToMethod.
+* class_respondsToMethod and _cache_addForwardEntry.
 *
-* #ifdef OBJC_COLLECTING_CACHE
-*	It doesn't matter if someone has the messageLock when we enter this
-*	function.  This function will fail to do the update if someone else
-*	is already updating the cache, i.e. they have the cacheUpdateLock.
-* #else
-*	The messageLock is already assumed to be taken out.
-* #endif
+* Cache locks: cacheUpdateLock must not be held.
 **********************************************************************/
-
-static	void	_cache_fill    (Class		cls,
-                            Method		smt,
-                            SEL			sel)
+static	BOOL	_cache_fill(Class cls, Method smt, SEL sel)
 {
-    Cache				cache;
-    Method *			buckets;
-
-    arith_t				index;
-    arith_t				mask;
     unsigned int		newOccupied;
+    arith_t index;
+    Method *buckets;
+    Cache cache;
+
+    // Never cache before +initialize is done
+    if (!ISINITIALIZED(cls)) {
+        return NO;
+    }
 
     // Keep tally of cache additions
     totalCacheFills += 1;
 
-#ifdef OBJC_COLLECTING_CACHE
-    // Make sure only one thread is updating the cache at a time, but don't
-    // wait for concurrent updater to finish, because it might be a while, or
-    // a deadlock!  Instead, just leave the method out of the cache until
-    // next time.  This is nasty given that cacheUpdateLock is per task!
-    if (!OBJC_TRYLOCK(&cacheUpdateLock))
-        return;
+    OBJC_LOCK(&cacheUpdateLock);
 
-    // Set up invariants for cache traversals
-    cache	= ((struct objc_class *)cls)->cache;
-    mask	= cache->mask;
-    buckets	= cache->buckets;
+    cache = ((struct objc_class *)cls)->cache;
 
     // Check for duplicate entries, if we're in the mode
     if (traceDuplicates)
     {
         int	index2;
+        arith_t mask = cache->mask;
+        buckets	= cache->buckets;        
 
         // Scan the cache
         for (index2 = 0; index2 < mask + 1; index2 += 1)
@@ -1753,44 +1688,26 @@ static	void	_cache_fill    (Class		cls,
         }
     }
 
-    // Do nothing if entry is already placed.  This re-check is needed
-    // only in the OBJC_COLLECTING_CACHE code, because the probe is
-    // done un-sync'd.
-    index	= ((unsigned int) sel & mask);
-    while (CACHE_BUCKET_VALID(buckets[index]))
-    {
-        if (CACHE_BUCKET_NAME(buckets[index]) == sel)
-        {
-            OBJC_UNLOCK(&cacheUpdateLock);
-            return;
-        }
-
-        index += 1;
-        index &= mask;
+    // Make sure the entry wasn't added to the cache by some other thread 
+    // before we grabbed the cacheUpdateLock.
+    // Don't use _cache_getMethod() because _cache_getMethod() doesn't 
+    // return forward:: entries.
+    if (_cache_getImp(cls, sel)) {
+        OBJC_UNLOCK(&cacheUpdateLock);
+        return NO; // entry is already cached, didn't add new one
     }
-
-#else // not OBJC_COLLECTING_CACHE
-    cache	= ((struct objc_class *)cls)->cache;
-    mask	= cache->mask;
-#endif
 
     // Use the cache as-is if it is less than 3/4 full
     newOccupied = cache->occupied + 1;
-    if ((newOccupied * 4) <= (mask + 1) * 3)
+    if ((newOccupied * 4) <= (cache->mask + 1) * 3) {
+        // Cache is less than 3/4 full.
         cache->occupied = newOccupied;
-
-    // Cache is getting full
-    else
-    {
-        // Flush the cache
-        if ((((struct objc_class * )cls)->info & CLS_FLUSH_CACHE) != 0)
+    } else {
+        // Cache is too full. Flush it or expand it.
+        if ((((struct objc_class * )cls)->info & CLS_FLUSH_CACHE) != 0) {
             _cache_flush (cls);
-
-        // Expand the cache
-        else
-        {
+        } else {
             cache = _cache_expand (cls);
-            mask  = cache->mask;
         }
 
         // Account for the addition
@@ -1809,7 +1726,7 @@ static	void	_cache_fill    (Class		cls,
     // are two kinds of entries, so there have to be two ways
     // to slide them.
     buckets	= cache->buckets;
-    index	= ((unsigned int) sel & mask);
+    index	= CACHE_HASH(sel, cache->mask); 
     for (;;)
     {
         // Slide existing entries down by one
@@ -1830,19 +1747,43 @@ static	void	_cache_fill    (Class		cls,
 
         // Move on to next slot
         index += 1;
-        index &= mask;
+        index &= cache->mask;
     }
 
-#ifdef OBJC_COLLECTING_CACHE
     OBJC_UNLOCK(&cacheUpdateLock);
-#endif
+
+    return YES; // successfully added new cache entry
 }
+
+
+/***********************************************************************
+* _cache_addForwardEntry
+* Add a forward:: entry  for the given selector to cls's method cache.
+* Does nothing if the cache addition fails for any reason.
+* Called from class_respondsToMethod and _class_lookupMethodAndLoadCache.
+* Cache locks: cacheUpdateLock must not be held.
+**********************************************************************/
+static void _cache_addForwardEntry(Class cls, SEL sel)
+{
+    Method smt;
+  
+    smt = malloc_zone_malloc(_objc_create_zone(), sizeof(struct objc_method));
+    smt->method_name = sel;
+    smt->method_types = "";
+    smt->method_imp = &_objc_msgForward;
+    if (! _cache_fill(cls, smt, sel)) {
+        // Entry not added to cache. Don't leak the method struct.
+        malloc_zone_free(_objc_create_zone(), smt);
+    }
+}
+
 
 /***********************************************************************
 * _cache_flush.  Invalidate all valid entries in the given class' cache,
 * and clear the CLS_FLUSH_CACHE in the cls->info.
 *
-* Called from flush_caches ().
+* Called from flush_caches() and _cache_fill()
+* Cache locks: cacheUpdateLock must be held by the caller.
 **********************************************************************/
 static void	_cache_flush		(Class		cls)
 {
@@ -1851,7 +1792,7 @@ static void	_cache_flush		(Class		cls)
 
     // Locate cache.  Ignore unused cache.
     cache = ((struct objc_class *)cls)->cache;
-    if (cache == &emptyCache)
+    if (cache == NULL  ||  cache == &emptyCache)
         return;
 
 #ifdef OBJC_INSTRUMENTED
@@ -1879,11 +1820,7 @@ static void	_cache_flush		(Class		cls)
 
         // Deallocate "forward::" entry
         if (oldEntry && oldEntry->method_imp == &_objc_msgForward)
-#ifdef OBJC_COLLECTING_CACHE
             _cache_collect_free (oldEntry, NO);
-#else
-        malloc_zone_free (_objc_create_zone(), oldEntry);
-#endif
     }
 
     // Clear the valid-entry counter
@@ -1916,6 +1853,267 @@ Class		_objc_getNonexistentClass	   (void)
     return (Class) &nonexistentObjectClass;
 }
 
+
+/***********************************************************************
+* struct _objc_initializing_classes
+* Per-thread list of classes currently being initialized by that thread. 
+* During initialization, that thread is allowed to send messages to that 
+* class, but other threads have to wait.
+* The list is a simple array of metaclasses (the metaclass stores 
+* the initialization state). 
+**********************************************************************/
+typedef struct _objc_initializing_classes {
+    int classesAllocated;
+    struct objc_class** metaclasses;
+} _objc_initializing_classes;
+
+
+/***********************************************************************
+* _fetchInitializingClassList
+* Return the list of classes being initialized by this thread.
+* If create == YES, create the list when no classes are being initialized by this thread.
+* If create == NO, return NULL when no classes are being initialized by this thread.
+**********************************************************************/
+static _objc_initializing_classes *_fetchInitializingClassList(BOOL create)
+{
+    _objc_pthread_data *data;
+    _objc_initializing_classes *list;
+    struct objc_class **classes;
+
+    data = pthread_getspecific(_objc_pthread_key);
+    if (data == NULL) {
+        if (!create) {
+            return NULL;
+        } else {
+            data = calloc(1, sizeof(_objc_pthread_data));
+            pthread_setspecific(_objc_pthread_key, data);
+        }
+    }
+
+    list = data->initializingClasses;
+    if (list == NULL) {
+        if (!create) {
+            return NULL;
+        } else {
+            list = calloc(1, sizeof(_objc_initializing_classes));
+            data->initializingClasses = list;
+        }
+    }
+
+    classes = list->metaclasses;
+    if (classes == NULL) {
+        // If _objc_initializing_classes exists, allocate metaclass array, 
+        // even if create == NO.
+        // Allow 4 simultaneous class inits on this thread before realloc.
+        list->classesAllocated = 4;
+        classes = calloc(list->classesAllocated, sizeof(struct objc_class *));
+        list->metaclasses = classes;
+    }
+    return list;
+}
+
+
+/***********************************************************************
+* _destroyInitializingClassList
+* Deallocate memory used by the given initialization list. 
+* Any part of the list may be NULL.
+* Called from _objc_pthread_destroyspecific().
+**********************************************************************/
+void _destroyInitializingClassList(_objc_initializing_classes *list)
+{
+    if (list != NULL) {
+        if (list->metaclasses != NULL) {
+            free(list->metaclasses);
+        }
+        free(list);
+    }
+}
+
+
+/***********************************************************************
+* _thisThreadIsInitializingClass
+* Return TRUE if this thread is currently initializing the given class.
+**********************************************************************/
+static BOOL _thisThreadIsInitializingClass(struct objc_class *cls)
+{
+    int i;
+
+    _objc_initializing_classes *list = _fetchInitializingClassList(NO);
+    if (list) {
+        cls = GETMETA(cls);
+        for (i = 0; i < list->classesAllocated; i++) {
+            if (cls == list->metaclasses[i]) return YES;
+        }
+    }
+
+    // no list or not found in list
+    return NO;
+}
+
+
+/***********************************************************************
+* _setThisThreadIsInitializingClass
+* Record that this thread is currently initializing the given class. 
+* This thread will be allowed to send messages to the class, but 
+*   other threads will have to wait.
+**********************************************************************/
+static void _setThisThreadIsInitializingClass(struct objc_class *cls)
+{
+    int i;
+    _objc_initializing_classes *list = _fetchInitializingClassList(YES);
+    cls = GETMETA(cls);
+  
+    // paranoia: explicitly disallow duplicates
+    for (i = 0; i < list->classesAllocated; i++) {
+        if (cls == list->metaclasses[i]) {
+            _objc_fatal("thread is already initializing this class!");
+            return; // already the initializer
+        }
+    }
+  
+    for (i = 0; i < list->classesAllocated; i++) {
+        if (0   == list->metaclasses[i]) {
+            list->metaclasses[i] = cls;
+            return;
+        }
+    }
+
+    // class list is full - reallocate
+    list->classesAllocated = list->classesAllocated * 2 + 1;
+    list->metaclasses = realloc(list->metaclasses, list->classesAllocated * sizeof(struct objc_class *));
+    // zero out the new entries
+    list->metaclasses[i++] = cls;
+    for ( ; i < list->classesAllocated; i++) {
+        list->metaclasses[i] = NULL;
+    }
+}
+
+
+/***********************************************************************
+* _setThisThreadIsNotInitializingClass
+* Record that this thread is no longer initializing the given class. 
+**********************************************************************/
+static void _setThisThreadIsNotInitializingClass(struct objc_class *cls)
+{
+    int i;
+
+    _objc_initializing_classes *list = _fetchInitializingClassList(NO);
+    if (list) {
+        cls = GETMETA(cls);    
+        for (i = 0; i < list->classesAllocated; i++) {
+            if (cls == list->metaclasses[i]) {
+                list->metaclasses[i] = NULL;
+                return;
+            }
+        }
+    }
+
+    // no list or not found in list
+    _objc_fatal("thread is not initializing this class!");  
+}
+
+
+/***********************************************************************
+* class_initialize.  Send the '+initialize' message on demand to any
+* uninitialized class. Force initialization of superclasses first.
+*
+* Called only from _class_lookupMethodAndLoadCache (or itself).
+**********************************************************************/
+static void class_initialize(struct objc_class *cls)
+{
+    long *infoP = &GETMETA(cls)->info;
+    BOOL reallyInitialize = NO;
+
+    // Get the real class from the metaclass. The superclass chain 
+    // hangs off the real class only.
+    if (ISMETA(cls)) {
+        if (strncmp(cls->name, "_%", 2) == 0) {
+            // Posee's meta's name is smashed and isn't in the class_hash, 
+            // so objc_getClass doesn't work.
+            char *baseName = strchr(cls->name, '%'); // get posee's real name
+            cls = objc_getClass(baseName);
+        } else {
+            cls = objc_getClass(cls->name);
+        }
+    }
+
+    // Make sure super is done initializing BEFORE beginning to initialize cls.
+    // See note about deadlock above.
+    if (cls->super_class  &&  !ISINITIALIZED(cls->super_class)) {
+        class_initialize(cls->super_class);
+    }
+    
+    // Try to atomically set CLS_INITIALIZING.
+    pthread_mutex_lock(&classInitLock);
+    if (!ISINITIALIZED(cls) && !ISINITIALIZING(cls)) {
+        *infoP |= CLS_INITIALIZING;
+        reallyInitialize = YES;
+    }
+    pthread_mutex_unlock(&classInitLock);
+    
+    if (reallyInitialize) {
+        // We successfully set the CLS_INITIALIZING bit. Initialize the class.
+        
+        // Record that we're initializing this class so we can message it.
+        _setThisThreadIsInitializingClass(cls);
+        
+        // bind the module in - if it came from a bundle or dynamic library
+        _objc_bindClassIfNeeded(cls);
+        
+        // chain on the categories and bind them if necessary
+        _objc_resolve_categories_for_class(cls);
+        
+        // Send the +initialize message.
+        // Note that +initialize is sent to the superclass (again) if 
+        // this class doesn't implement +initialize. 2157218
+        [(id)cls initialize];
+        
+        // Done initializing. Update the info bits and notify waiting threads.
+        pthread_mutex_lock(&classInitLock);
+        *infoP = (*infoP | CLS_INITIALIZED) & ~CLS_INITIALIZING;
+        pthread_cond_broadcast(&classInitWaitCond);
+        pthread_mutex_unlock(&classInitLock);
+        _setThisThreadIsNotInitializingClass(cls);
+        return;
+    }
+    
+    else if (ISINITIALIZING(cls)) {
+        // We couldn't set INITIALIZING because INITIALIZING was already set.
+        // If this thread set it earlier, continue normally.
+        // If some other thread set it, block until initialize is done.
+        // It's ok if INITIALIZING changes to INITIALIZED while we're here, 
+        //   because we safely check for INITIALIZED inside the lock 
+        //   before blocking.
+        if (_thisThreadIsInitializingClass(cls)) {
+            return;
+        } else {
+            pthread_mutex_lock(&classInitLock);
+            while (!ISINITIALIZED(cls)) {
+                pthread_cond_wait(&classInitWaitCond, &classInitLock);
+            }
+            pthread_mutex_unlock(&classInitLock);
+            return;
+        }
+    }
+    
+    else if (ISINITIALIZED(cls)) {
+        // Set CLS_INITIALIZING failed because someone else already 
+        //   initialized the class. Continue normally.
+        // NOTE this check must come AFTER the ISINITIALIZING case.
+        // Otherwise: Another thread is initializing this class. ISINITIALIZED 
+        //   is false. Skip this clause. Then the other thread finishes 
+        //   initialization and sets INITIALIZING=no and INITIALIZED=yes. 
+        //   Skip the ISINITIALIZING clause. Die horribly.
+        return;
+    }
+    
+    else {
+        // We shouldn't be here. 
+        _objc_fatal("thread-safe class init in objc runtime is buggy!");
+    }
+}
+
+
 /***********************************************************************
 * _class_lookupMethodAndLoadCache.
 *
@@ -1925,9 +2123,8 @@ IMP	_class_lookupMethodAndLoadCache	   (Class	cls,
                                         SEL		sel)
 {
     struct objc_class *	curClass;
-    Method	smt;
-    BOOL	calledSingleThreaded;
-    IMP		methodPC;
+    Method meth;
+    IMP methodPC = NULL;
 
     trace(0xb300, 0, 0, 0);
 
@@ -1939,119 +2136,80 @@ IMP	_class_lookupMethodAndLoadCache	   (Class	cls,
     if (cls == &nonexistentObjectClass)
         return (IMP) _nonexistentHandler;
 
-#ifndef OBJC_COLLECTING_CACHE
-    // Control can get here via the single-threaded message dispatcher,
-    // but class_initialize can cause application to go multithreaded.  Notice
-    // whether this is the case, so we can leave the messageLock unlocked
-    // on the way out, just as the single-threaded message dispatcher
-    // expects.  Note that the messageLock locking in classinitialize is
-    // appropriate in this case, because there are more than one thread now.
-    calledSingleThreaded = (_objc_multithread_mask != 0);
-#endif
-
     trace(0xb301, 0, 0, 0);
 
-    // Lazy initialization.  This unlocks and relocks messageLock,
-    // so cache information we might already have becomes invalid.
-    if (!ISINITIALIZED(cls))
-        class_initialize (objc_getClass (((struct objc_class *)cls)->name));
+    if (!ISINITIALIZED(cls)) {
+        class_initialize ((struct objc_class *)cls);
+        // If sel == initialize, class_initialize will send +initialize and 
+        // then the messenger will send +initialize again after this 
+        // procedure finishes. Of course, if this is not being called 
+        // from the messenger then it won't happen. 2778172
+    }
 
     trace(0xb302, 0, 0, 0);
 
     // Outer loop - search the caches and method lists of the
     // class and its super-classes
-    methodPC = NULL;
     for (curClass = cls; curClass; curClass = ((struct objc_class * )curClass)->super_class)
     {
-        Method *					buckets;
-        arith_t						idx;
-        arith_t						mask;
-        arith_t						methodCount;
-        struct objc_method_list *mlist;
-        void *iterator = 0;
 #ifdef PRELOAD_SUPERCLASS_CACHES
-        struct objc_class *						curClass2;
+        struct objc_class *curClass2;
 #endif
 
         trace(0xb303, 0, 0, 0);
 
-        mask    = curClass->cache->mask;
-        buckets	= curClass->cache->buckets;
-
-        // Minor loop #1 - check cache of given class
-        for (idx = ((uarith_t) sel & mask);
-             CACHE_BUCKET_VALID(buckets[idx]);
-             idx = (++idx & mask))
-        {
-            // Skip entries until selector matches
-            if (CACHE_BUCKET_NAME(buckets[idx]) != sel)
-                continue;
-
-            // Found the method.  Add it to the cache(s)
-            // unless it was found in the cache of the
-            // class originally being messaged.
-            //
-            // NOTE: The method is usually not found
-            // the original class' cache, because
-            // objc_msgSend () has already looked.
-            // BUT, if sending this method resulted in
-            // a +initialize on the class, and +initialize
-            // sends the same method, the method will
-            // indeed now be in the cache.  Calling
-            // _cache_fill with a buckets[idx] from the
-            // cache being filled results in a crash
-            // if the cache has to grow, because the
-            // buckets[idx] address is no longer valid.
-            if (curClass != cls)
-            {
+        // Beware of thread-unsafety and double-freeing of forward:: 
+        // entries here! See note in "Method cache locking" above.
+        // The upshot is that _cache_getMethod() will return NULL 
+        // instead of returning a forward:: entry.
+        meth = _cache_getMethod(curClass, sel);
+        if (meth) {
+            // Found the method in this class or a superclass.
+            // Cache the method in this class, unless we just found it in 
+            // this class's cache.
+            if (curClass != cls) {
 #ifdef PRELOAD_SUPERCLASS_CACHES
                 for (curClass2 = cls; curClass2 != curClass; curClass2 = curClass2->super_class)
-                    _cache_fill (curClass2, buckets[idx], sel);
-                _cache_fill (curClass, buckets[idx], sel);
+                    _cache_fill (curClass2, meth, sel);
+                _cache_fill (curClass, meth, sel);
 #else
-                _cache_fill (cls, buckets[idx], sel);
+                _cache_fill (cls, meth, sel);
 #endif
             }
 
-            // Return the implementation address
-            methodPC = CACHE_BUCKET_IMP(buckets[idx]);
+            methodPC = meth->method_imp;
             break;
         }
 
         trace(0xb304, (int)methodPC, 0, 0);
 
-        // Done if that found it
-        if (methodPC)
-            break;
+        // Cache scan failed. Search method list.
 
-        smt = _findMethodInClass(curClass, sel);
-
-        if (smt) {
+        meth = _findMethodInClass(curClass, sel);
+        if (meth) {
             // If logging is enabled, log the message send and let
             // the logger decide whether to encache the method.
             if ((objcMsgLogEnabled == 0) ||
-                (objcMsgLogProc (CLS_GETINFO(((struct objc_class * )curClass),CLS_META) ? YES : NO,
+                (objcMsgLogProc (CLS_GETINFO(((struct objc_class * )curClass),
+                                             CLS_META) ? YES : NO,
                                  ((struct objc_class *)cls)->name,
                                  curClass->name, sel)))
             {
                 // Cache the method implementation
 #ifdef PRELOAD_SUPERCLASS_CACHES
                 for (curClass2 = cls; curClass2 != curClass; curClass2 = curClass2->super_class)
-                    _cache_fill (curClass2, smt, sel);
-                _cache_fill (curClass, smt, sel);
+                    _cache_fill (curClass2, meth, sel);
+                _cache_fill (curClass, meth, sel);
 #else
-                _cache_fill (cls, smt, sel);
+                _cache_fill (cls, meth, sel);
 #endif
             }
-            // Return the implementation
-            methodPC = smt->method_imp;
+
+            methodPC = meth->method_imp;
+            break;
         }
 
         trace(0xb305, (int)methodPC, 0, 0);
-
-        // Done if that found it
-        if (methodPC)
-            break;
     }
 
     trace(0xb306, (int)methodPC, 0, 0);
@@ -2059,24 +2217,15 @@ IMP	_class_lookupMethodAndLoadCache	   (Class	cls,
     if (methodPC == NULL)
     {
         // Class and superclasses do not respond -- use forwarding
-        smt = malloc_zone_malloc (_objc_create_zone(), sizeof(struct objc_method));
-        smt->method_name	= sel;
-        smt->method_types	= "";
-        smt->method_imp		= &_objc_msgForward;
-        _cache_fill (cls, smt, sel);
+        _cache_addForwardEntry(cls, sel);
         methodPC = &_objc_msgForward;
     }
-
-#ifndef OBJC_COLLECTING_CACHE
-    // Unlock the lock
-    if (calledSingleThreaded)
-        OBJC_UNLOCK(&messageLock);
-#endif
 
     trace(0xb30f, (int)methodPC, 0, 0);
 
     return methodPC;
 }
+
 
 /***********************************************************************
 * SubtypeUntil.
@@ -2170,6 +2319,9 @@ unsigned	method_getNumberOfArguments	   (Method	method)
         // Traverse argument type
         typedesc = SkipFirstType (typedesc);
 
+        // Skip GNU runtime's register parameter hint
+        if (*typedesc == '+') typedesc++;
+
         // Traverse (possibly negative) argument offset
         if (*typedesc == '-')
             typedesc += 1;
@@ -2230,6 +2382,9 @@ unsigned	method_getSizeOfArguments	(Method		method)
 
     // skip the '@' marking the Id field
     typedesc = SkipFirstType (typedesc);
+
+    // Skip GNU runtime's register parameter hint
+    if (*typedesc == '+') typedesc++;
 
     // pick up the offset for the Id field
     foundBaseOffset = 0;
@@ -2303,6 +2458,9 @@ unsigned	method_getArgumentInfo	       (Method		method,
 
         if (nargs == 0)
         {
+            // Skip GNU runtime's register parameter hint
+            if (*typedesc == '+') typedesc++;
+
             // Skip negative sign in offset
             if (*typedesc == '-')
             {
@@ -2321,6 +2479,9 @@ unsigned	method_getArgumentInfo	       (Method		method,
 
         else
         {
+            // Skip GNU runtime's register parameter hint
+            if (*typedesc == '+') typedesc++;
+
             // Skip (possibly negative) argument offset
             if (*typedesc == '-')
                 typedesc += 1;
@@ -2349,6 +2510,9 @@ unsigned	method_getArgumentInfo	       (Method		method,
 
         else
         {
+            // Skip GNU register parameter hint
+            if (*typedesc == '+') typedesc++;
+
             // Pick up (possibly negative) argument offset
             if (*typedesc == '-')
             {
@@ -2408,7 +2572,6 @@ void *		_objc_create_zone		   (void)
 /***********************************************************************
 * cache collection.
 **********************************************************************/
-#ifdef OBJC_COLLECTING_CACHE
 
 static unsigned long	_get_pc_for_thread     (mach_port_t	thread)
 #ifdef hppa
@@ -2454,6 +2617,10 @@ static unsigned long	_get_pc_for_thread     (mach_port_t	thread)
 
 /***********************************************************************
 * _collecting_in_critical.
+* Returns TRUE if some thread is currently executing a cache-reading 
+* function. Collection of cache garbage is not allowed when a cache-
+* reading function is in progress because it might still be using 
+* the garbage memory.
 **********************************************************************/
 OBJC_EXPORT unsigned long	objc_entryPoints[];
 OBJC_EXPORT unsigned long	objc_exitPoints[];
@@ -2465,22 +2632,23 @@ static int	_collecting_in_critical		(void)
     unsigned			count;
     kern_return_t		ret;
     int					result;
+
     mach_port_t mythread = pthread_mach_thread_np(pthread_self());
 
     // Get a list of all the threads in the current task
     ret = task_threads (mach_task_self (), &threads, &number);
     if (ret != KERN_SUCCESS)
     {
-        _objc_inform ("objc: task_thread failed\n");
+        _objc_inform ("task_thread failed (result %d)\n", ret);
         exit (1);
     }
 
     // Check whether any thread is in the cache lookup code
-    result = 0;
-    for (count = 0; !result && (count < number); count += 1)
+    result = FALSE;
+    for (count = 0; count < number; count++)
     {
-        int				region;
-        unsigned long	pc;
+        int region;
+        unsigned long pc;
 
         // Don't bother checking ourselves
         if (threads[count] == mythread)
@@ -2490,13 +2658,18 @@ static int	_collecting_in_critical		(void)
         pc = _get_pc_for_thread (threads[count]);
 
         // Check whether it is in the cache lookup code
-        for (region = 0; !result && (objc_entryPoints[region] != 0); region += 1)
+        for (region = 0; objc_entryPoints[region] != 0; region++)
         {
             if ((pc >= objc_entryPoints[region]) &&
-                (pc <= objc_exitPoints[region]))
-                result = 1;
+                (pc <= objc_exitPoints[region])) 
+            {
+                result = TRUE;
+                goto done;
+            }
         }
     }
+
+ done:
     // Deallocate the port rights for the threads
     for (count = 0; count < number; count++) {
         mach_port_deallocate(mach_task_self (), threads[count]);
@@ -2562,6 +2735,7 @@ static void	_garbage_make_room		(void)
 /***********************************************************************
 * _cache_collect_free.  Add the specified malloc'd memory to the list
 * of them to free at some later point.
+* Cache locks: cacheUpdateLock must be held by the caller.
 **********************************************************************/
 static void	_cache_collect_free    (void *		data,
                                     BOOL		tryCollect)
@@ -2572,9 +2746,6 @@ static void	_cache_collect_free    (void *		data,
         // Check whether to log our activity
         report_garbage = getenv ("OBJC_REPORT_GARBAGE");
     }
-
-    // Synchronize
-    OBJC_LOCK(&cacheCollectionLock);
 
     // Insert new element in garbage list
     // Note that we do this even if we end up free'ing everything
@@ -2589,45 +2760,37 @@ static void	_cache_collect_free    (void *		data,
     // Done if caller says not to empty or the garbage is not full
     if (!tryCollect || (garbage_byte_size < garbage_threshold))
     {
-        OBJC_UNLOCK(&cacheCollectionLock);
         if (tryCollect && report_garbage)
-            _objc_inform ("below threshold\n");
+            _objc_inform ("couldn't collect cache garbage: below threshold\n");
 
         return;
     }
 
-    // Synchronize garbage collection with messageLock holders
-    if (OBJC_TRYLOCK(&messageLock))
-    {
-        // Synchronize garbage collection with cache lookers
-        if (!_collecting_in_critical ())
-        {
-            // Log our progress
-            if (tryCollect && report_garbage)
-                _objc_inform ("collecting!\n");
+    // tryCollect is guaranteed to be true after this point
 
-            // Dispose all refs now in the garbage
-            while (garbage_count)
-                free (garbage_refs[--garbage_count]);
+    // Synchronize garbage collection with objc_msgSend and other cache readers
+    if (!_collecting_in_critical ()) {
+        // No cache readers in progress - garbage is now deletable
 
-            // Clear the total size indicator
-            garbage_byte_size = 0;
-        }
-
-        // Someone is actively looking in the cache
-        else if (tryCollect && report_garbage)
-            _objc_inform ("in critical region\n");
-
-        OBJC_UNLOCK(&messageLock);
+        // Log our progress
+        if (report_garbage)
+            _objc_inform ("collecting!\n");
+        
+        // Dispose all refs now in the garbage
+        while (garbage_count)
+            free (garbage_refs[--garbage_count]);
+        
+        // Clear the total size indicator
+        garbage_byte_size = 0;
     }
-
-    // Someone already holds messageLock
-    else if (tryCollect && report_garbage)
-        _objc_inform ("messageLock taken\n");
-
-    OBJC_UNLOCK(&cacheCollectionLock);
+    else {     
+        // objc_msgSend (or other cache reader) is currently looking in the 
+        // cache and might still be using some garbage.
+        if (report_garbage) {
+            _objc_inform ("couldn't collect cache garbage: objc_msgSend in progress\n");
+        }
+    }
 }
-#endif // OBJC_COLLECTING_CACHE
 
 
 /***********************************************************************
@@ -2943,8 +3106,10 @@ void		_class_printMethodCacheStatistics		(void)
                     negativeEntryCount += 1;
 
                 // Calculate search distance (chain length) for this method
-                hash	    = (uarith_t) CACHE_BUCKET_NAME(method);
-                methodChain = ((index - hash) & mask);
+                // The chain may wrap around to the beginning of the table.
+                hash = CACHE_HASH(CACHE_BUCKET_NAME(method), mask);
+                if (index >= hash) methodChain = index - hash;
+                else methodChain = (mask+1) + index - hash;
 
                 // Tally chains of this length
                 if (methodChain < MAX_CHAIN_SIZE)

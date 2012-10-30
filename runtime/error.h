@@ -31,7 +31,7 @@
     All rights reserved.
 */
 
-#warning the API in this header is obsolete
+#warning The API in this header is obsoleted by NSException et al.
 
 #ifndef _OBJC_ERROR_H_
 #define _OBJC_ERROR_H_
@@ -100,7 +100,7 @@ OBJC_EXPORT void _NXRemoveHandler( NXHandler *handler );
  */
 
 OBJC_EXPORT
-#if defined(__GNUC__) && !defined(__STRICT_ANSI__) && !defined(NeXT_PDO)
+#if defined(__GNUC__) && !defined(__STRICT_ANSI__)
     volatile	/* never returns */
 #endif 
 void _NXRaiseError(int code, const void *data1, const void *data2)

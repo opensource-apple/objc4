@@ -32,25 +32,10 @@
 // because objc-class.h is public and objc-config.h is not.
 //#define OBJC_INSTRUMENTED
 
-// OBJC_COLLECTING_CACHE controls whether the method dispatching caches
-// are lockless during dispatch.  This is a BIG speed win, but can be
-// implemented only when a thread can figure out the PCs of all the other
-// threads in the task.
-
-#if defined(hppa) || defined (__i386__) || defined (i386) || defined (m68k) || defined (__ppc__) || defined(ppc)
-    #if !defined(NeXT_PDO)
-        #define OBJC_COLLECTING_CACHE
-    #endif
-#endif
-
 // Turn on support for class refs
 #define OBJC_CLASS_REFS
 
     #define __S(x) x
-
-#if defined(NeXT_PDO)
-    #define GENERIC_OBJC_FILE
-#endif
 
 // Get the nice macros for subroutine calling, etc.
 // Not available on all architectures.  Not needed
@@ -59,6 +44,6 @@
     #import <architecture/i386/asm_help.h>
 #elif defined (__ppc__) || defined(ppc)
     #import <architecture/ppc/asm_help.h>
-#elif (!defined(hppa) && !defined(sparc)) || !defined(NeXT_PDO)
+#else
     #error We need asm_help.h for this architecture
 #endif

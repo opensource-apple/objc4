@@ -29,9 +29,7 @@
 #ifndef _OBJC_RUNTIME_H_
 #define _OBJC_RUNTIME_H_
 
-#ifndef NeXT_PDO
 #import <stdarg.h>
-#endif
 #import <objc/objc.h>
 #import <objc/objc-class.h>
 
@@ -42,10 +40,6 @@ struct objc_symtab {
 	SEL 		*refs;		
 	unsigned short 	cls_def_cnt;
 	unsigned short 	cat_def_cnt;
-#ifdef NeXT_PDO
-	arith_t        obj_defs;
-	arith_t        proto_defs;
-#endif
 	void  		*defs[1];	/* variable size */
 };
 
@@ -58,16 +52,10 @@ struct objc_module {
 	Symtab 		symtab;	
 };
 
-#ifdef __cplusplus
-extern "Objective-C" {
-#endif
 struct objc_super {
 	id receiver;
 	Class class;
 };
-#ifdef __cplusplus
-}
-#endif
 
 /* kernel operations */
 

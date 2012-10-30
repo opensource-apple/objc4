@@ -64,12 +64,8 @@
  *
  * had been: typedef void *objc_header;
  */
-#if defined(NeXT_PDO)
-    typedef void headerType;
-#else 
-    #import <mach-o/loader.h>
-    typedef struct mach_header headerType;
-#endif 
+#import <mach-o/loader.h>
+typedef struct mach_header headerType;
 
 #import <objc/Protocol.h>
 
@@ -80,17 +76,10 @@ typedef struct _NXConstantStringTemplate {
     unsigned int _length;
 } NXConstantStringTemplate;
    
-#if defined(NeXT_PDO)
-    #define OBJC_CONSTANT_STRING_PTR NXConstantStringTemplate**
-    #define OBJC_CONSTANT_STRING_DEREF
-    #define OBJC_PROTOCOL_PTR ProtocolTemplate**
-    #define OBJC_PROTOCOL_DEREF -> 
-#elif defined(__MACH__)
-    #define OBJC_CONSTANT_STRING_PTR NXConstantStringTemplate*
-    #define OBJC_CONSTANT_STRING_DEREF &
-    #define OBJC_PROTOCOL_PTR ProtocolTemplate*
-    #define OBJC_PROTOCOL_DEREF .
-#endif
+#define OBJC_CONSTANT_STRING_PTR NXConstantStringTemplate*
+#define OBJC_CONSTANT_STRING_DEREF &
+#define OBJC_PROTOCOL_PTR ProtocolTemplate*
+#define OBJC_PROTOCOL_DEREF .
 
 // both
 OBJC_EXPORT headerType **	_getObjcHeaders();
@@ -101,6 +90,7 @@ OBJC_EXPORT const char *	_getObjcHeaderName(headerType *head);
 
 // internal routines for delaying binding
 void _objc_resolve_categories_for_class	(struct objc_class * cls);
+void _objc_bindClassIfNeeded(struct objc_class *cls);
 void _objc_bindModuleContainingClass(struct objc_class * cls);
 
 // someday a logging facility
@@ -198,8 +188,10 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
     OBJC_EXPORT void _objc_insertMethods( struct objc_method_list *mlist, struct objc_method_list ***list );
     OBJC_EXPORT void _objc_removeMethods( struct objc_method_list *mlist, struct objc_method_list ***list );
 
+    OBJC_EXPORT IMP _cache_getImp(Class cls, SEL sel);
+    OBJC_EXPORT Method _cache_getMethod(Class cls, SEL sel);
+
     /* message dispatcher */
-    OBJC_EXPORT Cache _cache_create(Class);
     OBJC_EXPORT IMP _class_lookupMethodAndLoadCache(Class, SEL);
     OBJC_EXPORT id _objc_msgForward (id self, SEL sel, ...);
 
@@ -219,9 +211,6 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
     #define MUTEX_TYPE pthread_mutex_t*
     #define OBJC_DECLARE_LOCK(MTX) pthread_mutex_t MTX = PTHREAD_MUTEX_INITIALIZER
     OBJC_EXPORT pthread_mutex_t classLock;
-    OBJC_EXPORT pthread_mutex_t messageLock;
-
-    OBJC_EXPORT int _objc_multithread_mask;
 
     // _objc_msgNil is actually (unsigned dummy, id, SEL) for i386;
     // currently not implemented for any sparc or hppa platforms
@@ -236,27 +225,9 @@ OBJC_EXPORT SEL *		_getObjcMessageRefs(headerType *head, int *nmess);
        return (s1 == s2);
     }
 
-        #if defined(OBJC_COLLECTING_CACHE)
-            #define OBJC_LOCK(MUTEX) 	mutex_lock (MUTEX)
-            #define OBJC_UNLOCK(MUTEX)	mutex_unlock (MUTEX)
-            #define OBJC_TRYLOCK(MUTEX)	mutex_try_lock (MUTEX)
-        #else // not OBJC_COLLECTING_CACHE
-            #define OBJC_LOCK(MUTEX)			\
-              do					\
-                {					\
-                  if (!_objc_multithread_mask)		\
-            	mutex_lock (MUTEX);			\
-                }					\
-              while (0)
-
-            #define OBJC_UNLOCK(MUTEX)			\
-              do					\
-                {					\
-                  if (!_objc_multithread_mask)		\
-            	mutex_unlock (MUTEX);			\
-                }					\
-              while (0)
-        #endif /* OBJC_COLLECTING_CACHE */
+    #define OBJC_LOCK(MUTEX) 	mutex_lock (MUTEX)
+    #define OBJC_UNLOCK(MUTEX)	mutex_unlock (MUTEX)
+    #define OBJC_TRYLOCK(MUTEX)	mutex_try_lock (MUTEX)
 
 #if !defined(SEG_OBJC)
 #define SEG_OBJC        "__OBJC"        /* objective-C runtime segment */
@@ -285,6 +256,26 @@ static __inline__ unsigned int _objc_strhash(const unsigned char *s) {
     }
     return hash;
 }
+
+
+// objc per-thread storage
+OBJC_EXPORT pthread_key_t _objc_pthread_key;
+typedef struct {
+    struct _objc_initializing_classes *initializingClasses; // for +initialize
+
+    // If you add new fields here, don't forget to update 
+    // _objc_pthread_destroyspecific()
+
+} _objc_pthread_data;
+
+
+// Class state
+#define ISCLASS(cls)		((((struct objc_class *) cls)->info & CLS_CLASS) != 0)
+#define ISMETA(cls)		((((struct objc_class *) cls)->info & CLS_META) != 0)
+#define GETMETA(cls)		(ISMETA(cls) ? ((struct objc_class *) cls) : ((struct objc_class *) cls)->isa)
+#define ISINITIALIZED(cls)	((((volatile long)GETMETA(cls)->info) & CLS_INITIALIZED) != 0)
+#define ISINITIALIZING(cls)	((((volatile long)GETMETA(cls)->info) & CLS_INITIALIZING) != 0)
+
 
 #endif /* _OBJC_PRIVATE_H_ */
 

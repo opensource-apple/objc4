@@ -55,7 +55,7 @@ void _objc_syslog(const char *format, ...)
     char bigBuffer[4*1024];
 
     va_start(ap, format);
-    vsprintf(bigBuffer, format, ap);
+    vsnprintf(bigBuffer, sizeof(bigBuffer), format, ap);
     va_end(ap);
 
 
@@ -91,7 +91,7 @@ volatile void _objc_error(id self, const char *fmt, va_list ap)
 { 
     char bigBuffer[4*1024];
 
-    vsprintf (bigBuffer, fmt, ap);
+    vsnprintf (bigBuffer, sizeof(bigBuffer), fmt, ap);
     _objc_syslog ("objc: %s: %s", object_getClassName (self), bigBuffer);
 
     abort();		/* generates a core file */
@@ -117,7 +117,7 @@ void _objc_inform(const char *fmt, ...)
     char bigBuffer[4*1024];
 
     va_start (ap,fmt); 
-    vsprintf (bigBuffer, fmt, ap);
+    vsnprintf (bigBuffer, sizeof(bigBuffer), fmt, ap);
     _objc_syslog ("objc: %s", bigBuffer);
     va_end (ap);
 }
