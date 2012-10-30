@@ -1,0 +1,5 @@
+
+ifeq "$(PLATFORM_OS)" "macos"
+	BEFORE_INSTALL += profile
+endif
+

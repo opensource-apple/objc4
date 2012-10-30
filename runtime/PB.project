@@ -1,0 +1,73 @@
+{
+    CURRENTLY_ACTIVE_VERSION = YES; 
+    DEPLOY_WITH_VERSION_NAME = A; 
+    DYNAMIC_CODE_GEN = YES; 
+    FILESTABLE = {
+        CLASSES = (); 
+        HEADERSEARCH = (); 
+        H_FILES = (
+            error.h, 
+            hashtable2.h, 
+            maptable.h, 
+            "objc-api.h", 
+            "objc-class.h", 
+            "objc-config.h", 
+            "objc-load.h", 
+            "objc-private.h", 
+            "objc-runtime.h", 
+            objc.h, 
+            Object.h, 
+            Protocol.h
+        ); 
+        OTHER_LINKED = (
+            hashtable2.m, 
+            maptable.m, 
+            "objc-class.m", 
+            "objc-errors.m", 
+            "objc-file.m", 
+            "objc-load.m", 
+            "objc-moninit.c", 
+            "objc-runtime.m", 
+            "objc-sel.m", 
+            Object.m, 
+            Protocol.m
+        ); 
+        OTHER_SOURCES = (
+            Makefile.preamble, 
+            Makefile, 
+            Makefile.postamble, 
+            objc_hpux_register_shlib.c, 
+            objc_dllMain.c
+        ); 
+        PUBLIC_HEADERS = (
+            "objc-class.h", 
+            "objc-api.h", 
+            "objc-load.h", 
+            "objc-runtime.h", 
+            objc.h, 
+            Object.h, 
+            Protocol.h, 
+            error.h, 
+            hashtable2.h
+        ); 
+        SUBPROJECTS = (Messengers.subproj, OldClasses.subproj); 
+    }; 
+    LANGUAGE = English; 
+    LOCALIZABLE_FILES = {}; 
+    MAKEFILEDIR = "$(MAKEFILEPATH)/pb_makefiles"; 
+    NEXTSTEP_BUILDTOOL = /bin/gnumake; 
+    NEXTSTEP_INSTALLDIR = /usr/lib; 
+    NEXTSTEP_JAVA_COMPILER = /usr/bin/javac; 
+    NEXTSTEP_OBJCPLUS_COMPILER = /usr/bin/cc; 
+    PDO_UNIX_BUILDTOOL = $NEXT_ROOT/Developer/bin/make; 
+    PDO_UNIX_INSTALLDIR = "$(LOCAL_DEVELOPER_DIR)/Libraries"; 
+    PDO_UNIX_JAVA_COMPILER = "$(NEXTDEV_BIN)/javac"; 
+    PDO_UNIX_OBJCPLUS_COMPILER = "$(NEXTDEV_BIN)/gcc"; 
+    PROJECTNAME = runtime; 
+    PROJECTTYPE = Library; 
+    PROJECTVERSION = 2.8; 
+    WINDOWS_BUILDTOOL = $NEXT_ROOT/Developer/Executables/make; 
+    WINDOWS_INSTALLDIR = /.; 
+    WINDOWS_JAVA_COMPILER = "$(JDKBINDIR)/javac.exe"; 
+    WINDOWS_OBJCPLUS_COMPILER = "$(DEVDIR)/gcc"; 
+}

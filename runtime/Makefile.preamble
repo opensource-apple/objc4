@@ -1,0 +1,71 @@
+###############################################################################
+#  Makefile.preamble
+#  Copyright 1997,2000 Apple Computer, Inc.
+###############################################################################
+
+ifeq "$(PLATFORM_OS)" "winnt"
+	BUILDING_ON_WINDOWS = YES
+else
+ifeq "$(PLATFORM_OS)" "win95"
+	BUILDING_ON_WINDOWS = YES
+else
+ifeq "$(PLATFORM_OS)" "win32"
+	BUILDING_ON_WINDOWS = YES
+endif # win32
+endif # win95
+endif # winnt
+
+ifeq "$(PLATFORM_OS)" "macos"
+	NAME = objc
+	OTHER_CFLAGS += -Wno-unused
+	OTHER_LIBTOOL_FLAGS += -Wl,-init,___initialize_objc
+	FRAMEWORKS += -framework CoreFoundation
+	HEADER_PATHS += -I$(NEXT_ROOT)$(SYSTEM_LIBRARY_DIR)/Frameworks/System.framework/PrivateHeaders
+	AFTER_INSTALL += create-profile-lib-compat-link
+endif
+ifeq "$(BUILDING_ON_WINDOWS)" "YES"
+	LIBRARY_STYLE = STATIC
+	OTHER_LIBTOOL_FLAGS = -debugtype:both
+endif
+ifeq "$(PLATFORM_OS)" "solaris"
+	OTHER_CFLAGS += -Wno-unused -fPIC
+	LIBRARY_STYLE = STATIC
+endif
+ifeq "$(PLATFORM_OS)" "hpux"
+	OTHER_CFLAGS += -Wno-unused -Wno-comment -D_REENTRANT -DNSBUILDINGHPUXSHLIB -fPIC
+	LIBRARY_STYLE = STATIC
+endif
+
+OTHER_CFLAGS += -DNSBUILDINGOBJC -I$(SYMROOT)
+OTHER_LDFLAGS =
+
+AFTER_INSTALLHDRS += link-hashtable
+AFTER_POSTINSTALL += postprocess
+
+ifeq ("$(PLATFORM_OS)", "macos")
+	PUBLIC_HEADER_DIR = /usr/include
+	PRIVATE_HEADER_DIR = /usr/local/include
+else
+ifeq ("$(PLATFORM_OS)", "solaris")
+	PUBLIC_HEADER_DIR = $(SYSTEM_LIBRARY_DIR)/Frameworks/System.framework/Versions/A/Headers
+	PRIVATE_HEADER_DIR = $(SYSTEM_LIBRARY_DIR)/Frameworks/System.framework/Versions/A/PrivateHeaders
+else
+ifeq ("$(PLATFORM_OS)", "hpux")
+	PUBLIC_HEADER_DIR = $(SYSTEM_LIBRARY_DIR)/Frameworks/System.framework/Versions/A/Headers
+	PRIVATE_HEADER_DIR = $(SYSTEM_LIBRARY_DIR)/Frameworks/System.framework/Versions/A/PrivateHeaders
+else
+	PUBLIC_HEADER_DIR = $(SYSTEM_DEVELOPER_DIR)/Headers
+	PRIVATE_HEADER_DIR = $(LOCAL_DEVELOPER_DIR)/Headers
+endif
+endif
+endif
+
+# If, in a subproject, you want to append to the parent's PUBLIC_HEADER_DIR# 
+# (say, to add a subdirectory like "/sys"), you can use:
+PUBLIC_HEADER_DIR_SUFFIX = /objc
+PRIVATE_HEADER_DIR_SUFFIX = /objc
+
+OTHER_PUBLIC_HEADERS = 
+OTHER_PRIVATE_HEADERS = maptable.h 
+OTHER_PROJECT_HEADERS = $(PUBLIC_HEADERS) $(OTHER_PRIVATE_HEADERS) objc-private.h objc-config.h
+
