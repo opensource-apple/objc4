@@ -216,20 +216,15 @@ id objc_allocate_object(Class cls, int extra)
 * startup time.
 **********************************************************************/
 
-static void objc_strongCast_write_barrier(id value, id *slot) {
-    if (!auto_zone_set_write_barrier(gc_zone, (void*)slot, value)) {
-        auto_zone_root_write_barrier(gc_zone, slot, value);
-    }
-}
-
 __private_extern__ id objc_assign_strongCast_gc(id value, id *slot) 
 {
-    objc_strongCast_write_barrier(value, slot);
-    return (*slot = value);
+    if (!auto_zone_set_write_barrier(gc_zone, (void*)slot, value)) {    // stores & returns true if slot points into GC allocated memory
+        auto_zone_root_write_barrier(gc_zone, slot, value);     // always stores
+    }
+    return value;
 }
 
-static void objc_register_global(id value, id *slot)
-{
+__private_extern__ id objc_assign_global_gc(id value, id *slot) {
     // use explicit root registration.
     if (value && auto_zone_is_valid_pointer(gc_zone, value)) {
         if (auto_zone_is_finalized(gc_zone, value)) {
@@ -240,11 +235,10 @@ static void objc_register_global(id value, id *slot)
         }
         auto_zone_add_root(gc_zone, slot, value);
     }
-}
+    else
+        *slot = value;
 
-__private_extern__ id objc_assign_global_gc(id value, id *slot) {
-    objc_register_global(value, slot);
-    return (*slot = value);
+    return value;
 }
 
 
@@ -260,8 +254,10 @@ __private_extern__ id objc_assign_ivar_gc(id value, id base, ptrdiff_t offset)
             objc_assign_ivar_error(base, offset);
         }
     }
+    else
+        *slot = value;
     
-    return (*slot = value);
+    return value;
 }
 
 
@@ -337,23 +333,56 @@ void *objc_memmove_collectable(void *dst, const void *src, size_t size)
 }
 
 BOOL objc_atomicCompareAndSwapGlobal(id predicate, id replacement, volatile id *objectLocation) {
-    if (UseGC) objc_register_global(replacement, (id *)objectLocation);
-    return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+    if (UseGC)
+        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, YES, NO);
+    else
+        return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
 }
 
 BOOL objc_atomicCompareAndSwapGlobalBarrier(id predicate, id replacement, volatile id *objectLocation) {
-    if (UseGC) objc_register_global(replacement, (id *)objectLocation);
-    return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+    if (UseGC)
+        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, YES, YES);
+    else
+        return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
 }
 
 BOOL objc_atomicCompareAndSwapInstanceVariable(id predicate, id replacement, volatile id *objectLocation) {
-    if (UseGC) objc_strongCast_write_barrier(replacement, (id *)objectLocation);
-    return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+    if (UseGC)
+        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, NO, NO);
+    else
+        return OSAtomicCompareAndSwapPtr((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
 }
 
 BOOL objc_atomicCompareAndSwapInstanceVariableBarrier(id predicate, id replacement, volatile id *objectLocation) {
-    if (UseGC) objc_strongCast_write_barrier(replacement, (id *)objectLocation);
-    return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+    if (UseGC)
+        return auto_zone_atomicCompareAndSwap(gc_zone, (void *)predicate, (void *)replacement, (void * volatile *)objectLocation, NO, YES);
+    else
+        return OSAtomicCompareAndSwapPtrBarrier((void *)predicate, (void *)replacement, (void * volatile *)objectLocation);
+}
+
+
+/***********************************************************************
+* CF-only write barrier exports
+* Called by CF only.
+**********************************************************************/
+
+// Exported as very private SPI to CF
+void* objc_assign_ivar_address_CF(void *value, void *base, void **slot)
+{
+    // CF has already checked that *slot is a gc block so this should never fail
+    if (!auto_zone_set_write_barrier(gc_zone, slot, value))
+        *slot = value;
+    return value;
+}
+
+
+// exported as very private SPI to CF
+void* objc_assign_strongCast_CF(void* value, void **slot) 
+{
+    // CF has already checked that *slot is a gc block so this should never fail
+    if (!auto_zone_set_write_barrier(gc_zone, slot, value))
+        *slot = value;
+    return value;
 }
 
 
@@ -444,41 +473,6 @@ void objc_clear_stack(unsigned long options) {
         bzero((void*)stack_base, stack_top - stack_base);
     }
 }
-
-/***********************************************************************
-* CF-only write barrier exports
-* Called by CF only.
-* The gc_zone guards are not thought to be necessary
-**********************************************************************/
-
-// Exported as very private SPI to Foundation to tell CF about
-void* objc_assign_ivar_address_CF(void *value, void *base, void **slot)
-{
-    if (value && gc_zone) {
-        if (auto_zone_is_valid_pointer(gc_zone, base)) {
-            ptrdiff_t offset = (((char *)slot)-(char *)base);
-            auto_zone_write_barrier(gc_zone, base, offset, value);
-        }
-    }
-    
-    return (*slot = value);
-}
-
-
-// Same as objc_assign_strongCast_gc, should tell Foundation to use _gc version instead
-// exported as very private SPI to Foundation to tell CF about
-void* objc_assign_strongCast_CF(void* value, void **slot) 
-{
-    if (value && gc_zone) {
-	void *base = (void *)auto_zone_base_pointer(gc_zone, (void*)slot);
-	if (base) {
-            ptrdiff_t offset = (((char *)slot)-(char *)base);
-            auto_zone_write_barrier(gc_zone, base, offset, value);
-	}
-    }
-    return (*slot = value);
-}
-
 
 /***********************************************************************
 * Finalization support
