@@ -24,6 +24,11 @@ int main()
 
 #else
 
+static id forward_handler(void)
+{
+    return 0;
+}
+
 static BOOL hasName(const char * const *names, const char *query)
 {
     const char *name;
@@ -109,6 +114,8 @@ int main()
     // fixme object_dispose() not aggressive enough?
     if (objc_collectingEnabled()) succeed(__FILE__);
 
+    objc_setForwardHandler((void*)&forward_handler, (void*)&forward_handler);
+
 #if defined(__arm__)
     int count = 10;
 #else
@@ -125,8 +132,7 @@ int main()
     while (count--) {
         cycle();
     }
-    // leak_check(0);
-    testwarn("rdar://11369189 can't check leaks because libxpc leaks");
+    leak_check(0);
 
     // 5359412 Make sure dylibs with nothing other than image_info can close
     void *dylib = dlopen("unload3.dylib", RTLD_LAZY);

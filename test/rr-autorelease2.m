@@ -21,6 +21,7 @@
 #include <Foundation/Foundation.h>
 
 static int state;
+static pthread_attr_t smallstack;
 
 #define NESTED_COUNT 8
 
@@ -238,8 +239,37 @@ void cycle(void)
 #endif
 }
 
+
+static void
+slow_cycle(void)
+{
+    // Large autorelease stack.
+    // Do this only once because it's slow.
+    testprintf("-- Large autorelease stack.\n");
+    {
+        // limit stack size: autorelease pop should not be recursive
+        pthread_t th;
+        pthread_create(&th, &smallstack, &autorelease_lots_fn, NULL);
+        pthread_join(th, NULL);
+    }
+
+    // Single large autorelease pool.
+    // Do this only once because it's slow.
+    testprintf("-- Large autorelease pool.\n");
+    {
+        // limit stack size: autorelease pop should not be recursive
+        pthread_t th;
+        pthread_create(&th, &smallstack, &autorelease_lots_fn, (void*)1);
+        pthread_join(th, NULL);
+    }
+}
+
+
 int main()
 {
+    pthread_attr_init(&smallstack);
+    pthread_attr_setstacksize(&smallstack, 16384);
+
     // inflate the refcount side table so it doesn't show up in leak checks
     {
         int count = 10000;
@@ -271,14 +301,12 @@ int main()
 #endif
 
 
-    pthread_attr_t smallstack;
-    pthread_attr_init(&smallstack);
-    pthread_attr_setstacksize(&smallstack, 4096*4);
-
     for (int i = 0; i < 100; i++) {
         cycle();
     }
 
+    slow_cycle();
+    
     leak_mark();
 
     for (int i = 0; i < 1000; i++) {
@@ -287,25 +315,7 @@ int main()
 
     leak_check(0);
 
-    // Large autorelease stack.
-    // Do this only once because it's slow.
-    testprintf("-- Large autorelease stack.\n");
-    {
-        // limit stack size: autorelease pop should not be recursive
-        pthread_t th;
-        pthread_create(&th, &smallstack, &autorelease_lots_fn, NULL);
-        pthread_join(th, NULL);
-    }
-
-    // Single large autorelease pool.
-    // Do this only once because it's slow.
-    testprintf("-- Large autorelease pool.\n");
-    {
-        // limit stack size: autorelease pop should not be recursive
-        pthread_t th;
-        pthread_create(&th, &smallstack, &autorelease_lots_fn, (void*)1);
-        pthread_join(th, NULL);
-    }
+    slow_cycle();
 
     leak_check(0);
 

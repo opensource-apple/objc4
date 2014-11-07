@@ -221,8 +221,11 @@ sub gettests {
 
         open(my $in, "< $file") || die "$file";
         my $contents = join "", <$in>;
-        die if defined $ALL_TESTS{$name};
-        $ALL_TESTS{$name} = $ext  if ($contents =~ m#^[/*\s]*TEST_#m);
+        if (defined $ALL_TESTS{$name}) {
+            print "${yellow}SKIP: multiple tests named '$name'; skipping file '$file'.${def}\n";
+        } else {
+            $ALL_TESTS{$name} = $ext  if ($contents =~ m#^[/*\s]*TEST_#m);
+        }
         close($in);
     }
     closedir($dir);
@@ -323,6 +326,11 @@ sub check_output {
     my @output = @_;
 
     my %T = %{$C{"TEST_$name"}};
+
+    # Quietly strip MallocScribble before saving the "original" output 
+    # because it is distracting.
+    filter_malloc(\@output);
+
     my @original_output = @output;
 
     # Run result-checking passes, reducing @output each time
@@ -341,8 +349,6 @@ sub check_output {
     $bad = "(output not 'OK: $name')" if ($bad eq ""  &&  (scalar(@output) != 1  ||  $output[0] !~ /^OK: $name/));
     
     if ($bad ne "") {
-        my $red = "\e[41;37m";
-        my $def = "\e[0m";
         print "${red}FAIL: /// test '$name' \\\\\\$def\n";
         colorprint($red, @original_output);
         print "${red}FAIL: \\\\\\ test '$name' ///$def\n";
@@ -350,8 +356,6 @@ sub check_output {
         $xit = 0;
     } 
     elsif ($warn ne "") {
-        my $yellow = "\e[43;37m";
-        my $def = "\e[0m";
         print "${yellow}PASS: /// test '$name' \\\\\\$def\n";
         colorprint($yellow, @original_output);
         print "${yellow}PASS: \\\\\\ test '$name' ///$def\n";
@@ -478,6 +482,34 @@ sub filter_valgrind
     $bad .= "(valgrind errors)" if ($errors);
     $bad .= "(valgrind leaks)" if ($leaks);
     return $bad;
+}
+
+
+
+sub filter_malloc
+{
+    my $outputref = shift;
+    my $errors = 0;
+
+    my @new_output;
+    my $count = 0;
+    for my $line (@$outputref) {
+        # Ignore MallocScribble prologue.
+        # Ignore MallocStackLogging prologue.
+        if ($line =~ /malloc: enabling scribbling to detect mods to free/  ||  
+            $line =~ /Deleted objects will be dirtied by the collector/  ||
+            $line =~ /malloc: stack logs being written into/  ||  
+            $line =~ /malloc: recording malloc and VM allocation stacks/)
+        {
+            next;
+	}
+
+        # not malloc output
+        push @new_output, $line;
+
+    }
+
+    @$outputref = @new_output;
 }
 
 sub filter_guardmalloc
@@ -745,13 +777,7 @@ sub find_compiler {
     my $result = $compiler_memo{$key};
     return $result if defined $result;
     
-    if (-e $cc) {
-        $result = $cc;
-    } elsif (-e "$sdk_path/$cc") {
-        $result = "$sdk_path/$cc";
-    } elsif ($sdk eq "system"  &&  -e "/usr/bin/$cc") {
-        $result = "/usr/bin/$cc";
-    } elsif ($sdk eq "system") {
+    if ($sdk eq "system") {
         $result  = `xcrun -find $cc 2>/dev/null`;
     } else {
         $result  = `xcrun -sdk $sdk -find $cc 2>/dev/null`;
@@ -810,8 +836,20 @@ sub make_one_config {
 
     # Look up test library (possible in root or SDK_PATH)
     
-    if (-e (glob "$root/*~dst")[0]) {
-        $root = (glob "$root/*~dst")[0];
+    my $rootarg = $root;
+    my $symroot;
+    my @sympaths = ( (glob "$root/*~sym")[0], 
+                     (glob "$root/BuildRecords/*_install/Symbols")[0], 
+                     "$root/Symbols" );
+    my @dstpaths = ( (glob "$root/*~dst")[0], 
+                     (glob "$root/BuildRecords/*_install/Root")[0], 
+                     "$root/Root" );
+    for(my $i = 0; $i < scalar(@sympaths); $i++) {
+        if (-e $sympaths[$i]  &&  -e $dstpaths[$i]) {
+            $symroot = $sympaths[$i];
+            $root = $dstpaths[$i];
+            last;
+        }
     }
 
     if ($root ne ""  &&  -e "$root$C{SDK_PATH}$TESTLIBPATH") {
@@ -821,7 +859,13 @@ sub make_one_config {
     } elsif (-e "$root/$TESTLIBNAME") {
         $C{TESTLIB} = "$root/$TESTLIBNAME";
     } else {
-        die "No $TESTLIBNAME in root '$root' for sdk '$C{SDK_PATH}'\n";
+        die "No $TESTLIBNAME in root '$rootarg' for sdk '$C{SDK_PATH}'\n"
+            # . join("\n", @dstpaths) . "\n"
+            ;
+    }
+
+    if (-e "$symroot/$TESTLIBNAME.dSYM") {
+        $C{TESTDSYM} = "$symroot/$TESTLIBNAME.dSYM";
     }
 
     if ($VERBOSE) {
@@ -856,14 +900,13 @@ sub make_one_config {
         $cflags .= " '-Wl,-syslibroot,$C{SDK_PATH}'";
     }
     
-    if ($C{SDK} =~ /^iphoneos[0-9]/  &&  $cflags !~ /-miphoneos-version-min/) {
+    if ($C{SDK} =~ /^iphoneos[0-9]/  &&  $cflags !~ /-mios-version-min/) {
         my ($vers) = ($C{SDK} =~ /^iphoneos([0-9]+\.[0-9+])/);
-        $cflags .= " -miphoneos-version-min=$vers";
+        $cflags .= " -mios-version-min=$vers";
     }
-    if ($C{SDK} =~ /^iphonesimulator[0-9]/  &&  $cflags !~ /-D__IPHONE_OS_VERSION_MIN_REQUIRED/) {
+    if ($C{SDK} =~ /^iphonesimulator[0-9]/  &&  $cflags !~ /-mios-simulator-version-min/) {
         my ($vers) = ($C{SDK} =~ /^iphonesimulator([0-9]+\.[0-9+])/);
-        $vers = int($vers * 10000);  # 4.2 => 42000
-        $cflags .= " -D__IPHONE_OS_VERSION_MIN_REQUIRED=$vers";
+        $cflags .= " -mios-simulator-version-min=$vers";
     }
     if ($C{SDK} =~ /^iphonesimulator/) {
         $objcflags .= " -fobjc-abi-version=2 -fobjc-legacy-dispatch";
@@ -872,12 +915,12 @@ sub make_one_config {
     if ($root ne "") {
         my $library_path = dirname($C{TESTLIB});
         $cflags .= " -L$library_path";
-        $cflags .= " -isystem '$root/usr/include'";
-        $cflags .= " -isystem '$root/usr/local/include'";
+        $cflags .= " -I '$root/usr/include'";
+        $cflags .= " -I '$root/usr/local/include'";
         
         if ($C{SDK_PATH} ne "/") {
-            $cflags .= " -isystem '$root$C{SDK_PATH}/usr/include'";
-            $cflags .= " -isystem '$root$C{SDK_PATH}/usr/local/include'";
+            $cflags .= " -I '$root$C{SDK_PATH}/usr/include'";
+            $cflags .= " -I '$root$C{SDK_PATH}/usr/local/include'";
         }
     }
 
@@ -909,7 +952,7 @@ sub make_one_config {
     }
     
     # Populate ENV_PREFIX
-    $C{ENV} = "LANG=C";
+    $C{ENV} = "LANG=C MallocScribble=1";
     $C{ENV} .= " VERBOSE=1"  if $VERBOSE;
     if ($root ne "") {
         my $library_path = dirname($C{TESTLIB});
@@ -1081,10 +1124,11 @@ sub run_one_config {
             if ($C{TESTLIB} ne $TESTLIBPATH) {
                 # hack - send thin library because device may use lib=armv7 
                 # even though app=armv6, and we want to set the lib's arch
-                make("lipo -output /tmp/$TESTLIBNAME -thin $C{ARCH} $C{TESTLIB}  ||  cp $C{TESTLIB} /tmp/$TESTLIBNAME");
+                make("xcrun -sdk $C{SDK} lipo -output /tmp/$TESTLIBNAME -thin $C{ARCH} $C{TESTLIB}  ||  cp $C{TESTLIB} /tmp/$TESTLIBNAME");
                 die "Couldn't thin $C{TESTLIB} to $C{ARCH}\n" if ($?);
                 make("RSYNC_PASSWORD=alpine rsync -av /tmp/$TESTLIBNAME rsync://root\@localhost:10873/root/var/root/test/");
                 die "Couldn't rsync $C{TESTLIB} to device\n" if ($?);
+                make("RSYNC_PASSWORD=alpine rsync -av $C{TESTDSYM} rsync://root\@localhost:10873/root/var/root/test/");
             }
         }
 

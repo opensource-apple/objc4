@@ -501,7 +501,7 @@ OBJC_EXPORT __declspec(naked) id _objc_msgForward_stret(id a, SEL b, ...)
 }
 
 
-__declspec(naked) id _objc_msgForward_internal(id a, SEL b, ...)
+__declspec(naked) id _objc_msgForward_cached(id a, SEL b, ...)
 {
     __asm {
         cmp edx, kFwdMsgSendStret

@@ -37,6 +37,10 @@
 #   define __has_extension __has_feature
 #endif
 
+#ifndef __has_attribute
+#   define __has_attribute(x) 0
+#endif
+
 
 /*
  * OBJC_API_VERSION 0 or undef: Tiger and earlier API only
@@ -58,18 +62,26 @@
 #endif
 
 
+/* OBJC_ISA_AVAILABILITY: `isa` will be deprecated or unavailable 
+ * in the future */
+#if !defined(OBJC_ISA_AVAILABILITY)
+#   define OBJC_ISA_AVAILABILITY  /* still available */
+#endif
+
+
 /* OBJC2_UNAVAILABLE: unavailable in objc 2.0, deprecated in Leopard */
 #if !defined(OBJC2_UNAVAILABLE)
 #   if __OBJC2__
 #       define OBJC2_UNAVAILABLE UNAVAILABLE_ATTRIBUTE
 #   else
-#       define OBJC2_UNAVAILABLE DEPRECATED_IN_MAC_OS_X_VERSION_10_5_AND_LATER
+        /* plain C code also falls here, but this is close enough */
+#       define OBJC2_UNAVAILABLE __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_5,__MAC_10_5, __IPHONE_2_0,__IPHONE_2_0)
 #   endif
 #endif
 
 /* OBJC_ARC_UNAVAILABLE: unavailable with -fobjc-arc */
 #if !defined(OBJC_ARC_UNAVAILABLE)
-#   if __has_feature(objc_arr)
+#   if __has_feature(objc_arc)
 #       if __has_extension(attribute_unavailable_with_message)
 #           define OBJC_ARC_UNAVAILABLE __attribute__((unavailable("not available in automatic reference counting mode")))
 #       else
@@ -119,6 +131,14 @@
 
 #if !defined(OBJC_IMPORT)
 #   define OBJC_IMPORT extern
+#endif
+
+#if !defined(OBJC_ROOT_CLASS)
+#   if __has_attribute(objc_root_class)
+#       define OBJC_ROOT_CLASS __attribute__((objc_root_class))
+#   else
+#       define OBJC_ROOT_CLASS
+#   endif
 #endif
 
 #ifndef __DARWIN_NULL

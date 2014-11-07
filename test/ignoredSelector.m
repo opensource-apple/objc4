@@ -8,6 +8,7 @@
 
 static int state = 0;
 
+OBJC_ROOT_CLASS
 @interface Super { id isa; } @end
 @implementation Super 
 +(id)class { return self; }
@@ -28,6 +29,7 @@ static int state = 0;
 @interface Sub2 : Super @end
 @implementation Sub2 @end
 
+OBJC_ROOT_CLASS
 @interface Empty { id isa; } @end
 @implementation Empty
 +(id)class { return self; }

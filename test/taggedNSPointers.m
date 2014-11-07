@@ -4,21 +4,23 @@
 #include <objc/runtime.h>
 #import <Foundation/Foundation.h>
 
-#if __OBJC2__ && __LP64__
+#if OBJC_HAVE_TAGGED_POINTERS
 
 void testTaggedNumber()
 {
     NSNumber *taggedNS = [NSNumber numberWithInt: 1234];
     CFNumberRef taggedCF = (CFNumberRef)objc_unretainedPointer(taggedNS);
-    uintptr_t taggedAddress = (uintptr_t)taggedCF;
     int result;
     
     testassert( CFGetTypeID(taggedCF) == CFNumberGetTypeID() );
+    testassert(_objc_getClassForTag(OBJC_TAG_NSNumber) == [taggedNS class]);
     
     CFNumberGetValue(taggedCF, kCFNumberIntType, &result);
     testassert(result == 1234);
 
-    testassert(taggedAddress & 0x1); // make sure it is really tagged
+    testassert(_objc_isTaggedPointer(taggedCF));
+    testassert(_objc_getTaggedPointerTag(taggedCF) == OBJC_TAG_NSNumber);
+    testassert(_objc_makeTaggedPointer(_objc_getTaggedPointerTag(taggedCF), _objc_getTaggedPointerValue(taggedCF)) == taggedCF);
 
     // do some generic object-y things to the taggedPointer instance
     CFRetain(taggedCF);
@@ -59,12 +61,12 @@ int main()
     succeed(__FILE__);
 }
 
-// OBJC2 && __LP64__
+// OBJC_HAVE_TAGGED_POINTERS
 #else
-// not (OBJC2 && __LP64__)
+// not OBJC_HAVE_TAGGED_POINTERS
 
-    // Tagged pointers not supported. Crash if an NSNumber actually 
-    // is a tagged pointer (which means this test is out of date).
+// Tagged pointers not supported. Crash if an NSNumber actually 
+// is a tagged pointer (which means this test is out of date).
 
 int main() 
 {

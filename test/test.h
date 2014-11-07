@@ -1,4 +1,4 @@
-// test.h
+// test.h 
 // Common definitions for trivial test harness
 
 
@@ -325,6 +325,7 @@ static id self_fn(id x) { return x; }
 
 /* General purpose root class */
 
+OBJC_ROOT_CLASS
 @interface TestRoot {
  @public
     Class isa;
@@ -389,6 +390,11 @@ struct stret {
     int c;
     int d;
     int e;
+    int f;
+    int g;
+    int h;
+    int i;
+    int j;
 };
 
 static inline BOOL stret_equal(struct stret a, struct stret b)
@@ -397,9 +403,14 @@ static inline BOOL stret_equal(struct stret a, struct stret b)
             a.b == b.b  &&  
             a.c == b.c  &&  
             a.d == b.d  &&  
-            a.e == b.e);
+            a.e == b.e  &&  
+            a.f == b.f  &&  
+            a.g == b.g  &&  
+            a.h == b.h  &&  
+            a.i == b.i  &&  
+            a.j == b.j);
 }
 
-static struct stret STRET_RESULT __attribute__((used)) = {1, 2, 3, 4, 5};
+static struct stret STRET_RESULT __attribute__((used)) = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
 #endif

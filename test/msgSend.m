@@ -1,4 +1,4 @@
-// TEST_CONFIG
+// TEST_CFLAGS -Wno-unused-parameter
 
 #include "test.h"
 #include "testroot.i"
@@ -81,6 +81,7 @@ do { \
     testassert(_cmd == sel_registerName(#sel "_noarg"));\
 } while (0)
 
+id NIL_RECEIVER;
 id ID_RESULT;
 long long LL_RESULT = __LONG_LONG_MAX__ - 2LL*__INT_MAX__;
 double FP_RESULT = __DBL_MIN__ + __DBL_EPSILON__;
@@ -94,7 +95,7 @@ static struct stret zero;
 -(struct stret)stret { return STRET_RESULT; }
 
 -(id)idret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     CHECK_ARGS(idret);
     state = 1;
@@ -102,7 +103,7 @@ static struct stret zero;
 }
 
 -(long long)llret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     CHECK_ARGS(llret);
     state = 2;
@@ -110,7 +111,7 @@ static struct stret zero;
 }
 
 -(struct stret)stret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     CHECK_ARGS(stret);
     state = 3;
@@ -118,7 +119,7 @@ static struct stret zero;
 }
 
 -(double)fpret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     CHECK_ARGS(fpret);
     state = 4;
@@ -126,7 +127,7 @@ static struct stret zero;
 }
 
 -(long double)lfpret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     CHECK_ARGS(lfpret);
     state = 5;
@@ -203,35 +204,35 @@ static struct stret zero;
 
 
 +(id)idret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     fail("+idret called instead of -idret");
     CHECK_ARGS(idret);
 }
 
 +(long long)llret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     fail("+llret called instead of -llret");
     CHECK_ARGS(llret);
 }
 
 +(struct stret)stret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     fail("+stret called instead of -stret");
     CHECK_ARGS(stret);
 }
 
 +(double)fpret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     fail("+fpret called instead of -fpret");
     CHECK_ARGS(fpret);
 }
 
 +(long double)lfpret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     fail("+lfpret called instead of -lfpret");
     CHECK_ARGS(lfpret);
@@ -273,7 +274,7 @@ static struct stret zero;
 @implementation Sub
 
 -(id)idret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     id result;
     CHECK_ARGS(idret);
@@ -286,7 +287,7 @@ static struct stret zero;
 }
 
 -(long long)llret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     long long result;
     CHECK_ARGS(llret);
@@ -299,7 +300,7 @@ static struct stret zero;
 }
 
 -(struct stret)stret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     struct stret result;
     CHECK_ARGS(stret);
@@ -312,7 +313,7 @@ static struct stret zero;
 }
 
 -(double)fpret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     double result;
     CHECK_ARGS(fpret);
@@ -325,7 +326,7 @@ static struct stret zero;
 }
 
 -(long double)lfpret: 
-   (int)i1:(int)i2:(int)i3:(int)i4:(int)i5:(int)i6:(int)i7:(int)i8:(int)i9:(int)i10:(int)i11:(int)i12:(int)i13 :(double)f1:(double)f2:(double)f3:(double)f4:(double)f5:(double)f6:(double)f7:(double)f8:(double)f9:(double)f10:(double)f11:(double)f12:(double)f13:(double)f14:(double)f15
+   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     long double result;
     CHECK_ARGS(lfpret);
@@ -401,17 +402,15 @@ static struct stret zero;
 @end
 
 
-#if __x86_64__
+#if OBJC_HAVE_TAGGED_POINTERS
 
 @interface TaggedSub : Sub @end
 
 @implementation TaggedSub : Sub
 
-#define TAG_VALUE(tagSlot, value) (objc_unretainedObject((void*)(1UL | (((uintptr_t)(tagSlot)) << 1) | (((uintptr_t)(value)) << 4))))
-
 +(void)initialize
 {
-    _objc_insert_tagged_isa(2, self);
+    _objc_registerTaggedPointerClass(OBJC_TAG_7, self);
 }
 
 @end
@@ -515,12 +514,12 @@ void sigtrap(int sig, siginfo_t *info, void *cc)
 
 uint8_t set(uintptr_t dst, uint8_t newvalue)
 {
-    uintptr_t start = dst & ~(4096-1);
-    mprotect((void*)start, 4096, PROT_READ|PROT_WRITE);
+    uintptr_t start = dst & ~(PAGE_SIZE-1);
+    mprotect((void*)start, PAGE_SIZE, PROT_READ|PROT_WRITE);
     // int3
     uint8_t oldvalue = *(uint8_t *)dst;
     *(uint8_t *)dst = newvalue;
-    mprotect((void*)start, 4096, PROT_READ|PROT_EXEC);
+    mprotect((void*)start, PAGE_SIZE, PROT_READ|PROT_EXEC);
     return oldvalue;
 }
 
@@ -580,8 +579,8 @@ __asm__(
 
 uintptr_t *getOffsets(void *symbol, const char *symname)
 {
-    uintptr_t *result = (uintptr_t *)malloc(4096 * sizeof(uintptr_t));
-    uintptr_t *end = result + 4096;
+    uintptr_t *result = (uintptr_t *)malloc(PAGE_SIZE * sizeof(uintptr_t));
+    uintptr_t *end = result + PAGE_SIZE;
     uintptr_t *p = result;
 
     // find library
@@ -595,6 +594,7 @@ uintptr_t *getOffsets(void *symbol, const char *symname)
     char *cmd;
     asprintf(&cmd, "/usr/bin/xcrun otool -arch x86_64 -tv -p _%s %s", 
              symname, dl.dli_fname);
+    testprintf("%s\n", cmd);
     FILE *disa = popen(cmd, "r");
     free(cmd);
     testassert(disa);
@@ -624,6 +624,9 @@ uintptr_t *getOffsets(void *symbol, const char *symname)
     testassert(p > result);
     testassert(p < end);
     *p = ~0UL;
+    // hack: skip last instruction because libunwind blows up if it's 
+    // one byte long and followed by the next function with no NOPs first
+    if (p > result) p[-1] = ~0UL;
     return result;
 }
 
@@ -726,7 +729,7 @@ void test_dw(const char *name, id sub, id tagged, SEL sel)
         unclobber(fn, offset, insn_byte);
 
         // require at least one path above to trip this offset
-        if (!caught) fprintf(stderr, "OFFSET %lu NOT CAUGHT\n", offset);
+        if (!caught) fprintf(stderr, "OFFSET %s+%lu NOT CAUGHT\n", name, offset);
     }
     free(insnOffsets);
 }
@@ -831,6 +834,10 @@ int main()
     double fpval;
     long double lfpval;
 
+#if __x86_64__
+    struct stret *stretptr;
+#endif
+
     uint64_t startTime;
     uint64_t totalTime;
     uint64_t targetTime;
@@ -857,7 +864,7 @@ int main()
 
     // get +initialize out of the way
     [Sub class];
-#if __x86_64__
+#if OBJC_HAVE_TAGGED_POINTERS
     [TaggedSub class];
 #endif
 
@@ -865,14 +872,16 @@ int main()
 
     Sub *sub = [Sub new];
     Super *sup = [Super new];
-#if __x86_64__
-    TaggedSub *tagged = TAG_VALUE(2, 999);
+#if OBJC_HAVE_TAGGED_POINTERS
+    TaggedSub *tagged = objc_unretainedObject(_objc_makeTaggedPointer(OBJC_TAG_7, 999));
 #endif
-    
+
     // Basic cached and uncached dispatch.
     // Do this first before anything below caches stuff.
+    testprintf("basic\n");
     test_basic(sub);
-#if __x86_64__
+#if OBJC_HAVE_TAGGED_POINTERS
+    testprintf("basic tagged\n");
     test_basic(tagged);
 #endif
 
@@ -898,6 +907,8 @@ int main()
     // fixme unless they all fail
     // `.align 4` matches loop alignment to make -O0 work
     // fill cache first
+    testprintf("time checks\n");
+
     SELF = sub;
     [sub voidret_nop];
     [sub llret_nop];
@@ -976,6 +987,8 @@ int main()
     // method_invoke_stret stret
     // method_invoke_stret fpret
     // method_invoke fpret long double
+    testprintf("method_invoke\n");
+
     SELF = sup;
 
     state = 0;
@@ -1010,37 +1023,51 @@ int main()
     // message to nil stret
     // message to nil fpret
     // message to nil fpret long double
+    // Use NIL_RECEIVER to avoid compiler optimizations.
+    testprintf("message to nil\n");
+
     state = 0;
     idval = ID_RESULT;
-    idval = [(id)nil idret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    idval = [(id)NIL_RECEIVER idret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
     testassert(state == 0);
     testassert(idval == nil);
     
     state = 0;
     llval = LL_RESULT;
-    llval = [(id)nil llret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    llval = [(id)NIL_RECEIVER llret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
     testassert(state == 0);
     testassert(llval == 0LL);
     
     state = 0;
     stretval = zero;
-    stretval = [(id)nil stret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    stretval = [(id)NIL_RECEIVER stret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
     testassert(state == 0);
 #if __clang__
     testassert(0 == memcmp(&stretval, &zero, sizeof(stretval)));
 #else
     // no stret result guarantee
 #endif
-    
+
+#if __x86_64__
+    // check stret return register
+    state = 0;
+    stretval = zero;
+    stretptr = ((struct stret *(*)(struct stret *, id, SEL))objc_msgSend_stret)
+        (&stretval, nil, @selector(stret_nop));
+    testassert(stretptr == &stretval);
+    testassert(state == 0);
+    // no stret result guarantee for hand-written calls, even with clang
+#endif
+
     state = 0;
     fpval = FP_RESULT;
-    fpval = [(id)nil fpret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    fpval = [(id)NIL_RECEIVER fpret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
     testassert(state == 0);
     testassert(fpval == 0.0);
     
     state = 0;
     lfpval = LFP_RESULT;
-    lfpval = [(id)nil lfpret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    lfpval = [(id)NIL_RECEIVER lfpret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
     testassert(state == 0);
     testassert(lfpval == 0.0);
 
@@ -1076,16 +1103,11 @@ int main()
     testassert(lfpval == 0.0);
 # endif
 #endif
-    
-    // message forwarded
-    // message forwarded long long
-    // message forwarded stret
-    // message forwarded fpret
-    // message forwarded fpret long double
-    // fixme
+
 
 #if __OBJC2__
     // rdar://8271364 objc_msgSendSuper2 must not change objc_super
+    testprintf("super struct\n");
     struct objc_super sup_st = {
         sub, 
         object_getClass(sub), 
@@ -1112,6 +1134,8 @@ int main()
 
 #if __OBJC2__
     // Debug messengers.
+    testprintf("debug messengers\n");
+
     state = 0;
     idmsg = (typeof(idmsg))objc_msgSend_debug;
     idval = nil;
@@ -1177,6 +1201,7 @@ int main()
 #if __x86_64__  &&  !__has_feature(objc_arc)
     // DWARF unwind tables
     // Not for ARC because the extra RR calls hit the traps at the wrong times
+    testprintf("unwind tables\n");
 
     // install exception handler
     struct sigaction act;
@@ -1189,18 +1214,13 @@ int main()
     // which can die in the trapped messenger
 
     test_dw("objc_msgSend",                   sub,tagged,@selector(idret_nop));
-    test_dw("objc_msgSend_fixup",             sub,tagged,@selector(idret_nop));
     test_dw("objc_msgSend_stret",             sub,tagged,@selector(stret_nop));
-    test_dw("objc_msgSend_stret_fixup",       sub,tagged,@selector(stret_nop));
     test_dw("objc_msgSend_fpret",             sub,tagged,@selector(fpret_nop));
-    test_dw("objc_msgSend_fpret_fixup",       sub,tagged,@selector(fpret_nop));
     // fixme fp2ret
     test_dw("objc_msgSendSuper",              sub,tagged,@selector(idret_nop));
     test_dw("objc_msgSendSuper2",             sub,tagged,@selector(idret_nop));
-    test_dw("objc_msgSendSuper2_fixup",       sub,tagged,@selector(idret_nop));
     test_dw("objc_msgSendSuper_stret",        sub,tagged,@selector(stret_nop));
     test_dw("objc_msgSendSuper2_stret",       sub,tagged,@selector(stret_nop));
-    test_dw("objc_msgSendSuper2_stret_fixup", sub,tagged,@selector(stret_nop));
 
     // DWARF unwind tables
 #endif

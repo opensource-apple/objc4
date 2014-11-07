@@ -11,6 +11,7 @@ static BOOL auto_zone_is_valid_pointer(void *a, void *b) { return a||b; }
 #endif
 #include "test.h"
 
+OBJC_ROOT_CLASS
 @interface Super { @public id isa; } @end
 @implementation Super 
 +(void) initialize { } 
@@ -26,7 +27,7 @@ int main()
 
     s = class_createInstance([Super class], 0);
     testassert(s);
-    testassert(s->isa == [Super class]);
+    testassert(object_getClass(s) == [Super class]);
     testassert(malloc_size(s) >= class_getInstanceSize([Super class]));
     if (objc_collectingEnabled()) testassert(auto_zone_is_valid_pointer(objc_collectableZone(), s));
 
@@ -34,7 +35,7 @@ int main()
 
     s = class_createInstance([Sub class], 0);
     testassert(s);
-    testassert(s->isa == [Sub class]);
+    testassert(object_getClass(s) == [Sub class]);
     testassert(malloc_size(s) >= class_getInstanceSize([Sub class]));
     if (objc_collectingEnabled()) testassert(auto_zone_is_valid_pointer(objc_collectableZone(), s));
 
@@ -42,7 +43,7 @@ int main()
 
     s = class_createInstance([Super class], 100);
     testassert(s);
-    testassert(s->isa == [Super class]);
+    testassert(object_getClass(s) == [Super class]);
     testassert(malloc_size(s) >= class_getInstanceSize([Super class]) + 100);
     if (objc_collectingEnabled()) testassert(auto_zone_is_valid_pointer(objc_collectableZone(), s));
 
@@ -50,7 +51,7 @@ int main()
 
     s = class_createInstance([Sub class], 100);
     testassert(s);
-    testassert(s->isa == [Sub class]);
+    testassert(object_getClass(s) == [Sub class]);
     testassert(malloc_size(s) >= class_getInstanceSize([Sub class]) + 100);
     if (objc_collectingEnabled()) testassert(auto_zone_is_valid_pointer(objc_collectableZone(), s));
 

@@ -1,6 +1,7 @@
 #if __arm__
 	
 #include <arm/arch.h>
+#include <mach/vm_param.h>
 
 .syntax unified
 
@@ -25,7 +26,7 @@
 	.arm
 #endif
 	
-.align 12
+.align PAGE_SHIFT
 .private_extern __a2a3_tramphead
 __a2a3_tramphead_nt:	
 __a2a3_tramphead:
@@ -49,7 +50,7 @@ __a2a3_tramphead:
 	// load block pointer from trampoline's data
 	// nt label works around thumb integrated asm bug rdar://11315197
 	adr  r12, __a2a3_tramphead_nt // text page
-	sub  r12, r12, #4096          // data page precedes text page
+	sub  r12, r12, #PAGE_SIZE     // data page precedes text page
 	ldr  r12, [r12, r2, LSL #3]   // load block pointer from data + index*8
 
 	// shuffle parameters

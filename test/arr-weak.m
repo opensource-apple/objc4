@@ -2,7 +2,7 @@
 // TEST_CRASHES
 /*
 TEST_RUN_OUTPUT
-objc\[\d+\]: cannot form weak reference to instance \(0x[0-9a-f]+\) of class Crash
+objc\[\d+\]: Cannot form weak reference to instance \(0x[0-9a-f]+\) of class Crash. It is possible that this object was over-released, or is in the process of deallocation.
 CRASHED: SIG(ILL|TRAP)
 END
 */
@@ -43,10 +43,9 @@ static bool did_dealloc;
 }
 @end
 
-int main()
+
+void cycle(Test *obj, Test *obj2)
 {
-    Test *obj = [Test new];
-    Test *obj2 = [Test new];
     id result;
 
     testprintf("Weak assignment\n");
@@ -69,21 +68,76 @@ int main()
     testassert(result == NULL);
     testassert(weak == NULL);
 
-    testprintf("Weak clear\n");
+    testprintf("Weak re-assignment to NULL\n");
+    result = objc_storeWeak(&weak, NULL);
+    testassert(result == NULL);
+    testassert(weak == NULL);
 
+    testprintf("Weak move\n");
     result = objc_storeWeak(&weak, obj);
     testassert(result == obj);
     testassert(weak == obj);
-
-    result = objc_storeWeak(&weak2, obj);
-    testassert(result == obj);
+    weak2 = (id)(PAGE_SIZE-16);
+    objc_moveWeak(&weak2, &weak);
+    testassert(weak == nil);
     testassert(weak2 == obj);
+    objc_storeWeak(&weak2, NULL);
+
+    testprintf("Weak copy\n");
+    result = objc_storeWeak(&weak, obj);
+    testassert(result == obj);
+    testassert(weak == obj);
+    weak2 = (id)(PAGE_SIZE-16);
+    objc_copyWeak(&weak2, &weak);
+    testassert(weak == obj);
+    testassert(weak2 == obj);
+    objc_storeWeak(&weak, NULL);
+    objc_storeWeak(&weak2, NULL);
+
+    testprintf("Weak clear\n");
+
+    id obj3 = [Test new];
+
+    result = objc_storeWeak(&weak, obj3);
+    testassert(result == obj3);
+    testassert(weak == obj3);
+
+    result = objc_storeWeak(&weak2, obj3);
+    testassert(result == obj3);
+    testassert(weak2 == obj3);
 
     did_dealloc = false;
-    [obj release];
+    [obj3 release];
     testassert(did_dealloc);
     testassert(weak == NULL);
     testassert(weak2 == NULL);
+}
+
+
+int main()
+{
+    Test *obj = [Test new];
+    Test *obj2 = [Test new];
+    id result;
+
+    for (int i = 0; i < 100000; i++) {
+        if (i == 10) leak_mark();
+        cycle(obj, obj2);
+    }
+    // allow some slop for [Test new] inside cycle() 
+    // to land in different side table stripes
+    leak_check(3072);
+
+
+    // rdar://14105994
+    id weaks[8];
+    for (size_t i = 0; i < sizeof(weaks)/sizeof(weaks[0]); i++) {
+        objc_storeWeak(&weaks[i], obj);
+    }
+    for (size_t i = 0; i < sizeof(weaks)/sizeof(weaks[0]); i++) {
+        objc_storeWeak(&weaks[i], nil);
+    }
+
 
     Crash *obj3 = [Crash new];
     result = objc_storeWeak(&weak, obj3);

@@ -30,6 +30,15 @@
 #define _OBJC_OS_H
 
 #include <TargetConditionals.h>
+#include "objc-config.h"
+
+#ifdef __LP64__
+#   define WORD_SHIFT 3UL
+#   define WORD_MASK 7UL
+#else
+#   define WORD_SHIFT 2UL
+#   define WORD_MASK 3UL
+#endif
 
 #if TARGET_OS_MAC
 
@@ -54,69 +63,37 @@
 #   include <crt_externs.h>
 #   include <AssertMacros.h>
 #   undef check
-#   include <AvailabilityMacros.h>
+#   include <Availability.h>
 #   include <TargetConditionals.h>
 #   include <sys/mman.h>
 #   include <sys/time.h>
 #   include <sys/stat.h>
 #   include <sys/param.h>
 #   include <mach/mach.h>
+#   include <mach/vm_param.h>
 #   include <mach-o/dyld.h>
 #   include <mach-o/ldsyms.h>
 #   include <mach-o/loader.h>
 #   include <mach-o/getsect.h>
 #   include <mach-o/dyld_priv.h>
 #   include <malloc/malloc.h>
+#   include <os/lock_private.h>
 #   include <libkern/OSAtomic.h>
 #   include <libkern/OSCacheControl.h>
 #   include <System/pthread_machdep.h>
 #   include "objc-probes.h"  // generated dtrace probe definitions.
 
+// Some libc functions call objc_msgSend() 
+// so we can't use them without deadlocks.
+void syslog(int, const char *, ...) UNAVAILABLE_ATTRIBUTE;
+void vsyslog(int, const char *, va_list) UNAVAILABLE_ATTRIBUTE;
 
-#if defined(__i386__) || defined(__x86_64__)
 
-// Inlined spinlock.
-// Not for arm on iOS because it hurts uniprocessor performance.
-
-#define ARR_SPINLOCK_INIT 0
-// XXX -- Careful: OSSpinLock isn't volatile, but should be
-typedef volatile int ARRSpinLock;
-__attribute__((always_inline))
-static inline void ARRSpinLockLock(ARRSpinLock *l)
-{
-    unsigned y;
-again:
-    if (__builtin_expect(__sync_lock_test_and_set(l, 1), 0) == 0) {
-        return;
-    }
-    for (y = 1000; y; y--) {
-#if defined(__i386__) || defined(__x86_64__)
-        asm("pause");
-#endif
-        if (*l == 0) goto again;
-    }
-    thread_switch(THREAD_NULL, SWITCH_OPTION_DEPRESS, 1);
-    goto again;
-}
-__attribute__((always_inline))
-static inline void ARRSpinLockUnlock(ARRSpinLock *l)
-{
-    __sync_lock_release(l);
-}
-__attribute__((always_inline))
-static inline int ARRSpinLockTry(ARRSpinLock *l)
-{
-    return __sync_bool_compare_and_swap(l, 0, 1);
-}
-
-#define OSSpinLock ARRSpinLock
-#define OSSpinLockTry(l) ARRSpinLockTry(l)
-#define OSSpinLockLock(l) ARRSpinLockLock(l)
-#define OSSpinLockUnlock(l) ARRSpinLockUnlock(l)
-#undef OS_SPINLOCK_INIT
-#define OS_SPINLOCK_INIT ARR_SPINLOCK_INIT 
-
-#endif
+#define spinlock_t os_lock_handoff_s
+#define spinlock_trylock(l) os_lock_trylock(l)
+#define spinlock_lock(l) os_lock_lock(l)
+#define spinlock_unlock(l) os_lock_unlock(l)
+#define SPINLOCK_INITIALIZER OS_LOCK_HANDOFF_INIT
 
 
 #if !TARGET_OS_IPHONE
@@ -127,16 +104,6 @@ static inline int ARRSpinLockTry(ARRSpinLock *l)
     extern const char *CRSetCrashLogMessage(const char *msg);
     extern const char *CRGetCrashLogMessage(void);
     extern const char *CRSetCrashLogMessage2(const char *msg);
-    __END_DECLS
-#endif
-
-#if TARGET_IPHONE_SIMULATOR
-    // getsectiondata() and getsegmentdata() are unavailable
-    __BEGIN_DECLS
-#   define getsectiondata(m, s, n, c) objc_getsectiondata(m, s, n, c)
-#   define getsegmentdata(m, s, c) objc_getsegmentdata(m, s, c)
-    extern uint8_t *objc_getsectiondata(const struct mach_header *mh, const char *segname, const char *sectname, unsigned long *outSize);
-    extern uint8_t * objc_getsegmentdata(const struct mach_header *mh, const char *segname, unsigned long *outSize);
     __END_DECLS
 #endif
 
@@ -177,7 +144,7 @@ static inline int ARRSpinLockTry(ARRSpinLock *l)
 #   include <string.h>
 #   include <assert.h>
 #   include <malloc.h>
-#   include <AvailabilityMacros.h>
+#   include <Availability.h>
 
 #   if __cplusplus
 #       include <vector>
@@ -382,10 +349,10 @@ static __inline int _mutex_unlock_nodebug(mutex_t *m) {
 }
 
 
-typedef mutex_t OSSpinLock;
-#define OSSpinLockLock(l) mutex_lock(l)
-#define OSSpinLockUnlock(l) mutex_unlock(l)
-#define OS_SPINLOCK_INIT MUTEX_INITIALIZER
+typedef mutex_t spinlock_t;
+#define spinlock_lock(l) mutex_lock(l)
+#define spinlock_unlock(l) mutex_unlock(l)
+#define SPINLOCK_INITIALIZER MUTEX_INITIALIZER
 
 
 typedef struct {
@@ -654,33 +621,13 @@ static inline void tls_set_direct(tls_key_t k, void *value)
 typedef pthread_mutex_t mutex_t;
 #define MUTEX_INITIALIZER PTHREAD_MUTEX_INITIALIZER;
 
-extern int DebuggerMode;
-extern void gdb_objc_debuggerModeFailure(void);
-extern BOOL isManagedDuringDebugger(void *lock);
-extern BOOL isLockedDuringDebugger(void *lock);
-
 static inline int _mutex_lock_nodebug(mutex_t *m) { 
-    if (DebuggerMode  &&  isManagedDuringDebugger(m)) {
-        if (! isLockedDuringDebugger(m)) {
-            gdb_objc_debuggerModeFailure();
-        }
-        return 0;
-    }
     return pthread_mutex_lock(m); 
 }
 static inline bool _mutex_try_lock_nodebug(mutex_t *m) { 
-    if (DebuggerMode  &&  isManagedDuringDebugger(m)) {
-        if (! isLockedDuringDebugger(m)) {
-            gdb_objc_debuggerModeFailure();
-        }
-        return true;
-    }
     return !pthread_mutex_trylock(m); 
 }
 static inline int _mutex_unlock_nodebug(mutex_t *m) { 
-    if (DebuggerMode  &&  isManagedDuringDebugger(m)) {
-        return 0;
-    }
     return pthread_mutex_unlock(m); 
 }
 
@@ -694,29 +641,14 @@ extern void recursive_mutex_init(recursive_mutex_t *m);
 
 static inline int _recursive_mutex_lock_nodebug(recursive_mutex_t *m) { 
     assert(m->mutex);
-    if (DebuggerMode  &&  isManagedDuringDebugger(m)) {
-        if (! isLockedDuringDebugger((mutex_t *)m)) {
-            gdb_objc_debuggerModeFailure();
-        }
-        return 0;
-    }
     return pthread_mutex_lock(m->mutex); 
 }
 static inline bool _recursive_mutex_try_lock_nodebug(recursive_mutex_t *m) { 
     assert(m->mutex);
-    if (DebuggerMode  &&  isManagedDuringDebugger(m)) {
-        if (! isLockedDuringDebugger((mutex_t *)m)) {
-            gdb_objc_debuggerModeFailure();
-        }
-        return true;
-    }
     return !pthread_mutex_trylock(m->mutex); 
 }
 static inline int _recursive_mutex_unlock_nodebug(recursive_mutex_t *m) { 
     assert(m->mutex);
-    if (DebuggerMode  &&  isManagedDuringDebugger(m)) {
-        return 0;
-    }
     return pthread_mutex_unlock(m->mutex); 
 }
 
@@ -739,7 +671,6 @@ static inline int monitor_init(monitor_t *c) {
     return 0;
 }
 static inline int _monitor_enter_nodebug(monitor_t *c) {
-    assert(!isManagedDuringDebugger(c));
     return pthread_mutex_lock(&c->mutex);
 }
 static inline int _monitor_exit_nodebug(monitor_t *c) {
@@ -782,9 +713,6 @@ typedef struct {
     pthread_rwlock_t rwl;
 } rwlock_t;
 
-extern BOOL isReadingDuringDebugger(rwlock_t *lock);
-extern BOOL isWritingDuringDebugger(rwlock_t *lock);
-
 static inline void rwlock_init(rwlock_t *l)
 {
     int err __unused = pthread_rwlock_init(&l->rwl, NULL);
@@ -793,21 +721,12 @@ static inline void rwlock_init(rwlock_t *l)
 
 static inline void _rwlock_read_nodebug(rwlock_t *l)
 {
-    if (DebuggerMode  &&  isManagedDuringDebugger(l)) {
-        if (! isReadingDuringDebugger(l)) {
-            gdb_objc_debuggerModeFailure();
-        }
-        return;
-    }
     int err __unused = pthread_rwlock_rdlock(&l->rwl);
     assert(err == 0);
 }
 
 static inline void _rwlock_unlock_read_nodebug(rwlock_t *l)
 {
-    if (DebuggerMode  &&  isManagedDuringDebugger(l)) {
-        return;
-    }
     int err __unused = pthread_rwlock_unlock(&l->rwl);
     assert(err == 0);
 }
@@ -815,12 +734,6 @@ static inline void _rwlock_unlock_read_nodebug(rwlock_t *l)
 
 static inline bool _rwlock_try_read_nodebug(rwlock_t *l)
 {
-    if (DebuggerMode  &&  isManagedDuringDebugger(l)) {
-        if (! isReadingDuringDebugger(l)) {
-            gdb_objc_debuggerModeFailure();
-        }
-        return true;
-    }
     int err = pthread_rwlock_tryrdlock(&l->rwl);
     assert(err == 0  ||  err == EBUSY);
     return (err == 0);
@@ -829,33 +742,18 @@ static inline bool _rwlock_try_read_nodebug(rwlock_t *l)
 
 static inline void _rwlock_write_nodebug(rwlock_t *l)
 {
-    if (DebuggerMode  &&  isManagedDuringDebugger(l)) {
-        if (! isWritingDuringDebugger(l)) {
-            gdb_objc_debuggerModeFailure();
-        }
-        return;
-    }
     int err __unused = pthread_rwlock_wrlock(&l->rwl);
     assert(err == 0);
 }
 
 static inline void _rwlock_unlock_write_nodebug(rwlock_t *l)
 {
-    if (DebuggerMode  &&  isManagedDuringDebugger(l)) {
-        return;
-    }
     int err __unused = pthread_rwlock_unlock(&l->rwl);
     assert(err == 0);
 }
 
 static inline bool _rwlock_try_write_nodebug(rwlock_t *l)
 {
-    if (DebuggerMode  &&  isManagedDuringDebugger(l)) {
-        if (! isWritingDuringDebugger(l)) {
-            gdb_objc_debuggerModeFailure();
-        }
-        return true;
-    }
     int err = pthread_rwlock_trywrlock(&l->rwl);
     assert(err == 0  ||  err == EBUSY);
     return (err == 0);

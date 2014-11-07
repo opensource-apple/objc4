@@ -136,23 +136,18 @@ OBJC_EXPORT void objc_msgSend_fp2ret_debug(id self, SEL op, ...)
 
 #if __OBJC2__  &&  defined(__x86_64__)
 // objc_msgSend_fixup() is used for vtable-dispatchable call sites.
-OBJC_EXPORT id objc_msgSend_fixup(id self, SEL op, ...)
-    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
-OBJC_EXPORT void objc_msgSend_stret_fixup(id self, SEL op, ...)
-    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
-OBJC_EXPORT id objc_msgSendSuper2_fixup(struct objc_super *super, SEL op, ...)
-    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
-OBJC_EXPORT void objc_msgSendSuper2_stret_fixup(struct objc_super *super, SEL op,...)
-    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
-OBJC_EXPORT long double objc_msgSend_fpret_fixup(id self, SEL op, ...)
-    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
-# if __STDC_VERSION__ >= 199901L
-OBJC_EXPORT _Complex long double objc_msgSend_fp2ret_fixup(id self, SEL op, ...)
-    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
-# else
-OBJC_EXPORT void objc_msgSend_fp2ret_fixup(id self, SEL op, ...)
-    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_NA);
-# endif
+OBJC_EXPORT void objc_msgSend_fixup(void)
+     __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_5, __MAC_10_8, __IPHONE_NA, __IPHONE_NA);
+OBJC_EXPORT void objc_msgSend_stret_fixup(void)
+     __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_5, __MAC_10_8, __IPHONE_NA, __IPHONE_NA);
+OBJC_EXPORT void objc_msgSendSuper2_fixup(void)
+     __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_5, __MAC_10_8, __IPHONE_NA, __IPHONE_NA);
+OBJC_EXPORT void objc_msgSendSuper2_stret_fixup(void)
+     __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_5, __MAC_10_8, __IPHONE_NA, __IPHONE_NA);
+OBJC_EXPORT void objc_msgSend_fpret_fixup(void)
+     __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_5, __MAC_10_8, __IPHONE_NA, __IPHONE_NA);
+OBJC_EXPORT void objc_msgSend_fp2ret_fixup(void)
+     __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_5, __MAC_10_8, __IPHONE_NA, __IPHONE_NA);
 #endif
 
 /* C++-compatible exception handling. */

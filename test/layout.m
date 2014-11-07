@@ -23,7 +23,7 @@ void printlayout(const char *name, const uint8_t *layout)
     testprintf("00\n");
 }
 
-
+OBJC_ROOT_CLASS
 @interface Super { id isa; } @end
 @implementation Super @end
 
@@ -68,6 +68,7 @@ void printlayout(const char *name, const uint8_t *layout)
 
 // strong: ""
 // weak: NULL
+OBJC_ROOT_CLASS
 @interface NoScanned { long i;  } @end
 @implementation NoScanned @end
 

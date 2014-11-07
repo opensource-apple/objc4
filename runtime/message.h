@@ -32,10 +32,16 @@
 
 #ifndef OBJC_SUPER
 #define OBJC_SUPER
+
+/// Specifies the superclass of an instance. 
 struct objc_super {
+    /// Specifies an instance of a class.
     __unsafe_unretained id receiver;
+
+    /// Specifies the particular superclass of the instance to message. 
 #if !defined(__cplusplus)  &&  !__OBJC2__
-    __unsafe_unretained Class class;  /* For compatibility with old objc-runtime.h header */
+    /* For compatibility with old objc-runtime.h header */
+    __unsafe_unretained Class class;
 #else
     __unsafe_unretained Class super_class;
 #endif
@@ -59,8 +65,38 @@ OBJC_EXPORT void objc_msgSend(void /* id self, SEL op, ... */ )
 OBJC_EXPORT void objc_msgSendSuper(void /* struct objc_super *super, SEL op, ... */ )
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 #else
+/** 
+ * Sends a message with a simple return value to an instance of a class.
+ * 
+ * @param self A pointer to the instance of the class that is to receive the message.
+ * @param op The selector of the method that handles the message.
+ * @param ... 
+ *   A variable argument list containing the arguments to the method.
+ * 
+ * @return The return value of the method.
+ * 
+ * @note When it encounters a method call, the compiler generates a call to one of the
+ *  functions \c objc_msgSend, \c objc_msgSend_stret, \c objc_msgSendSuper, or \c objc_msgSendSuper_stret.
+ *  Messages sent to an object’s superclass (using the \c super keyword) are sent using \c objc_msgSendSuper; 
+ *  other messages are sent using \c objc_msgSend. Methods that have data structures as return values
+ *  are sent using \c objc_msgSendSuper_stret and \c objc_msgSend_stret.
+ */
 OBJC_EXPORT id objc_msgSend(id self, SEL op, ...)
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+/** 
+ * Sends a message with a simple return value to the superclass of an instance of a class.
+ * 
+ * @param super A pointer to an \c objc_super data structure. Pass values identifying the
+ *  context the message was sent to, including the instance of the class that is to receive the
+ *  message and the superclass at which to start searching for the method implementation.
+ * @param op A pointer of type SEL. Pass the selector of the method that will handle the message.
+ * @param ...
+ *   A variable argument list containing the arguments to the method.
+ * 
+ * @return The return value of the method identified by \e op.
+ * 
+ * @see objc_msgSend
+ */
 OBJC_EXPORT id objc_msgSendSuper(struct objc_super *super, SEL op, ...)
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 #endif
@@ -81,8 +117,18 @@ OBJC_EXPORT void objc_msgSend_stret(void /* id self, SEL op, ... */ )
 OBJC_EXPORT void objc_msgSendSuper_stret(void /* struct objc_super *super, SEL op, ... */ )
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 #else
+/** 
+ * Sends a message with a data-structure return value to an instance of a class.
+ * 
+ * @see objc_msgSend
+ */
 OBJC_EXPORT void objc_msgSend_stret(id self, SEL op, ...)
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+/** 
+ * Sends a message with a data-structure return value to the superclass of an instance of a class.
+ * 
+ * @see objc_msgSendSuper
+ */
 OBJC_EXPORT void objc_msgSendSuper_stret(struct objc_super *super, SEL op, ...)
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 #endif
@@ -126,6 +172,15 @@ OBJC_EXPORT void objc_msgSend_fp2ret(void /* id self, SEL op, ... */ )
 // OBJC_OLD_DISPATCH_PROTOTYPES
 # if defined(__i386__)
 
+/** 
+ * Sends a message with a floating-point return value to an instance of a class.
+ * 
+ * @see objc_msgSend
+ * @note On the i386 platform, the ABI for functions returning a floating-point value is
+ *  incompatible with that for functions returning an integral type. On the i386 platform, therefore, 
+ *  you must use \c objc_msgSend_fpret for functions returning non-integral type. For \c float or 
+ *  \c long \c double return types, cast the function to an appropriate function pointer type first.
+ */
 OBJC_EXPORT double objc_msgSend_fpret(id self, SEL op, ...)
     __OSX_AVAILABLE_STARTING(__MAC_10_4, __IPHONE_2_0);
 
@@ -133,7 +188,11 @@ OBJC_EXPORT double objc_msgSend_fpret(id self, SEL op, ...)
 /* See also objc_msgSendv_fpret() below. */
 
 # elif defined(__x86_64__)
-
+/** 
+ * Sends a message with a floating-point return value to an instance of a class.
+ * 
+ * @see objc_msgSend
+ */
 OBJC_EXPORT long double objc_msgSend_fpret(id self, SEL op, ...)
     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 

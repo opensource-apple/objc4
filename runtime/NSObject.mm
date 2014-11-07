@@ -21,15 +21,12 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#include "objc-weak.h"
 #include "objc-private.h"
-#include "objc-internal.h"
-#include "objc-os.h"
-#if __OBJC2__
-#include "objc-runtime-new.h"
-#endif
-#include "runtime.h"
+#include "NSObject.h"
+
+#include "objc-weak.h"
 #include "llvm-DenseMap.h"
+#include "NSObject.h"
 
 #include <malloc/malloc.h>
 #include <stdint.h>
@@ -46,55 +43,6 @@
 
 @interface NSInvocation
 - (SEL)selector;
-@end
-
-// better to not rely on Foundation to build
-@class NSString;
-@class NSMethodSignature;
-#ifdef __LP64__
-typedef unsigned long NSUInteger;
-#else
-typedef unsigned int NSUInteger;
-#endif
-typedef struct _NSZone NSZone;
-
-@protocol NSObject
-
-- (BOOL)isEqual:(id)object;
-- (NSUInteger)hash;
-
-- (Class)superclass;
-- (Class)class;
-- (id)self;
-- (NSZone *)zone;
-
-- (id)performSelector:(SEL)aSelector;
-- (id)performSelector:(SEL)aSelector withObject:(id)object;
-- (id)performSelector:(SEL)aSelector withObject:(id)object1 withObject:(id)object2;
-
-- (BOOL)isProxy;
-
-- (BOOL)isKindOfClass:(Class)aClass;
-- (BOOL)isMemberOfClass:(Class)aClass;
-- (BOOL)conformsToProtocol:(Protocol *)aProtocol;
-
-- (BOOL)respondsToSelector:(SEL)aSelector;
-
-- (id)retain;
-- (oneway void)release;
-- (id)autorelease;
-- (NSUInteger)retainCount;
-
-- (NSString *)description;
-- (NSString *)debugDescription;
-
-@end
-
-OBJC_EXPORT
-@interface NSObject <NSObject>
-{
-    Class isa;
-}
 @end
 
 // HACK -- the use of these functions must be after the @implementation
@@ -162,8 +110,6 @@ static bool callerAcceptsFastAutorelease(const void * const ra0);
 * Weak ivar support
 **********************************************************************/
 
-static bool seen_weak_refs;
-
 static id defaultBadAllocHandler(Class cls)
 {
     _objc_fatal("attempt to allocate object of class '%s' failed", 
@@ -184,21 +130,6 @@ void _objc_setBadAllocHandler(id(*newHandler)(Class))
 }
 
 
-#define ARR_LOGGING 0
-
-#if ARR_LOGGING
-struct {
-    int retains;
-    int releases;
-    int autoreleases;
-    int blockCopies;
-} CompilerGenerated, ExplicitlyCoded;
-
-void (^objc_arr_log)(const char *, id param) = 
-    ^(const char *str, id param) { printf("%s %p\n", str, param); };
-#endif
-
-
 namespace {
 
 #if TARGET_OS_EMBEDDED
@@ -208,7 +139,15 @@ namespace {
 #endif
 
 // should be a multiple of cache line size (64)
-#define SIDE_TABLE_SIZE 64
+#define SIDE_TABLE_SIZE 128
+
+// The order of these bits is important.
+#define SIDE_TABLE_WEAKLY_REFERENCED (1<<0)
+#define SIDE_TABLE_DEALLOCATING      (1<<1)  // MSB-ward of weak bit
+#define SIDE_TABLE_RC_ONE            (1<<2)  // MSB-ward of deallocating bit
+
+#define SIDE_TABLE_RC_SHIFT 2
+
 
 typedef objc::DenseMap<id,size_t,true> RefcountMap;
 
@@ -217,11 +156,11 @@ private:
     static uint8_t table_buf[SIDE_TABLE_STRIPE * SIDE_TABLE_SIZE];
 
 public:
-    OSSpinLock slock;
+    spinlock_t slock;
     RefcountMap refcnts;
     weak_table_t weak_table;
 
-    SideTable() : slock(OS_SPINLOCK_INIT)
+    SideTable() : slock(SPINLOCK_INITIALIZER)
     {
         memset(&weak_table, 0, sizeof(weak_table));
     }
@@ -249,19 +188,6 @@ public:
             new (&table_buf[i * SIDE_TABLE_SIZE]) SideTable;
         }
     }
-    
-    static bool noLocksHeld(void) {
-        bool gotAll = true;
-        for (int i = 0; i < SIDE_TABLE_STRIPE && gotAll; i++) {
-            SideTable *s = (SideTable *)(&table_buf[i * SIDE_TABLE_SIZE]);
-            if (OSSpinLockTry(&s->slock)) {
-                OSSpinLockUnlock(&s->slock);
-            } else {
-                gotAll = false;
-            }
-        }
-        return gotAll;
-    }
 };
 
 STATIC_ASSERT(sizeof(SideTable) <= SIDE_TABLE_SIZE);
@@ -274,20 +200,12 @@ SideTable::table_buf[SIDE_TABLE_STRIPE * SIDE_TABLE_SIZE];
 // anonymous namespace
 };
 
-bool noSideTableLocksHeld(void)
-{
-    return SideTable::noLocksHeld();
-}
 
 //
 // The -fobjc-arc flag causes the compiler to issue calls to objc_{retain/release/autorelease/retain_block}
 //
 
 id objc_retainBlock(id x) {
-#if ARR_LOGGING
-    objc_arr_log("objc_retain_block", x);
-    ++CompilerGenerated.blockCopies;
-#endif
     return (id)_Block_copy(x);
 }
 
@@ -305,20 +223,25 @@ objc_retain_autorelease(id obj)
     return objc_autorelease(objc_retain(obj));
 }
 
+/** 
+ * This function stores a new value into a __weak variable. It would
+ * be used anywhere a __weak variable is the target of an assignment.
+ * 
+ * @param location The address of the weak pointer itself
+ * @param newObj The new object this weak ptr should now point to
+ * 
+ * @return \e newObj
+ */
 id
 objc_storeWeak(id *location, id newObj)
 {
     id oldObj;
     SideTable *oldTable;
     SideTable *newTable;
-    OSSpinLock *lock1;
+    spinlock_t *lock1;
 #if SIDE_TABLE_STRIPE > 1
-    OSSpinLock *lock2;
+    spinlock_t *lock2;
 #endif
-
-    if (!seen_weak_refs) {
-        seen_weak_refs = true;
-    }
 
     // Acquire locks for old and new values.
     // Order by lock address to prevent lock ordering problems. 
@@ -333,35 +256,37 @@ objc_storeWeak(id *location, id newObj)
 #if SIDE_TABLE_STRIPE > 1
     lock2 = &oldTable->slock;
     if (lock1 > lock2) {
-        OSSpinLock *temp = lock1;
+        spinlock_t *temp = lock1;
         lock1 = lock2;
         lock2 = temp;
     }
-    if (lock1 != lock2) OSSpinLockLock(lock2);
+    if (lock1 != lock2) spinlock_lock(lock2);
 #endif
-    OSSpinLockLock(lock1);
+    spinlock_lock(lock1);
 
     if (*location != oldObj) {
-        OSSpinLockUnlock(lock1);
+        spinlock_unlock(lock1);
 #if SIDE_TABLE_STRIPE > 1
-        if (lock1 != lock2) OSSpinLockUnlock(lock2);
+        if (lock1 != lock2) spinlock_unlock(lock2);
 #endif
         goto retry;
     }
 
-    if (oldObj) {
-        weak_unregister_no_lock(&oldTable->weak_table, oldObj, location);
+    weak_unregister_no_lock(&oldTable->weak_table, oldObj, location);
+    newObj = weak_register_no_lock(&newTable->weak_table, newObj, location);
+    // weak_register_no_lock returns nil if weak store should be rejected
+
+    // Set is-weakly-referenced bit in refcount table.
+    if (newObj  &&  !newObj->isTaggedPointer()) {
+        newTable->refcnts[DISGUISE(newObj)] |= SIDE_TABLE_WEAKLY_REFERENCED;
     }
-    if (newObj) {
-        newObj = weak_register_no_lock(&newTable->weak_table, newObj,location);
-        // weak_register_no_lock returns NULL if weak store should be rejected
-    }
+
     // Do not set *location anywhere else. That would introduce a race.
     *location = newObj;
     
-    OSSpinLockUnlock(lock1);
+    spinlock_unlock(lock1);
 #if SIDE_TABLE_STRIPE > 1
-    if (lock1 != lock2) OSSpinLockUnlock(lock2);
+    if (lock1 != lock2) spinlock_unlock(lock2);
 #endif
 
     return newObj;
@@ -373,46 +298,119 @@ objc_loadWeakRetained(id *location)
     id result;
 
     SideTable *table;
-    OSSpinLock *lock;
+    spinlock_t *lock;
     
  retry:
     result = *location;
-    if (!result) return NULL;
+    if (!result) return nil;
     
     table = SideTable::tableForPointer(result);
     lock = &table->slock;
     
-    OSSpinLockLock(lock);
+    spinlock_lock(lock);
     if (*location != result) {
-        OSSpinLockUnlock(lock);
+        spinlock_unlock(lock);
         goto retry;
     }
 
-    result = arr_read_weak_reference(&table->weak_table, location);
+    result = weak_read_no_lock(&table->weak_table, location);
 
-    OSSpinLockUnlock(lock);
+    spinlock_unlock(lock);
     return result;
 }
 
+/** 
+ * This loads the object referenced by a weak pointer and returns it, after
+ * retaining and autoreleasing the object to ensure that it stays alive
+ * long enough for the caller to use it. This function would be used
+ * anywhere a __weak variable is used in an expression.
+ * 
+ * @param location The weak pointer address
+ * 
+ * @return The object pointed to by \e location, or \c nil if \e location is \c nil.
+ */
 id
 objc_loadWeak(id *location)
 {
+    if (!*location) return nil;
     return objc_autorelease(objc_loadWeakRetained(location));
 }
 
+/** 
+ * Initialize a fresh weak pointer to some object location. 
+ * It would be used for code like: 
+ *
+ * (The nil case) 
+ * __weak id weakPtr;
+ * (The non-nil case) 
+ * NSObject *o = ...;
+ * __weak id weakPtr = o;
+ * 
+ * @param addr Address of __weak ptr. 
+ * @param val Object ptr. 
+ */
 id
 objc_initWeak(id *addr, id val)
 {
     *addr = 0;
+    if (!val) return nil;
     return objc_storeWeak(addr, val);
 }
 
+__attribute__((noinline, used)) void
+objc_destroyWeak_slow(id *addr)
+{
+    SideTable *oldTable;
+    spinlock_t *lock;
+    id oldObj;
+
+    // No need to see weak refs, we are destroying
+    
+    // Acquire lock for old value only
+    // retry if the old value changes underneath us
+ retry: 
+    oldObj = *addr;
+    oldTable = SideTable::tableForPointer(oldObj);
+    
+    lock = &oldTable->slock;
+    spinlock_lock(lock);
+    
+    if (*addr != oldObj) {
+        spinlock_unlock(lock);
+        goto retry;
+    }
+
+    weak_unregister_no_lock(&oldTable->weak_table, oldObj, addr);
+    
+    spinlock_unlock(lock);
+}
+
+/** 
+ * Destroys the relationship between a weak pointer
+ * and the object it is referencing in the internal weak
+ * table. If the weak pointer is not referencing anything, 
+ * there is no need to edit the weak table. 
+ * 
+ * @param addr The weak pointer address. 
+ */
 void
 objc_destroyWeak(id *addr)
 {
-    objc_storeWeak(addr, 0);
+    if (!*addr) return;
+    return objc_destroyWeak_slow(addr);
 }
 
+/** 
+ * This function copies a weak pointer from one location to another,
+ * when the destination doesn't already contain a weak pointer. It
+ * would be used for code like:
+ *
+ *  __weak id weakPtr1 = ...;
+ *  __weak id weakPtr2 = weakPtr1;
+ * 
+ * @param to weakPtr2 in this ex
+ * @param from weakPtr1
+ */
 void
 objc_copyWeak(id *to, id *from)
 {
@@ -421,11 +419,16 @@ objc_copyWeak(id *to, id *from)
     objc_release(val);
 }
 
+/** 
+ * Move a weak pointer from one location to another.
+ * Before the move, the destination must be uninitialized.
+ * After the move, the source is nil.
+ */
 void
 objc_moveWeak(id *to, id *from)
 {
     objc_copyWeak(to, from);
-    objc_destroyWeak(from);
+    objc_storeWeak(from, 0);
 }
 
 
@@ -441,7 +444,7 @@ objc_moveWeak(id *to, id *from)
      objects are stored. 
  */
 
-extern "C" BREAKPOINT_FUNCTION(void objc_autoreleaseNoPool(id obj));
+BREAKPOINT_FUNCTION(void objc_autoreleaseNoPool(id obj));
 
 namespace {
 
@@ -485,14 +488,14 @@ struct magic_t {
 class AutoreleasePoolPage 
 {
 
-#define POOL_SENTINEL 0
+#define POOL_SENTINEL nil
     static pthread_key_t const key = AUTORELEASE_POOL_KEY;
     static uint8_t const SCRIBBLE = 0xA3;  // 0xA3A3A3A3 after releasing
     static size_t const SIZE = 
 #if PROTECT_AUTORELEASEPOOL
-        4096;  // must be multiple of vm page size
+        PAGE_SIZE;  // must be multiple of vm page size
 #else
-        4096;  // size and alignment, power of 2
+        PAGE_SIZE;  // size and alignment, power of 2
 #endif
     static size_t const COUNT = SIZE / sizeof(id);
 
@@ -529,7 +532,7 @@ class AutoreleasePoolPage
 
     AutoreleasePoolPage(AutoreleasePoolPage *newParent) 
         : magic(), next(begin()), thread(pthread_self()),
-          parent(newParent), child(NULL), 
+          parent(newParent), child(nil), 
           depth(parent ? 1+parent->depth : 0), 
           hiwat(parent ? parent->hiwat : 0)
     { 
@@ -662,7 +665,7 @@ class AutoreleasePoolPage
             page = page->parent;
             if (page) {
                 page->unprotect();
-                page->child = NULL;
+                page->child = nil;
                 page->protect();
             }
             delete deathptr;
@@ -674,7 +677,7 @@ class AutoreleasePoolPage
         // reinstate TLS value while we work
         setHotPage((AutoreleasePoolPage *)p);
         pop(0);
-        setHotPage(NULL);
+        setHotPage(nil);
     }
 
     static AutoreleasePoolPage *pageForPointer(const void *p) 
@@ -743,13 +746,21 @@ class AutoreleasePoolPage
         assert(!page || page->full());
 
         if (!page) {
+            // No pool. Silently push one.
             assert(obj != POOL_SENTINEL);
-            _objc_inform("Object %p of class %s autoreleased "
-                         "with no pool in place - just leaking - "
-                         "break on objc_autoreleaseNoPool() to debug", 
-                         obj, object_getClassName(obj));
-            objc_autoreleaseNoPool(obj);
-            return NULL;
+
+            if (DebugMissingPools) {
+                _objc_inform("MISSING POOLS: Object %p of class %s "
+                             "autoreleased with no pool in place - "
+                             "just leaking - break on "
+                             "objc_autoreleaseNoPool() to debug", 
+                             (void*)obj, object_getClassName(obj));
+                objc_autoreleaseNoPool(obj);
+                return nil;
+            }
+
+            push();
+            page = hotPage();
         }
 
         do {
@@ -765,7 +776,7 @@ public:
     static inline id autorelease(id obj)
     {
         assert(obj);
-        assert(!OBJC_IS_TAGGED_PTR(obj));
+        assert(!obj->isTaggedPointer());
         id *dest __unused = autoreleaseFast(obj);
         assert(!dest  ||  *dest == obj);
         return obj;
@@ -775,7 +786,7 @@ public:
     static inline void *push() 
     {
         if (!hotPage()) {
-            setHotPage(new AutoreleasePoolPage(NULL));
+            setHotPage(new AutoreleasePoolPage(nil));
         } 
         id *dest = autoreleaseFast(POOL_SENTINEL);
         assert(*dest == POOL_SENTINEL);
@@ -805,9 +816,12 @@ public:
         // memory: delete empty children
         // hysteresis: keep one empty child if this page is more than half full
         // special case: delete everything for pop(0)
-        if (!token) {
+        // special case: delete everything for pop(top) with DebugMissingPools
+        if (!token  ||  
+            (DebugMissingPools  &&  page->empty()  &&  !page->parent)) 
+        {
             page->kill();
-            setHotPage(NULL);
+            setHotPage(nil);
         } else if (page->child) {
             if (page->lessThanHalfFull()) {
                 page->child->kill();
@@ -898,18 +912,17 @@ public:
 
 extern "C" {
 __attribute__((used,noinline,nothrow))
-static id _objc_rootRetain_slow(id obj);
+static id _objc_rootRetain_slow(id obj, SideTable *table);
 __attribute__((used,noinline,nothrow))
-static bool _objc_rootReleaseWasZero_slow(id obj);
+static bool _objc_rootReleaseWasZero_slow(id obj, SideTable *table);
 };
 
 id
-_objc_rootRetain_slow(id obj)
+_objc_rootRetain_slow(id obj, SideTable *table)
 {
-    SideTable *table = SideTable::tableForPointer(obj);
-    OSSpinLockLock(&table->slock);
-    table->refcnts[DISGUISE(obj)] += 2;
-    OSSpinLockUnlock(&table->slock);
+    spinlock_lock(&table->slock);
+    table->refcnts[DISGUISE(obj)] += SIDE_TABLE_RC_ONE;
+    spinlock_unlock(&table->slock);
 
     return obj;
 }
@@ -920,25 +933,27 @@ _objc_rootTryRetain(id obj)
     assert(obj);
     assert(!UseGC);
 
-    if (OBJC_IS_TAGGED_PTR(obj)) return true;
+    if (obj->isTaggedPointer()) return true;
 
     SideTable *table = SideTable::tableForPointer(obj);
 
     // NO SPINLOCK HERE
     // _objc_rootTryRetain() is called exclusively by _objc_loadWeak(), 
     // which already acquired the lock on our behalf.
-    if (table->slock == 0) {
-        _objc_fatal("Do not call -_tryRetain.");
-    }
+
+    // fixme can't do this efficiently with os_lock_handoff_s
+    // if (table->slock == 0) {
+    //     _objc_fatal("Do not call -_tryRetain.");
+    // }
 
     bool result = true;
     RefcountMap::iterator it = table->refcnts.find(DISGUISE(obj));
     if (it == table->refcnts.end()) {
-        table->refcnts[DISGUISE(obj)] = 2;
-    } else if (it->second & 1) {
+        table->refcnts[DISGUISE(obj)] = SIDE_TABLE_RC_ONE;
+    } else if (it->second & SIDE_TABLE_DEALLOCATING) {
         result = false;
     } else {
-        it->second += 2;
+        it->second += SIDE_TABLE_RC_ONE;
     }
     
     return result;
@@ -950,19 +965,22 @@ _objc_rootIsDeallocating(id obj)
     assert(obj);
     assert(!UseGC);
 
-    if (OBJC_IS_TAGGED_PTR(obj)) return false;
+    if (obj->isTaggedPointer()) return false;
 
     SideTable *table = SideTable::tableForPointer(obj);
 
     // NO SPINLOCK HERE
     // _objc_rootIsDeallocating() is called exclusively by _objc_storeWeak(), 
     // which already acquired the lock on our behalf.
-    if (table->slock == 0) {
-        _objc_fatal("Do not call -_isDeallocating.");
-    }
+
+
+    // fixme can't do this efficiently with os_lock_handoff_s
+    // if (table->slock == 0) {
+    //     _objc_fatal("Do not call -_isDeallocating.");
+    // }
 
     RefcountMap::iterator it = table->refcnts.find(DISGUISE(obj));
-    return (it != table->refcnts.end()) && ((it->second & 1) == 1);
+    return (it != table->refcnts.end()) && (it->second & SIDE_TABLE_DEALLOCATING);
 }
 
 
@@ -977,34 +995,36 @@ objc_clear_deallocating(id obj)
     // clear any weak table items
     // clear extra retain count and deallocating bit
     // (fixme warn or abort if extra retain count == 0 ?)
-    OSSpinLockLock(&table->slock);
-    if (seen_weak_refs) {
-        arr_clear_deallocating(&table->weak_table, obj);
+    spinlock_lock(&table->slock);
+    RefcountMap::iterator it = table->refcnts.find(DISGUISE(obj));
+    if (it != table->refcnts.end()) {
+        if (it->second & SIDE_TABLE_WEAKLY_REFERENCED) {
+            weak_clear_no_lock(&table->weak_table, obj);
+        }
+        table->refcnts.erase(it);
     }
-    table->refcnts.erase(DISGUISE(obj));
-    OSSpinLockUnlock(&table->slock);
+    spinlock_unlock(&table->slock);
 }
 
 
 bool
-_objc_rootReleaseWasZero_slow(id obj)
+_objc_rootReleaseWasZero_slow(id obj, SideTable *table)
 {
-    SideTable *table = SideTable::tableForPointer(obj);
-
     bool do_dealloc = false;
 
-    OSSpinLockLock(&table->slock);
+    spinlock_lock(&table->slock);
     RefcountMap::iterator it = table->refcnts.find(DISGUISE(obj));
     if (it == table->refcnts.end()) {
         do_dealloc = true;
-        table->refcnts[DISGUISE(obj)] = 1;
-    } else if (it->second == 0) {
+        table->refcnts[DISGUISE(obj)] = SIDE_TABLE_DEALLOCATING;
+    } else if (it->second < SIDE_TABLE_DEALLOCATING) {
+        // SIDE_TABLE_WEAKLY_REFERENCED may be set. Don't change it.
         do_dealloc = true;
-        it->second = 1;
+        it->second |= SIDE_TABLE_DEALLOCATING;
     } else {
-        it->second -= 2;
+        it->second -= SIDE_TABLE_RC_ONE;
     }
-    OSSpinLockUnlock(&table->slock);
+    spinlock_unlock(&table->slock);
     return do_dealloc;
 }
 
@@ -1014,33 +1034,35 @@ _objc_rootReleaseWasZero(id obj)
     assert(obj);
     assert(!UseGC);
 
-    if (OBJC_IS_TAGGED_PTR(obj)) return false;
+    if (obj->isTaggedPointer()) return false;
 
     SideTable *table = SideTable::tableForPointer(obj);
 
     bool do_dealloc = false;
 
-    if (OSSpinLockTry(&table->slock)) {
+    if (spinlock_trylock(&table->slock)) {
         RefcountMap::iterator it = table->refcnts.find(DISGUISE(obj));
         if (it == table->refcnts.end()) {
             do_dealloc = true;
-            table->refcnts[DISGUISE(obj)] = 1;
-        } else if (it->second == 0) {
+            table->refcnts[DISGUISE(obj)] = SIDE_TABLE_DEALLOCATING;
+        } else if (it->second < SIDE_TABLE_DEALLOCATING) {
+            // SIDE_TABLE_WEAKLY_REFERENCED may be set. Don't change it.
             do_dealloc = true;
-            it->second = 1;
+            it->second |= SIDE_TABLE_DEALLOCATING;
         } else {
-            it->second -= 2;
+            it->second -= SIDE_TABLE_RC_ONE;
         }
-        OSSpinLockUnlock(&table->slock);
+        spinlock_unlock(&table->slock);
         return do_dealloc;
     }
-    return _objc_rootReleaseWasZero_slow(obj);
+
+    return _objc_rootReleaseWasZero_slow(obj, table);
 }
 
 __attribute__((noinline,used))
 static id _objc_rootAutorelease2(id obj)
 {
-    if (OBJC_IS_TAGGED_PTR(obj)) return obj;
+    if (obj->isTaggedPointer()) return obj;
     return AutoreleasePoolPage::autorelease(obj);
 }
 
@@ -1054,18 +1076,18 @@ _objc_rootRetainCount(id obj)
     // threaded environment because the result is immediately stale by the
     // time the caller receives it.
 
-    if (OBJC_IS_TAGGED_PTR(obj)) return (uintptr_t)obj;    
+    if (obj->isTaggedPointer()) return (uintptr_t)obj;    
 
     SideTable *table = SideTable::tableForPointer(obj);
 
     size_t refcnt_result = 1;
     
-    OSSpinLockLock(&table->slock);
+    spinlock_lock(&table->slock);
     RefcountMap::iterator it = table->refcnts.find(DISGUISE(obj));
     if (it != table->refcnts.end()) {
-        refcnt_result = (it->second >> 1) + 1;
+        refcnt_result += it->second >> SIDE_TABLE_RC_SHIFT;
     }
-    OSSpinLockUnlock(&table->slock);
+    spinlock_unlock(&table->slock);
     return refcnt_result;
 }
 
@@ -1102,11 +1124,46 @@ _objc_rootAllocWithZone(Class cls, malloc_zone_t *zone)
 id
 _objc_rootAlloc(Class cls)
 {
-#if 0  &&  __OBJC2__
+#if __OBJC2__
     // Skip over the +allocWithZone: call if the class doesn't override it.
-    // fixme not - this breaks ObjectAlloc
-    if (! ((class_t *)cls)->isa->hasCustomAWZ()) {
-        return class_createInstance(cls, 0);
+    if (! cls->ISA()->hasCustomAWZ()) {
+        id obj = class_createInstance(cls, 0);
+        if (!obj) obj = callBadAllocHandler(cls);
+        return obj;
+    }
+#endif
+    return [cls allocWithZone: nil];
+}
+
+id
+objc_alloc(Class cls)
+{
+#if __OBJC2__
+    // Skip over +alloc and +allocWithZone: if the class doesn't override them.
+    if (cls  &&  
+        cls->ISA()->isInitialized_meta()  &&  
+        ! cls->ISA()->hasCustomAWZ()) 
+    {
+        id obj = class_createInstance(cls, 0);
+        if (!obj) obj = callBadAllocHandler(cls);
+        return obj;
+    }
+#endif
+    return [cls alloc];
+}
+
+id 
+objc_allocWithZone(Class cls)
+{
+#if __OBJC2__
+    // Skip over the +allocWithZone: call if the class doesn't override it.
+    if (cls  &&  
+        cls->ISA()->isInitialized_meta()  &&  
+        ! cls->ISA()->hasCustomAWZ()) 
+    {
+        id obj = class_createInstance(cls, 0);
+        if (!obj) obj = callBadAllocHandler(cls);
+        return obj;
     }
 #endif
     return [cls allocWithZone: nil];
@@ -1118,7 +1175,7 @@ _objc_rootDealloc(id obj)
     assert(obj);
     assert(!UseGC);
 
-    if (OBJC_IS_TAGGED_PTR(obj)) return;
+    if (obj->isTaggedPointer()) return;
 
     object_dispose(obj);
 }
@@ -1167,7 +1224,7 @@ void _objc_autoreleasePoolPop(void *ctxt) { objc_autoreleasePoolPop(ctxt); }
 void *
 objc_autoreleasePoolPush(void)
 {
-    if (UseGC) return NULL;
+    if (UseGC) return nil;
     return AutoreleasePoolPage::push();
 }
 
@@ -1314,7 +1371,7 @@ id
 objc_autoreleaseReturnValue(id obj)
 {
 #if SUPPORT_RETURN_AUTORELEASE
-    assert(tls_get_direct(AUTORELEASE_POOL_RECLAIM_KEY) == NULL);
+    assert(tls_get_direct(AUTORELEASE_POOL_RECLAIM_KEY) == nil);
 
     if (callerAcceptsFastAutorelease(__builtin_return_address(0))) {
         tls_set_direct(AUTORELEASE_POOL_RECLAIM_KEY, obj);
@@ -1415,11 +1472,11 @@ void arr_init(void)
 }
 
 + (Class)superclass {
-    return class_getSuperclass(self);
+    return self->superclass;
 }
 
 - (Class)superclass {
-    return class_getSuperclass([self class]);
+    return [self class]->superclass;
 }
 
 + (BOOL)isMemberOfClass:(Class)cls {
@@ -1431,28 +1488,28 @@ void arr_init(void)
 }
 
 + (BOOL)isKindOfClass:(Class)cls {
-    for (Class tcls = object_getClass((id)self); tcls; tcls = class_getSuperclass(tcls)) {
+    for (Class tcls = object_getClass((id)self); tcls; tcls = tcls->superclass) {
         if (tcls == cls) return YES;
     }
     return NO;
 }
 
 - (BOOL)isKindOfClass:(Class)cls {
-    for (Class tcls = [self class]; tcls; tcls = class_getSuperclass(tcls)) {
+    for (Class tcls = [self class]; tcls; tcls = tcls->superclass) {
         if (tcls == cls) return YES;
     }
     return NO;
 }
 
 + (BOOL)isSubclassOfClass:(Class)cls {
-    for (Class tcls = self; tcls; tcls = class_getSuperclass(tcls)) {
+    for (Class tcls = self; tcls; tcls = tcls->superclass) {
         if (tcls == cls) return YES;
     }
     return NO;
 }
 
 + (BOOL)isAncestorOfObject:(NSObject *)obj {
-    for (Class tcls = [obj class]; tcls; tcls = class_getSuperclass(tcls)) {
+    for (Class tcls = [obj class]; tcls; tcls = tcls->superclass) {
         if (tcls == self) return YES;
     }
     return NO;
@@ -1475,7 +1532,7 @@ void arr_init(void)
 
 + (BOOL)conformsToProtocol:(Protocol *)protocol {
     if (!protocol) return NO;
-    for (Class tcls = self; tcls; tcls = class_getSuperclass(tcls)) {
+    for (Class tcls = self; tcls; tcls = tcls->superclass) {
         if (class_conformsToProtocol(tcls, protocol)) return YES;
     }
     return NO;
@@ -1483,7 +1540,7 @@ void arr_init(void)
 
 - (BOOL)conformsToProtocol:(Protocol *)protocol {
     if (!protocol) return NO;
-    for (Class tcls = [self class]; tcls; tcls = class_getSuperclass(tcls)) {
+    for (Class tcls = [self class]; tcls; tcls = tcls->superclass) {
         if (class_conformsToProtocol(tcls, protocol)) return YES;
     }
     return NO;
@@ -1522,14 +1579,6 @@ void arr_init(void)
     return NO;
 }
 
-+ (BOOL)isBlock {
-    return NO;
-}
-
-- (BOOL)isBlock {
-    return NO;
-}
-
 
 + (IMP)instanceMethodForSelector:(SEL)sel {
     if (!sel) [self doesNotRecognizeSelector:sel];
@@ -1538,12 +1587,12 @@ void arr_init(void)
 
 + (IMP)methodForSelector:(SEL)sel {
     if (!sel) [self doesNotRecognizeSelector:sel];
-    return class_getMethodImplementation(object_getClass((id)self), sel);
+    return object_getMethodImplementation((id)self, sel);
 }
 
 - (IMP)methodForSelector:(SEL)sel {
     if (!sel) [self doesNotRecognizeSelector:sel];
-    return class_getMethodImplementation([self class], sel);
+    return object_getMethodImplementation(self, sel);
 }
 
 + (BOOL)resolveClassMethod:(SEL)sel {
@@ -1661,20 +1710,23 @@ void arr_init(void)
 }
 
 // Replaced by ObjectAlloc
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmismatched-method-attributes"
 - (id)retain
 __attribute__((aligned(16)))
 {
-    if (OBJC_IS_TAGGED_PTR(self)) return self;
+    if (((id)self)->isTaggedPointer()) return self;
 
     SideTable *table = SideTable::tableForPointer(self);
 
-    if (OSSpinLockTry(&table->slock)) {
-        table->refcnts[DISGUISE(self)] += 2;
-        OSSpinLockUnlock(&table->slock);
+    if (spinlock_trylock(&table->slock)) {
+        table->refcnts[DISGUISE(self)] += SIDE_TABLE_RC_ONE;
+        spinlock_unlock(&table->slock);
         return self;
     }
-    return _objc_rootRetain_slow(self);
+    return _objc_rootRetain_slow(self, table);
 }
+#pragma clang diagnostic pop
 
 
 + (BOOL)_tryRetain {
@@ -1714,6 +1766,8 @@ __attribute__((aligned(16)))
 }
 
 // Replaced by ObjectAlloc
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmismatched-method-attributes"
 - (oneway void)release
 __attribute__((aligned(16)))
 {
@@ -1724,19 +1778,22 @@ __attribute__((aligned(16)))
     }
     [self dealloc];
 }
+#pragma clang diagnostic pop
 
 + (id)autorelease {
     return (id)self;
 }
 
 // Replaced by ObjectAlloc
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmismatched-method-attributes"
 - (id)autorelease
 __attribute__((aligned(16)))
 {
     // no tag check here: tagged pointers DO use fast autoreleasing
 
 #if SUPPORT_RETURN_AUTORELEASE
-    assert(tls_get_direct(AUTORELEASE_POOL_RECLAIM_KEY) == NULL);
+    assert(tls_get_direct(AUTORELEASE_POOL_RECLAIM_KEY) == nil);
 
     if (callerAcceptsFastAutorelease(__builtin_return_address(0))) {
         tls_set_direct(AUTORELEASE_POOL_RECLAIM_KEY, self);
@@ -1745,6 +1802,7 @@ __attribute__((aligned(16)))
 #endif
     return _objc_rootAutorelease2(self);
 }
+#pragma clang diagnostic pop
 
 + (NSUInteger)retainCount {
     return ULONG_MAX;
@@ -1759,7 +1817,7 @@ __attribute__((aligned(16)))
 }
 
 // Replaced by ObjectAlloc
-+ (id)allocWithZone:(NSZone *)zone {
++ (id)allocWithZone:(struct _NSZone *)zone {
     return _objc_rootAllocWithZone(self, (malloc_zone_t *)zone);
 }
 
@@ -1789,36 +1847,36 @@ __attribute__((aligned(16)))
     _objc_rootFinalize(self);
 }
 
-+ (NSZone *)zone {
-    return (NSZone *)_objc_rootZone(self);
++ (struct _NSZone *)zone {
+    return (struct _NSZone *)_objc_rootZone(self);
 }
 
-- (NSZone *)zone {
-    return (NSZone *)_objc_rootZone(self);
+- (struct _NSZone *)zone {
+    return (struct _NSZone *)_objc_rootZone(self);
 }
 
 + (id)copy {
     return (id)self;
 }
 
-+ (id)copyWithZone:(NSZone *)zone {
++ (id)copyWithZone:(struct _NSZone *)zone {
     return (id)self;
 }
 
 - (id)copy {
-    return [(id)self copyWithZone:NULL];
+    return [(id)self copyWithZone:nil];
 }
 
 + (id)mutableCopy {
     return (id)self;
 }
 
-+ (id)mutableCopyWithZone:(NSZone *)zone {
++ (id)mutableCopyWithZone:(struct _NSZone *)zone {
     return (id)self;
 }
 
 - (id)mutableCopy {
-    return [(id)self mutableCopyWithZone:NULL];
+    return [(id)self mutableCopyWithZone:nil];
 }
 
 @end
@@ -1827,11 +1885,11 @@ __attribute__((aligned(16)))
 id
 objc_retain(id obj)
 {
-    if (!obj || OBJC_IS_TAGGED_PTR(obj)) {
+    if (!obj || obj->isTaggedPointer()) {
         goto out_slow;
     }
 #if __OBJC2__
-    if (((class_t *)obj->isa)->hasCustomRR()) {
+    if (((Class)obj->isa)->hasCustomRR()) {
         return [obj retain];
     }
     return bypass_msgSend_retain(obj);
@@ -1849,11 +1907,11 @@ __attribute__((aligned(16)))
 void
 objc_release(id obj)
 {
-    if (!obj || OBJC_IS_TAGGED_PTR(obj)) {
+    if (!obj || obj->isTaggedPointer()) {
         return;
     }
 #if __OBJC2__
-    if (((class_t *)obj->isa)->hasCustomRR()) {
+    if (((Class)obj->isa)->hasCustomRR()) {
         return (void)[obj release];
     }
     return bypass_msgSend_release(obj);
@@ -1866,11 +1924,11 @@ __attribute__((aligned(16)))
 id
 objc_autorelease(id obj)
 {
-    if (!obj || OBJC_IS_TAGGED_PTR(obj)) {
+    if (!obj || obj->isTaggedPointer()) {
         goto out_slow;
     }
 #if __OBJC2__
-    if (((class_t *)obj->isa)->hasCustomRR()) {
+    if (((Class)obj->isa)->hasCustomRR()) {
         return [obj autorelease];
     }
     return bypass_msgSend_autorelease(obj);
@@ -1890,7 +1948,7 @@ _objc_rootRetain(id obj)
     assert(obj);
     assert(!UseGC);
 
-    if (OBJC_IS_TAGGED_PTR(obj)) return obj;
+    if (obj->isTaggedPointer()) return obj;
 
     return bypass_msgSend_retain(obj);
 }
@@ -1901,7 +1959,7 @@ _objc_rootRelease(id obj)
     assert(obj);
     assert(!UseGC);
 
-    if (OBJC_IS_TAGGED_PTR(obj)) return;
+    if (obj->isTaggedPointer()) return;
 
     bypass_msgSend_release(obj);
 }

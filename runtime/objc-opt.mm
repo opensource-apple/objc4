@@ -26,7 +26,6 @@
   Management of optimizations in the dyld shared cache 
 */
 
-#include "objc.h"
 #include "objc-private.h"
 
 using namespace objc_opt;
@@ -42,17 +41,17 @@ bool isPreoptimized(void)
 
 const objc_selopt_t *preoptimizedSelectors(void) 
 {
-    return NULL;
+    return nil;
 }
 
-struct class_t * getPreoptimizedClass(const char *name)
+Class getPreoptimizedClass(const char *name)
 {
-    return NULL;
+    return nil;
 }
 
 header_info *preoptimizedHinfoForHeader(const headerType *mhdr)
 {
-    return NULL;
+    return nil;
 }
 
 void preopt_init(void)
@@ -79,7 +78,7 @@ __BEGIN_DECLS
 // _objc_opt_data: opt data possibly written by dyld
 // empty_opt_data: empty data to use if dyld didn't cooperate or DisablePreopt
 
-static const objc_opt_t *opt = NULL;
+static const objc_opt_t *opt = nil;
 static bool preoptimized;
 
 extern const objc_opt_t _objc_opt_data;  // in __TEXT, __objc_opt_ro
@@ -97,33 +96,33 @@ const objc_selopt_t *preoptimizedSelectors(void)
     return opt->selopt();
 }
 
-struct class_t * getPreoptimizedClass(const char *name)
+Class getPreoptimizedClass(const char *name)
 {
     assert(opt);
     objc_clsopt_t *classes = opt->clsopt();
-    if (!classes) return NULL;
+    if (!classes) return nil;
 
     void *cls;
     void *hi;
     uint32_t count = classes->getClassAndHeader(name, cls, hi);
     if (count == 1  &&  ((header_info *)hi)->loaded) {
         // exactly one matching class, and it's image is loaded
-        return (struct class_t *)cls;
+        return (Class)cls;
     } 
-    if (count == 2) {
+    else if (count > 1) {
         // more than one matching class - find one that is loaded
         void *clslist[count];
         void *hilist[count];
         classes->getClassesAndHeaders(name, clslist, hilist);
         for (uint32_t i = 0; i < count; i++) {
             if (((header_info *)hilist[i])->loaded) {
-                return (struct class_t *)clslist[i];
+                return (Class)clslist[i];
             }
         }
     }
 
     // no match that is loaded
-    return NULL;
+    return nil;
 }
 
 namespace objc_opt {
@@ -156,7 +155,7 @@ struct objc_headeropt_t {
         }
 #endif
 
-        return NULL;
+        return nil;
     }
 };
 };
@@ -167,14 +166,14 @@ header_info *preoptimizedHinfoForHeader(const headerType *mhdr)
     assert(opt);
     objc_headeropt_t *hinfos = opt->headeropt();
     if (hinfos) return hinfos->get(mhdr);
-    else return NULL;
+    else return nil;
 }
 
 
 void preopt_init(void)
 {
     // `opt` not set at compile time in order to detect too-early usage
-    const char *failure = NULL;
+    const char *failure = nil;
     opt = &_objc_opt_data;
 
     if (DisablePreopt) {

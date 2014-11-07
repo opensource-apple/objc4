@@ -54,12 +54,16 @@ int main()
     // objc_getFutureClass with existing class
     oldTestRoot = objc_getFutureClass("TestRoot");
     testassert(oldTestRoot == [TestRoot class]);
+    testassert(! _class_isFutureClass(oldTestRoot));
 
     // objc_getFutureClass with missing class
     oldSub1 = objc_getFutureClass("Sub1");
     testassert(oldSub1);
     testassert(malloc_size(objc_unretainedPointer(oldSub1)) > 0);
     testassert(objc_getClass("Sub1") == Nil);
+    testassert(_class_isFutureClass(oldSub1));
+    testassert(0 == strcmp(class_getName(oldSub1), "Sub1"));
+    testassert(object_getClass(oldSub1) == Nil);  // CF expects this
 
     // objc_getFutureClass a second time
     testassert(oldSub1 == objc_getFutureClass("Sub1"));
@@ -93,6 +97,7 @@ int main()
     testassert(oldSub1 == newSub1);
     testassert(newSub1 == [newSub1 classref]);
     testassert(newSub1 == class_getSuperclass(objc_getClass("SubSub1")));
+    testassert(! _class_isFutureClass(newSub1));
 
     testassert(1 == [oldSub1 method]);
     testassert(1 == [newSub1 method]);

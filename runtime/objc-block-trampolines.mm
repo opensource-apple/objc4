@@ -195,7 +195,6 @@ static TrampolineBlockPagePair *_allocateTrampolinesAndData(ArgumentMode aMode) 
     vm_address_t dataAddress;
     
     // make sure certain assumptions are met
-    assert(PAGE_SIZE == 4096);
     assert(sizeof(TrampolineBlockPagePair) == 2*PAGE_SIZE);
     assert(_slotSize() == 8);
     assert(_headerSize() >= TRAMPOLINE_PAGE_PAIR_HEADER_SIZE);
@@ -209,23 +208,24 @@ static TrampolineBlockPagePair *_allocateTrampolinesAndData(ArgumentMode aMode) 
     TrampolineBlockPagePair *headPagePair = headPagePairs[aMode];
     
     if (headPagePair) {
-        assert(headPagePair->nextAvailablePage == NULL);
+        assert(headPagePair->nextAvailablePage == nil);
     }
     
     int i;
     kern_return_t result = KERN_FAILURE;
     for(i = 0; i < 5; i++) {
-         result = vm_allocate(mach_task_self(), &dataAddress, PAGE_SIZE * 2, TRUE);
+         result = vm_allocate(mach_task_self(), &dataAddress, PAGE_SIZE * 2, 
+                              TRUE | VM_MAKE_TAG(VM_MEMORY_FOUNDATION));
         if (result != KERN_SUCCESS) {
             mach_error("vm_allocate failed", result);
-            return NULL;
+            return nil;
         }
 
         vm_address_t codeAddress = dataAddress + PAGE_SIZE;
         result = vm_deallocate(mach_task_self(), codeAddress, PAGE_SIZE);
         if (result != KERN_SUCCESS) {
             mach_error("vm_deallocate failed", result);
-            return NULL;
+            return nil;
         }
         
         uintptr_t codePage;
@@ -247,19 +247,19 @@ static TrampolineBlockPagePair *_allocateTrampolinesAndData(ArgumentMode aMode) 
             result = vm_deallocate(mach_task_self(), dataAddress, PAGE_SIZE);
             if (result != KERN_SUCCESS) {
                 mach_error("vm_deallocate for retry failed.", result);
-                return NULL;
+                return nil;
             } 
         } else
             break;
     }
     
     if (result != KERN_SUCCESS)
-        return NULL; 
+        return nil; 
     
     TrampolineBlockPagePair *pagePair = (TrampolineBlockPagePair *) dataAddress;
     pagePair->nextAvailable = _paddingSlotCount();
-    pagePair->nextPagePair = NULL;
-    pagePair->nextAvailablePage = NULL;
+    pagePair->nextPagePair = nil;
+    pagePair->nextAvailablePage = nil;
     id *lastPageBlockPtr = _payloadAddressAtIndex(pagePair, _slotsPerPagePair() - 1);
     *lastPageBlockPtr = (id)(uintptr_t) LAST_SLOT_MARKER;
     
@@ -321,7 +321,7 @@ static TrampolineBlockPagePair *_pagePairAndIndexContainingIMP(IMP anImp, uint32
         }
     }
     
-    return NULL;
+    return nil;
 }
 
 // `block` must already have been copied 
@@ -335,7 +335,7 @@ static IMP _imp_implementationWithBlockNoCopy(ArgumentMode aMode, id block)
 
     uint32_t index = pagePair->nextAvailable;
     id *payloadAddress = _payloadAddressAtIndex(pagePair, index);
-    assert((index < 1024) || (index == LAST_SLOT_MARKER));
+    assert((index < _slotsPerPagePair()) || (index == LAST_SLOT_MARKER));
     
     uint32_t nextAvailableIndex = (uint32_t) *((uintptr_t *) payloadAddress);
     if (nextAvailableIndex == 0)
@@ -350,7 +350,7 @@ static IMP _imp_implementationWithBlockNoCopy(ArgumentMode aMode, id block)
             iteratorPair = iteratorPair->nextAvailablePage;
         if (iteratorPair) {
             iteratorPair->nextAvailablePage = pagePair->nextAvailablePage;
-            pagePair->nextAvailablePage = NULL;
+            pagePair->nextAvailablePage = nil;
         }
     } else {
         // empty slot at index contains pointer to next available index
@@ -387,27 +387,27 @@ id imp_getBlock(IMP anImp) {
     uint32_t index;
     TrampolineBlockPagePair *pagePair;
     
-    if (!anImp) return NULL;
+    if (!anImp) return nil;
     
     _lock();
     
-    pagePair = _pagePairAndIndexContainingIMP(anImp, &index, NULL);
+    pagePair = _pagePairAndIndexContainingIMP(anImp, &index, nil);
     
     if (!pagePair) {
         _unlock();
-        return NULL;
+        return nil;
     }
     
     id potentialBlock = *_payloadAddressAtIndex(pagePair, index);
     
     if ((uintptr_t) potentialBlock == (uintptr_t) LAST_SLOT_MARKER) {
         _unlock();
-        return NULL;
+        return nil;
     }
     
     if ((uintptr_t) potentialBlock < (uintptr_t) _slotsPerPagePair()) {
         _unlock();
-        return NULL;
+        return nil;
     }
     
     _unlock();
@@ -449,10 +449,10 @@ BOOL imp_removeBlock(IMP anImp) {
     while(pagePairIterator->nextAvailablePage && (pagePairIterator->nextAvailablePage != pagePair))
         pagePairIterator = pagePairIterator->nextAvailablePage;
     
-    if (! pagePairIterator->nextAvailablePage) { // if iteration stopped because nextAvail was NULL
+    if (! pagePairIterator->nextAvailablePage) { // if iteration stopped because nextAvail was nil
         // add to end of list.
         pagePairIterator->nextAvailablePage = pagePair;
-        pagePair->nextAvailablePage = NULL;
+        pagePair->nextAvailablePage = nil;
     }
     
     _unlock();
