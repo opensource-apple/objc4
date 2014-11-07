@@ -59,6 +59,12 @@ main()
         tmp = _objc_rootAutorelease(obj);
 #ifdef __arm__
         asm volatile("mov r7, r7");
+#elif __arm64__
+        asm volatile("mov fp, fp");
+#elif __x86_64__
+        // nothing to do
+#else
+#error unknown architecture
 #endif
         tmp = objc_retainAutoreleasedReturnValue(tmp);
         testassert(!did_dealloc);
@@ -82,8 +88,12 @@ main()
         tmp = _objc_rootAutorelease(obj);
 #ifdef __arm__
         asm volatile("mov r6, r6");
+#elif __arm64__
+        asm volatile("mov x6, x6");
 #elif __x86_64__
         asm volatile("mov %rdi, %rdi");
+#else
+#error unknown architecture
 #endif
         tmp = objc_retainAutoreleasedReturnValue(tmp);
         testassert(!did_dealloc);

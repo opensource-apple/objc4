@@ -41,10 +41,26 @@ struct DenseMapInfo<T*> {
     return reinterpret_cast<T*>(Val);
   }
   static unsigned getHashValue(const T *PtrVal) {
-    return (unsigned((uintptr_t)PtrVal) >> 4) ^
-           (unsigned((uintptr_t)PtrVal) >> 9);
+      return ptr_hash((uintptr_t)PtrVal);
   }
   static bool isEqual(const T *LHS, const T *RHS) { return LHS == RHS; }
+};
+
+// Provide DenseMapInfo for disguised pointers.
+template<typename T>
+struct DenseMapInfo<DisguisedPtr<T>> {
+  static inline DisguisedPtr<T> getEmptyKey() {
+    return DisguisedPtr<T>((T*)(uintptr_t)-1);
+  }
+  static inline DisguisedPtr<T> getTombstoneKey() {
+    return DisguisedPtr<T>((T*)(uintptr_t)-2);
+  }
+  static unsigned getHashValue(const T *PtrVal) {
+      return ptr_hash((uintptr_t)PtrVal);
+  }
+  static bool isEqual(const DisguisedPtr<T> &LHS, const DisguisedPtr<T> &RHS) {
+      return LHS == RHS; 
+  }
 };
 
 // Provide DenseMapInfo for cstrings.

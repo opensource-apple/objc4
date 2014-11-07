@@ -79,30 +79,51 @@ OBJC_EXPORT NXHashTable *_objc_debug_class_hash
 
 
 /***********************************************************************
+* Non-pointer isa
+**********************************************************************/
+
+#if __OBJC2__
+
+// Extract isa pointer from an isa field.
+// (Class)(isa & mask) == class pointer
+OBJC_EXPORT const uintptr_t objc_debug_isa_class_mask
+    __OSX_AVAILABLE_STARTING(__MAC_10_10, __IPHONE_7_0);
+
+// Extract magic cookie from an isa field.
+// (isa & magic_mask) == magic_value
+OBJC_EXPORT const uintptr_t objc_debug_isa_magic_mask
+    __OSX_AVAILABLE_STARTING(__MAC_10_10, __IPHONE_7_0);
+OBJC_EXPORT const uintptr_t objc_debug_isa_magic_value
+    __OSX_AVAILABLE_STARTING(__MAC_10_10, __IPHONE_7_0);
+
+#endif
+
+
+/***********************************************************************
 * Tagged pointer decoding
 **********************************************************************/
 #if __OBJC2__
 
 // if (obj & mask) obj is a tagged pointer object
 OBJC_EXPORT uintptr_t objc_debug_taggedpointer_mask
-    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_NA);
+    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_7_0);
 
 // tag_slot = (obj >> slot_shift) & slot_mask
 OBJC_EXPORT unsigned int objc_debug_taggedpointer_slot_shift
-    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_NA);
+    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_7_0);
 OBJC_EXPORT uintptr_t objc_debug_taggedpointer_slot_mask
-    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_NA);
+    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_7_0);
 
 // class = classes[tag_slot]
 OBJC_EXPORT Class objc_debug_taggedpointer_classes[]
-    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_NA);
+    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_7_0);
 
 // payload = (obj << payload_lshift) >> payload_rshift
 // Payload signedness is determined by the signedness of the right-shift.
 OBJC_EXPORT unsigned int objc_debug_taggedpointer_payload_lshift
-    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_NA);
+    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_7_0);
 OBJC_EXPORT unsigned int objc_debug_taggedpointer_payload_rshift
-    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_NA);
+    __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_7_0);
 
 #endif
 

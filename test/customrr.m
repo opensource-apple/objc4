@@ -259,6 +259,9 @@ int main(int argc __unused, char **argv)
     void *dlh;
 
 
+#if __x86_64__
+    // vtable dispatch can introduce bypass just like the ARC entrypoints
+#else
     testprintf("method dispatch does not bypass\n");
     zero();
     
@@ -310,6 +313,7 @@ int main(int argc __unused, char **argv)
     testassert(PlusReleases == 3);
     [UnrealizedSubA3 autorelease];
     testassert(PlusAutoreleases == 3);
+#endif
 
 
     testprintf("objc_msgSend() does not bypass\n");
@@ -417,16 +421,12 @@ int main(int argc __unused, char **argv)
     testassert(SubPlusAutoreleases == 1);
 
 #if __OBJC2__
-#if 1
-    testwarn("rdar://12961688 CustomRR is wrong for unrealized classes");
-#else
     objc_retain((Class)&OBJC_CLASS_$_UnrealizedSubC1);
     testassert(PlusRetains == 3);
     objc_release((Class)&OBJC_CLASS_$_UnrealizedSubC2);
     testassert(PlusReleases == 3);
     objc_autorelease((Class)&OBJC_CLASS_$_UnrealizedSubC3);
     testassert(PlusAutoreleases == 3);
-#endif
 #endif
 
 
@@ -453,7 +453,7 @@ int main(int argc __unused, char **argv)
     objc_autorelease(obj);
     testassert(Autoreleases == 0);
 
-    class_addMethod(cls->isa, @selector(retain), (IMP)imp_fn, "");
+    class_addMethod(object_getClass(cls), @selector(retain), (IMP)imp_fn, "");
     
     objc_retain(obj);
     testassert(Retains == 0);

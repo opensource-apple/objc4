@@ -281,7 +281,7 @@ static void _finishInitializing(Class cls, Class supercls)
 
     if (PrintInitializing) {
         _objc_inform("INITIALIZE: %s is fully +initialized",
-                     cls->getName());
+                     cls->nameForLogging());
     }
 
     // propagate finalization affinity.
@@ -329,7 +329,7 @@ static void _finishInitializingAfter(Class cls, Class supercls)
 
     if (PrintInitializing) {
         _objc_inform("INITIALIZE: %s waiting for superclass +[%s initialize]",
-                     cls->getName(), supercls->getName());
+                     cls->nameForLogging(), supercls->nameForLogging());
     }
 
     if (!pendingInitializeMap) {
@@ -386,14 +386,14 @@ void _class_initialize(Class cls)
         // this class doesn't implement +initialize. 2157218
         if (PrintInitializing) {
             _objc_inform("INITIALIZE: calling +[%s initialize]",
-                         cls->getName());
+                         cls->nameForLogging());
         }
 
         ((void(*)(Class, SEL))objc_msgSend)(cls, SEL_initialize);
 
         if (PrintInitializing) {
             _objc_inform("INITIALIZE: finished +[%s initialize]",
-                         cls->getName());
+                         cls->nameForLogging());
         }        
         
         // Done initializing. 

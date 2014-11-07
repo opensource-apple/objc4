@@ -29,6 +29,7 @@
 #include <objc/objc.h>
 #include <objc/runtime.h>
 
+#pragma GCC system_header
 
 #ifndef OBJC_SUPER
 #define OBJC_SUPER
@@ -113,9 +114,11 @@ OBJC_EXPORT id objc_msgSendSuper(struct objc_super *super, SEL op, ...)
  */
 #if !OBJC_OLD_DISPATCH_PROTOTYPES
 OBJC_EXPORT void objc_msgSend_stret(void /* id self, SEL op, ... */ )
-    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0)
+    OBJC_ARM64_UNAVAILABLE;
 OBJC_EXPORT void objc_msgSendSuper_stret(void /* struct objc_super *super, SEL op, ... */ )
-    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0)
+    OBJC_ARM64_UNAVAILABLE;
 #else
 /** 
  * Sends a message with a data-structure return value to an instance of a class.
@@ -123,14 +126,17 @@ OBJC_EXPORT void objc_msgSendSuper_stret(void /* struct objc_super *super, SEL o
  * @see objc_msgSend
  */
 OBJC_EXPORT void objc_msgSend_stret(id self, SEL op, ...)
-    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0)
+    OBJC_ARM64_UNAVAILABLE;
+
 /** 
  * Sends a message with a data-structure return value to the superclass of an instance of a class.
  * 
  * @see objc_msgSendSuper
  */
 OBJC_EXPORT void objc_msgSendSuper_stret(struct objc_super *super, SEL op, ...)
-    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
+    __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0)
+    OBJC_ARM64_UNAVAILABLE;
 #endif
 
 
@@ -226,12 +232,14 @@ OBJC_EXPORT void objc_msgSend_fp2ret(id self, SEL op, ...)
 OBJC_EXPORT void method_invoke(void /* id receiver, Method m, ... */ ) 
     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 OBJC_EXPORT void method_invoke_stret(void /* id receiver, Method m, ... */ ) 
-    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0)
+    OBJC_ARM64_UNAVAILABLE;
 #else
 OBJC_EXPORT id method_invoke(id receiver, Method m, ...) 
     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 OBJC_EXPORT void method_invoke_stret(id receiver, Method m, ...) 
-    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+    __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0)
+    OBJC_ARM64_UNAVAILABLE;
 #endif
 
 
@@ -254,12 +262,14 @@ OBJC_EXPORT void method_invoke_stret(id receiver, Method m, ...)
 OBJC_EXPORT void _objc_msgForward(void /* id receiver, SEL sel, ... */ ) 
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 OBJC_EXPORT void _objc_msgForward_stret(void /* id receiver, SEL sel, ... */ ) 
-    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_0);
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_0)
+    OBJC_ARM64_UNAVAILABLE;
 #else
 OBJC_EXPORT id _objc_msgForward(id receiver, SEL sel, ...) 
     __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0);
 OBJC_EXPORT void _objc_msgForward_stret(id receiver, SEL sel, ...) 
-    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_0);
+    __OSX_AVAILABLE_STARTING(__MAC_10_6, __IPHONE_3_0)
+    OBJC_ARM64_UNAVAILABLE;
 #endif
 
 

@@ -120,6 +120,20 @@ struct objc_class : objc_object {
         return hasCxxCtor();  // one bit for both ctor and dtor
     }
 
+    bool hasCustomRR() { 
+        return true;
+    }
+    void setHasCustomRR(bool = false) { }
+    void setHasDefaultRR() { }
+    void printCustomRR(bool) { }
+
+    bool hasCustomAWZ() { 
+        return true;
+    }
+    void setHasCustomAWZ(bool = false) { }
+    void setHasDefaultAWZ() { }
+    void printCustomAWZ(bool) { }
+
     bool instancesHaveAssociatedObjects() {
         return info & CLS_INSTANCES_HAVE_ASSOCIATED_OBJECTS;
     }
@@ -175,7 +189,9 @@ struct objc_class : objc_object {
 
     bool isConnected();
 
-    const char *getName() { return name; }
+    const char *mangledName() { return name; }
+    const char *demangledName() { return name; }
+    const char *nameForLogging() { return name; }
 
     bool isMetaClass() {
         return info & CLS_META;
@@ -195,6 +211,13 @@ struct objc_class : objc_object {
     // Class's ivar size rounded up to a pointer-size boundary.
     uint32_t alignedInstanceSize() {
         return (unalignedInstanceSize() + WORD_MASK) & ~WORD_MASK;
+    }
+
+    size_t instanceSize(size_t extraBytes) {
+        size_t size = alignedInstanceSize() + extraBytes;
+        // CF requires all objects be at least 16 bytes.
+        if (size < 16) size = 16;
+        return size;
     }
 
 };

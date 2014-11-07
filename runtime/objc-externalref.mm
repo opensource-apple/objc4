@@ -85,7 +85,7 @@ static void _initialize_gc() {
 // grow the buffer by one page
 static bool _grow_list(external_ref_list *list) {
     auto_memory_type_t memory_type = (is_strong(list) ? AUTO_MEMORY_ALL_POINTERS : AUTO_MEMORY_ALL_WEAK_POINTERS);
-    size_t new_size = list->_size + PAGE_SIZE / sizeof(void *);
+    size_t new_size = list->_size + PAGE_MAX_SIZE / sizeof(void *);
     // auto_realloc() has been enhanced to handle strong and weak memory.
     void **new_list = (void **)(list->_buffer ? malloc_zone_realloc(gc_zone, list->_buffer, new_size * sizeof(void *)) : auto_zone_allocate_object(gc_zone, new_size * sizeof(void *), memory_type, false, false));
     if (!new_list) _objc_fatal("unable to allocate, size = %ld\n", new_size);

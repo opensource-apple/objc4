@@ -1,7 +1,7 @@
 /* 
 TEST_CRASHES
 TEST_RUN_OUTPUT
-objc\[\d+\]: tag index 7 used for two different classes \(was 0x[0-9a-fA-F]+ NSObject, now 0x[0-9a-fA-F]+ Protocol\)
+objc\[\d+\]: tag index 7 used for two different classes \(was 0x[0-9a-fA-F]+ NSObject, now 0x[0-9a-fA-F]+ TestRoot\)
 CRASHED: SIG(ILL|TRAP)
 OR
 no tagged pointers
@@ -10,6 +10,7 @@ END
 */
 
 #include "test.h"
+#include "testroot.i"
 
 #include <objc/objc-internal.h>
 #include <objc/Protocol.h>
@@ -25,7 +26,7 @@ int main()
     _objc_registerTaggedPointerClass(OBJC_TAG_7, [NSObject class]);
 
     // colliding registration disallowed
-    _objc_registerTaggedPointerClass(OBJC_TAG_7, [Protocol class]);
+    _objc_registerTaggedPointerClass(OBJC_TAG_7, [TestRoot class]);
 
     fail(__FILE__);
 }

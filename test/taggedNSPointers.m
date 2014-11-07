@@ -32,15 +32,15 @@ void testTaggedNumber()
     [dict setObject: @"bob" forKey: taggedNS];
     testassert([@"bob" isEqualToString: [dict objectForKey: taggedNS]]);
     
-    NSNumber *i12345 = [NSNumber numberWithInt: 12345];
+    NSNumber *iM88 = [NSNumber numberWithInt:-88];
     NSNumber *i12346 = [NSNumber numberWithInt: 12346];
     NSNumber *i12347 = [NSNumber numberWithInt: 12347];
     
-    NSArray *anArray = [NSArray arrayWithObjects: i12345, i12346, i12347, nil];
+    NSArray *anArray = [NSArray arrayWithObjects: iM88, i12346, i12347, nil];
     testassert([anArray count] == 3);
     testassert([anArray indexOfObject: i12346] == 1);
     
-    NSSet *aSet = [NSSet setWithObjects: i12345, i12346, i12347, nil];
+    NSSet *aSet = [NSSet setWithObjects: iM88, i12346, i12347, nil];
     testassert([aSet count] == 3);
     testassert([aSet containsObject: i12346]);
     

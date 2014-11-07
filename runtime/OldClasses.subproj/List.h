@@ -32,7 +32,7 @@
 #ifndef _OBJC_LIST_H_
 #define _OBJC_LIST_H_
 
-#if !__OBJC2__
+#if __OBJC__  &&  !__OBJC2__
 
 #include <objc/Object.h>
 #include <Availability.h>

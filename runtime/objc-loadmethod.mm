@@ -69,7 +69,8 @@ void add_class_to_loadable_list(Class cls)
     if (!method) return;  // Don't bother if cls has no +load method
     
     if (PrintLoading) {
-        _objc_inform("LOAD: class '%s' scheduled for +load", cls->getName());
+        _objc_inform("LOAD: class '%s' scheduled for +load", 
+                     cls->nameForLogging());
     }
     
     if (loadable_classes_used == loadable_classes_allocated) {
@@ -137,7 +138,8 @@ void remove_class_from_loadable_list(Class cls)
             if (loadable_classes[i].cls == cls) {
                 loadable_classes[i].cls = nil;
                 if (PrintLoading) {
-                    _objc_inform("LOAD: class '%s' unscheduled for +load", cls->getName());
+                    _objc_inform("LOAD: class '%s' unscheduled for +load", 
+                                 cls->nameForLogging());
                 }
                 return;
             }
@@ -197,7 +199,7 @@ static void call_class_loads(void)
         if (!cls) continue; 
 
         if (PrintLoading) {
-            _objc_inform("LOAD: +[%s load]\n", cls->getName());
+            _objc_inform("LOAD: +[%s load]\n", cls->nameForLogging());
         }
         (*load_method)(cls, SEL_load);
     }
@@ -243,7 +245,7 @@ static BOOL call_category_loads(void)
         if (cls  &&  cls->isLoadable()) {
             if (PrintLoading) {
                 _objc_inform("LOAD: +[%s(%s) load]\n", 
-                             cls->getName(), 
+                             cls->nameForLogging(), 
                              _category_getName(cat));
             }
             (*load_method)(cls, SEL_load);

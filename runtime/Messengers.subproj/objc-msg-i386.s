@@ -42,12 +42,6 @@
 ********************************************************************/
 
 .data
-// Substitute receiver for messages sent to nil (usually also nil)
-// id _objc_nilReceiver
-.align 4
-.private_extern __objc_nilReceiver
-__objc_nilReceiver:
-	.long   0
 
 // _objc_entryPoints and _objc_exitPoints are used by objc
 // to get the critical regions for which method caches 
@@ -192,74 +186,6 @@ _gdb_objc_messenger_breakpoints:
 	CACHE_HISTOGRAM_SIZE = 512
 #endif
 
-
-//////////////////////////////////////////////////////////////////////
-//
-// LOAD_STATIC_WORD	targetReg, symbolName, LOCAL_SYMBOL | EXTERNAL_SYMBOL
-//
-// Load the value of the named static data word.
-//
-// Takes: targetReg       - the register, other than r0, to load
-//        symbolName      - the name of the symbol
-//        LOCAL_SYMBOL    - symbol name used as-is
-//        EXTERNAL_SYMBOL - symbol name gets nonlazy treatment
-//
-// Eats: edx and targetReg
-//////////////////////////////////////////////////////////////////////
-
-// Values to specify whether the symbol is plain or nonlazy
-LOCAL_SYMBOL	= 0
-EXTERNAL_SYMBOL	= 1
-
-.macro	LOAD_STATIC_WORD
-
-#if defined(__DYNAMIC__)
-	call	1f
-1:	popl	%edx
-.if $2 == EXTERNAL_SYMBOL
-	movl	L$1-1b(%edx),$0
-	movl	0($0),$0
-.elseif $2 == LOCAL_SYMBOL
-	movl	$1-1b(%edx),$0
-.else
-	!!! Unknown symbol type !!!
-.endif
-#else
-	movl	$1,$0
-#endif
-
-.endmacro
-
-//////////////////////////////////////////////////////////////////////
-//
-// LEA_STATIC_DATA	targetReg, symbolName, LOCAL_SYMBOL | EXTERNAL_SYMBOL
-//
-// Load the address of the named static data.
-//
-// Takes: targetReg       - the register, other than edx, to load
-//        symbolName      - the name of the symbol
-//        LOCAL_SYMBOL    - symbol is local to this module
-//        EXTERNAL_SYMBOL - symbol is imported from another module
-//
-// Eats: edx and targetReg
-//////////////////////////////////////////////////////////////////////
-
-.macro	LEA_STATIC_DATA
-#if defined(__DYNAMIC__)
-	call	1f
-1:	popl	%edx
-.if $2 == EXTERNAL_SYMBOL
-	movl	L$1-1b(%edx),$0
-.elseif $2 == LOCAL_SYMBOL
-	leal	$1-1b(%edx),$0
-.else
-	!!! Unknown symbol type !!!
-.endif
-#else
-	leal	$1,$0
-#endif
-
-.endmacro
 
 //////////////////////////////////////////////////////////////////////
 //
@@ -686,14 +612,6 @@ LMsgSendCacheMiss:
 
 // message sent to nil: redirect to nil receiver, if any
 LMsgSendNilSelf:
-	call	1f			// load new receiver
-1:	popl	%edx
-	movl	__objc_nilReceiver-1b(%edx),%eax
-	testl	%eax, %eax		// return nil if no new receiver
-	je	LMsgSendReturnZero
-	movl	%eax, self(%esp)	// send to new receiver
-	jmp	LMsgSendReceiverOk	// receiver must be in %eax
-LMsgSendReturnZero:
 	// %eax is already zero
 	movl	$0,%edx
 LMsgSendDone:
@@ -844,14 +762,7 @@ LMsgSendFpretCacheMiss:
 
 // message sent to nil: redirect to nil receiver, if any
 LMsgSendFpretNilSelf:
-	call	1f			// load new receiver
-1:	popl	%edx
-	movl	__objc_nilReceiver-1b(%edx),%eax
-	testl	%eax, %eax		// return zero if no new receiver
-	je	LMsgSendFpretReturnZero
-	movl	%eax, self(%esp)	// send to new receiver
-	jmp	LMsgSendFpretReceiverOk	// receiver must be in %eax
-LMsgSendFpretReturnZero:
+	// %eax is already zero
 	fldz
 LMsgSendFpretDone:
 	MESSENGER_END_NIL
@@ -954,14 +865,6 @@ LMsgSendStretCacheMiss:
 
 // message sent to nil: redirect to nil receiver, if any
 LMsgSendStretNilSelf:
-	call	1f			// load new receiver
-1:	popl	%edx
-	movl	__objc_nilReceiver-1b(%edx),%eax
-	testl	%eax, %eax		// return nil if no new receiver
-	je	LMsgSendStretDone
-	movl	%eax, self_stret(%esp)	// send to new receiver
-	jmp	LMsgSendStretReceiverOk	// receiver must be in %eax
-LMsgSendStretDone:
 	MESSENGER_END_NIL
 	ret	$4			// pop struct return address (#2995932)
 
@@ -1095,15 +998,13 @@ _FwdSel: .long 0
 	.align 2
 LUnkSelStr: .ascii "Does not recognize selector %s (while forwarding %s)\0"
 
-	.data
-	.align 2
-	.private_extern __objc_forward_handler
-__objc_forward_handler:	.long 0
-
-	.data
-	.align 2
-	.private_extern __objc_forward_stret_handler
-__objc_forward_stret_handler:	.long 0
+	.non_lazy_symbol_pointer
+L_forward_handler:
+	.indirect_symbol __objc_forward_handler
+	.long 0
+L_forward_stret_handler:
+	.indirect_symbol __objc_forward_stret_handler
+	.long 0
 
 	STATIC_ENTRY	__objc_msgForward_impcache
 	// Method cache version
@@ -1132,7 +1033,8 @@ L__objc_msgForward$pic_base:
 	popl	%edx
 	
 	// Call user handler, if any
-	movl	__objc_forward_handler-L__objc_msgForward$pic_base(%edx),%ecx
+	movl	L_forward_handler-L__objc_msgForward$pic_base(%edx),%ecx
+	movl	(%ecx), %ecx
 	testl	%ecx, %ecx		// if not NULL
 	je	1f			//   skip to default handler
 	jmp	*%ecx			// call __objc_forward_handler
@@ -1186,7 +1088,8 @@ L__objc_msgForwardStret$pic_base:
 	popl	%edx
 
 	// Call user handler, if any
-	movl	__objc_forward_stret_handler-L__objc_msgForwardStret$pic_base(%edx), %ecx
+	movl	L_forward_stret_handler-L__objc_msgForwardStret$pic_base(%edx), %ecx
+	movl	(%ecx), %ecx
 	testl	%ecx, %ecx		// if not NULL
 	je	1f			//   skip to default handler
 	jmp	*%ecx			// call __objc_forward_stret_handler

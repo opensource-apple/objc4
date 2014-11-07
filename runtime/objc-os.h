@@ -35,10 +35,19 @@
 #ifdef __LP64__
 #   define WORD_SHIFT 3UL
 #   define WORD_MASK 7UL
+#   define WORD_BITS 64
 #else
 #   define WORD_SHIFT 2UL
 #   define WORD_MASK 3UL
+#   define WORD_BITS 32
 #endif
+
+static inline uint32_t word_align(uint32_t x) {
+    return (x + WORD_MASK) & ~WORD_MASK;
+}
+static inline size_t word_align(size_t x) {
+    return (x + WORD_MASK) & ~WORD_MASK;
+}
 
 #if TARGET_OS_MAC
 
@@ -89,6 +98,116 @@ void syslog(int, const char *, ...) UNAVAILABLE_ATTRIBUTE;
 void vsyslog(int, const char *, va_list) UNAVAILABLE_ATTRIBUTE;
 
 
+#define ALWAYS_INLINE inline __attribute__((always_inline))
+#define NEVER_INLINE inline __attribute__((noinline))
+
+
+
+static ALWAYS_INLINE uintptr_t 
+addc(uintptr_t lhs, uintptr_t rhs, uintptr_t carryin, uintptr_t *carryout)
+{
+    return __builtin_addcl(lhs, rhs, carryin, carryout);
+}
+
+static ALWAYS_INLINE uintptr_t 
+subc(uintptr_t lhs, uintptr_t rhs, uintptr_t carryin, uintptr_t *carryout)
+{
+    return __builtin_subcl(lhs, rhs, carryin, carryout);
+}
+
+
+#if __arm64__
+
+static ALWAYS_INLINE
+uintptr_t 
+LoadExclusive(uintptr_t *src)
+{
+    uintptr_t result;
+    asm("ldxr %x0, [%x1]" 
+        : "=r" (result) 
+        : "r" (src), "m" (*src));
+    return result;
+}
+
+static ALWAYS_INLINE
+bool 
+StoreExclusive(uintptr_t *dst, uintptr_t oldvalue __unused, uintptr_t value)
+{
+    uint32_t result;
+    asm("stxr %w0, %x2, [%x3]" 
+        : "=r" (result), "=m" (*dst) 
+        : "r" (value), "r" (dst));
+    return !result;
+}
+
+
+static ALWAYS_INLINE
+bool 
+StoreReleaseExclusive(uintptr_t *dst, uintptr_t oldvalue __unused, uintptr_t value)
+{
+    uint32_t result;
+    asm("stlxr %w0, %x2, [%x3]" 
+        : "=r" (result), "=m" (*dst) 
+        : "r" (value), "r" (dst));
+    return !result;
+}
+
+
+#elif __arm__  
+
+static ALWAYS_INLINE
+uintptr_t 
+LoadExclusive(uintptr_t *src)
+{
+    return *src;
+}
+
+static ALWAYS_INLINE
+bool 
+StoreExclusive(uintptr_t *dst, uintptr_t oldvalue, uintptr_t value)
+{
+    return OSAtomicCompareAndSwapPtr((void *)oldvalue, (void *)value, 
+                                     (void **)dst);
+}
+
+static ALWAYS_INLINE
+bool 
+StoreReleaseExclusive(uintptr_t *dst, uintptr_t oldvalue, uintptr_t value)
+{
+    return OSAtomicCompareAndSwapPtrBarrier((void *)oldvalue, (void *)value, 
+                                            (void **)dst);
+}
+
+
+#elif __x86_64__  ||  __i386__
+
+static ALWAYS_INLINE
+uintptr_t 
+LoadExclusive(uintptr_t *src)
+{
+    return *src;
+}
+
+static ALWAYS_INLINE
+bool 
+StoreExclusive(uintptr_t *dst, uintptr_t oldvalue, uintptr_t value)
+{
+    
+    return __sync_bool_compare_and_swap((void **)dst, (void *)oldvalue, (void *)value);
+}
+
+static ALWAYS_INLINE
+bool 
+StoreReleaseExclusive(uintptr_t *dst, uintptr_t oldvalue, uintptr_t value)
+{
+    return StoreExclusive(dst, oldvalue, value);
+}
+
+#else 
+#   error unknown architecture
+#endif
+
+
 #define spinlock_t os_lock_handoff_s
 #define spinlock_trylock(l) os_lock_trylock(l)
 #define spinlock_lock(l) os_lock_lock(l)
@@ -123,8 +242,8 @@ void vsyslog(int, const char *, va_list) UNAVAILABLE_ATTRIBUTE;
 /* Use this for functions that are intended to be breakpoint hooks.
    If you do not, the compiler may optimize them away.
    BREAKPOINT_FUNCTION( void stop_on_error(void) ); */
-#   define BREAKPOINT_FUNCTION(prototype)                            \
-    OBJC_EXTERN __attribute__((noinline, visibility("hidden")))      \
+#   define BREAKPOINT_FUNCTION(prototype)                             \
+    OBJC_EXTERN __attribute__((noinline, used, visibility("hidden"))) \
     prototype { asm(""); }
 
 #elif TARGET_OS_WIN32
@@ -551,8 +670,8 @@ static bool is_valid_direct_key(tls_key_t k) {
 // rdar://9162780  _pthread_get/setspecific_direct are inefficient
 // copied from libdispatch
 
-__attribute__((always_inline)) __attribute__((const))
-static inline void**
+__attribute__((const))
+static ALWAYS_INLINE void**
 tls_base(void)
 {
     uintptr_t p;
@@ -564,8 +683,8 @@ tls_base(void)
 #endif
 }
 
-__attribute__((always_inline))
-static inline void
+
+static ALWAYS_INLINE void
 tls_set_direct(void **tsdb, tls_key_t k, void *v)
 {
     assert(is_valid_direct_key(k));
@@ -575,8 +694,8 @@ tls_set_direct(void **tsdb, tls_key_t k, void *v)
 #define tls_set_direct(k, v)                    \
         tls_set_direct(tls_base(), (k), (v))
 
-__attribute__((always_inline))
-static inline void *
+
+static ALWAYS_INLINE void *
 tls_get_direct(void **tsdb, tls_key_t k)
 {
     assert(is_valid_direct_key(k));

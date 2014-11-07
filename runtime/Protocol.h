@@ -28,7 +28,13 @@
 #ifndef _OBJC_PROTOCOL_H_
 #define _OBJC_PROTOCOL_H_
 
-#if __OBJC2__
+#if !__OBJC__
+
+// typedef Protocol is here:
+#include <objc/runtime.h>
+
+
+#elif __OBJC2__
 
 #include <objc/NSObject.h>
 
@@ -38,6 +44,7 @@
 __OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_2_0)
 @interface Protocol : NSObject
 @end
+
 
 #else
 

@@ -79,15 +79,22 @@ SEL SEL_autorelease = NULL;
 SEL SEL_retainCount = NULL;
 SEL SEL_alloc = NULL;
 SEL SEL_allocWithZone = NULL;
+SEL SEL_dealloc = NULL;
 SEL SEL_copy = NULL;
 SEL SEL_new = NULL;
 SEL SEL_finalize = NULL;
 SEL SEL_forwardInvocation = NULL;
+SEL SEL_tryRetain = NULL;
+SEL SEL_isDeallocating = NULL;
+SEL SEL_retainWeakReference = NULL;
+SEL SEL_allowsWeakReference = NULL;
+
 
 header_info *FirstHeader = 0;  // NULL means empty list
 header_info *LastHeader  = 0;  // NULL means invalid; recompute it
 int HeaderCount = 0;
 
+uint32_t AppSDKVersion = 0;
 
 
 /***********************************************************************
@@ -132,34 +139,6 @@ Class objc_lookUpClass(const char *aClassName)
 
     // NO unconnected, NO class handler
     return look_up_class(aClassName, NO, NO);
-}
-
-/***********************************************************************
-* objc_getFutureClass.  Return the id of the named class.
-* If the class does not exist, return an uninitialized class 
-* structure that will be used for the class when and if it 
-* does get loaded.
-* Not thread safe. 
-**********************************************************************/
-Class objc_getFutureClass(const char *name)
-{
-    Class cls;
-
-    // YES unconnected, NO class handler
-    // (unconnected is OK because it will someday be the real class)
-    cls = look_up_class(name, YES, NO);
-    if (cls) {
-        if (PrintFuture) {
-            _objc_inform("FUTURE: found %p already in use for %s", 
-                         (void*)cls, name);
-        }
-        return cls;
-    }
-    
-    // No class or future class with that name yet. Make one.
-    // fixme not thread-safe with respect to 
-    // simultaneous library load or getFutureClass.
-    return _objc_allocateFutureClass(name);
 }
 
 
@@ -384,6 +363,11 @@ void _objc_pthread_destroyspecific(void *arg)
         _destroyInitializingClassList(data->initializingClasses);
         _destroySyncCache(data->syncCache);
         _destroyAltHandlerList(data->handlerList);
+        for (int i = 0; i < (int)countof(data->printableNames); i++) {
+            if (data->printableNames[i]) {
+                free(data->printableNames[i]);  
+            }
+        }
 
         // add further cleanup here...
 
@@ -415,37 +399,47 @@ void _objcInit(void)
 }
 
 
-#if !(TARGET_OS_WIN32  ||  TARGET_OS_EMBEDDED  ||  TARGET_OS_IPHONE)
-/***********************************************************************
-* _objc_setNilReceiver
-**********************************************************************/
-id _objc_setNilReceiver(id newNilReceiver)
-{
-    id oldNilReceiver;
-
-    oldNilReceiver = _objc_nilReceiver;
-    _objc_nilReceiver = newNilReceiver;
-
-    return oldNilReceiver;
-}
-
-/***********************************************************************
-* _objc_getNilReceiver
-**********************************************************************/
-id _objc_getNilReceiver(void)
-{
-    return _objc_nilReceiver;
-}
-#endif
-
-
 /***********************************************************************
 * objc_setForwardHandler
 **********************************************************************/
+
+#if !__OBJC2__
+
+// Default forward handler (nil) goes to forward:: dispatch.
+void *_objc_forward_handler = nil;
+void *_objc_forward_stret_handler = nil;
+
+#else
+
+// Default forward handler halts the process.
+__attribute__((noreturn)) void 
+objc_defaultForwardHandler(id self, SEL sel)
+{
+    _objc_fatal("%c[%s %s]: unrecognized selector sent to instance %p "
+                "(no message forward handler is installed)", 
+                class_isMetaClass(object_getClass(self)) ? '+' : '-', 
+                object_getClassName(self), sel_getName(sel), self);
+}
+void *_objc_forward_handler = (void*)objc_defaultForwardHandler;
+
+#if SUPPORT_STRET
+struct stret { int i[100]; };
+__attribute__((noreturn)) struct stret 
+objc_defaultForwardStretHandler(id self, SEL sel)
+{
+    objc_defaultForwardHandler(self, sel);
+}
+void *_objc_forward_stret_handler = (void*)objc_defaultForwardStretHandler;
+#endif
+
+#endif
+
 void objc_setForwardHandler(void *fwd, void *fwd_stret)
 {
     _objc_forward_handler = fwd;
+#if SUPPORT_STRET
     _objc_forward_stret_handler = fwd_stret;
+#endif
 }
 
 
@@ -465,13 +459,13 @@ const char *class_getImageName(Class cls)
     if (!cls) return NULL;
 
 #if !__OBJC2__
-    cls = _objc_getOrigClass(cls->getName());
+    cls = _objc_getOrigClass(cls->demangledName());
 #endif
 #if TARGET_OS_WIN32
     charactersCopied = 0;
     szFileName = malloc(MAX_PATH * sizeof(TCHAR));
     
-    origCls = objc_getOrigClass(cls->getName());
+    origCls = objc_getOrigClass(cls->demangledName());
     classModule = NULL;
     res = GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCTSTR)origCls, &classModule);
     if (res && classModule) {
@@ -639,7 +633,7 @@ void objc_removeAssociatedObjects(id object)
     } else 
 #endif
     {
-        if (object && object->getIsa()->instancesHaveAssociatedObjects()) {
+        if (object && object->hasAssociatedObjects()) {
             _object_remove_assocations(object);
         }
     }

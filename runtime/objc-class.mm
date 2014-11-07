@@ -207,6 +207,16 @@ Class object_setClass(id obj, Class cls)
 
 
 /***********************************************************************
+* object_isClass.
+**********************************************************************/
+BOOL object_isClass(id obj)
+{
+    if (!obj) return NO;
+    return obj->isClass();
+}
+
+
+/***********************************************************************
 * object_getClassName.
 **********************************************************************/
 const char *object_getClassName(id obj)
@@ -228,23 +238,13 @@ IMP object_getMethodImplementation(id obj, SEL name)
 /***********************************************************************
  * object_getMethodImplementation_stret.
  **********************************************************************/
+#if SUPPORT_STRET
 IMP object_getMethodImplementation_stret(id obj, SEL name)
 {
     Class cls = (obj ? obj->getIsa() : nil);
     return class_getMethodImplementation_stret(cls, name);
 }
-
-
-/***********************************************************************
-* object_getIndexedIvars.
-**********************************************************************/
-void *object_getIndexedIvars(id obj)
-{
-    // ivars are tacked onto the end of the object
-    if (!obj) return nil;
-    if (obj->isTaggedPointer()) return nil;
-    return ((char *) obj) + obj->ISA()->alignedInstanceSize();
-}
+#endif
 
 
 Ivar object_setInstanceVariable(id obj, const char *name, void *value)
@@ -392,7 +392,7 @@ static void object_cxxDestructFromClass(id obj, Class cls)
         if (dtor != (void(*)(id))_objc_msgForward_impcache) {
             if (PrintCxxCtors) {
                 _objc_inform("CXX: calling C++ destructors for class %s", 
-                             cls->getName());
+                             cls->nameForLogging());
             }
             (*dtor)(obj);
         }
@@ -418,8 +418,9 @@ void object_cxxDestruct(id obj)
 * Recursively call C++ constructors on obj, starting with base class's 
 *   ctor method (if any) followed by subclasses' ctors (if any), stopping 
 *   at cls's ctor (if any).
-* Returns YES if construction succeeded.
-* Returns NO if some constructor threw an exception. The exception is 
+* Does not check cls->hasCxxCtor(). The caller should preflight that.
+* Returns self if construction succeeded.
+* Returns nil if some constructor threw an exception. The exception is 
 *   caught and discarded. Any partial construction is destructed.
 * Uses methodListLock and cacheUpdateLock. The caller must hold neither.
 *
@@ -427,52 +428,37 @@ void object_cxxDestruct(id obj)
 * return self: construction succeeded
 * return nil:  construction failed because a C++ constructor threw an exception
 **********************************************************************/
-static BOOL object_cxxConstructFromClass(id obj, Class cls)
+id 
+object_cxxConstructFromClass(id obj, Class cls)
 {
+    assert(cls->hasCxxCtor());  // required for performance, not correctness
+
     id (*ctor)(id);
     Class supercls;
-
-    // Stop if neither this class nor any superclass has ctors.
-    if (!cls->hasCxxCtor()) return YES;  // no ctor - ok
 
     supercls = cls->superclass;
 
     // Call superclasses' ctors first, if any.
-    if (supercls) {
-        BOOL ok = object_cxxConstructFromClass(obj, supercls);
-        if (!ok) return NO;  // some superclass's ctor failed - give up
+    if (supercls  &&  supercls->hasCxxCtor()) {
+        bool ok = object_cxxConstructFromClass(obj, supercls);
+        if (!ok) return nil;  // some superclass's ctor failed - give up
     }
 
     // Find this class's ctor, if any.
     ctor = (id(*)(id))lookupMethodInClassAndLoadCache(cls, SEL_cxx_construct);
-    if (ctor == (id(*)(id))_objc_msgForward_impcache) return YES;  // no ctor - ok
+    if (ctor == (id(*)(id))_objc_msgForward_impcache) return obj;  // no ctor - ok
     
     // Call this class's ctor.
     if (PrintCxxCtors) {
-        _objc_inform("CXX: calling C++ constructors for class %s", cls->getName());
+        _objc_inform("CXX: calling C++ constructors for class %s", 
+                     cls->nameForLogging());
     }
-    if ((*ctor)(obj)) return YES;  // ctor called and succeeded - ok
+    if ((*ctor)(obj)) return obj;  // ctor called and succeeded - ok
 
     // This class's ctor was called and failed. 
     // Call superclasses's dtors to clean up.
     if (supercls) object_cxxDestructFromClass(obj, supercls);
-    return NO;
-}
-
-
-/***********************************************************************
-* object_cxxConstructFromClass.
-* Call C++ constructors on obj, if any.
-* Returns YES if construction succeeded.
-* Returns NO if some constructor threw an exception. The exception is 
-*   caught and discarded. Any partial construction is destructed.
-* Uses methodListLock and cacheUpdateLock. The caller must hold neither.
-**********************************************************************/
-BOOL object_cxxConstruct(id obj)
-{
-    if (!obj) return YES;
-    if (obj->isTaggedPointer()) return YES;
-    return object_cxxConstructFromClass(obj, obj->ISA());
+    return nil;
 }
 
 
@@ -507,15 +493,15 @@ static void _class_resolveClassMethod(Class cls, SEL sel, id inst)
             _objc_inform("RESOLVE: method %c[%s %s] "
                          "dynamically resolved to %p", 
                          cls->isMetaClass() ? '+' : '-', 
-                         cls->getName(), sel_getName(sel), imp);
+                         cls->nameForLogging(), sel_getName(sel), imp);
         }
         else {
             // Method resolver didn't add anything?
             _objc_inform("RESOLVE: +[%s resolveClassMethod:%s] returned YES"
                          ", but no new implementation of %c[%s %s] was found",
-                         cls->getName(), sel_getName(sel), 
+                         cls->nameForLogging(), sel_getName(sel), 
                          cls->isMetaClass() ? '+' : '-', 
-                         cls->getName(), sel_getName(sel));
+                         cls->nameForLogging(), sel_getName(sel));
         }
     }
 }
@@ -549,15 +535,15 @@ static void _class_resolveInstanceMethod(Class cls, SEL sel, id inst)
             _objc_inform("RESOLVE: method %c[%s %s] "
                          "dynamically resolved to %p", 
                          cls->isMetaClass() ? '+' : '-', 
-                         cls->getName(), sel_getName(sel), imp);
+                         cls->nameForLogging(), sel_getName(sel), imp);
         }
         else {
             // Method resolver didn't add anything?
             _objc_inform("RESOLVE: +[%s resolveInstanceMethod:%s] returned YES"
                          ", but no new implementation of %c[%s %s] was found",
-                         cls->getName(), sel_getName(sel), 
+                         cls->nameForLogging(), sel_getName(sel), 
                          cls->isMetaClass() ? '+' : '-', 
-                         cls->getName(), sel_getName(sel));
+                         cls->nameForLogging(), sel_getName(sel));
         }
     }
 }
@@ -645,13 +631,21 @@ BOOL class_respondsToMethod(Class cls, SEL sel)
 
 BOOL class_respondsToSelector(Class cls, SEL sel)
 {
+    return class_respondsToSelector_inst(cls, sel, nil);
+}
+
+
+// inst is an instance of cls or a subclass thereof, or nil if none is known.
+// Non-nil inst is faster in some cases. See lookUpImpOrForward() for details.
+BOOL class_respondsToSelector_inst(Class cls, SEL sel, id inst)
+{
     IMP imp;
 
     if (!sel  ||  !cls) return NO;
 
     // Avoids +initialize because it historically did so.
     // We're not returning a callable IMP anyway.
-    imp = lookUpImpOrNil(cls, sel, nil, 
+    imp = lookUpImpOrNil(cls, sel, inst, 
                          NO/*initialize*/, YES/*cache*/, YES/*resolver*/);
     return imp ? YES : NO;
 }
@@ -691,7 +685,7 @@ IMP class_getMethodImplementation(Class cls, SEL sel)
     return imp;
 }
 
-
+#if SUPPORT_STRET
 IMP class_getMethodImplementation_stret(Class cls, SEL sel)
 {
     IMP imp = class_getMethodImplementation(cls, sel);
@@ -702,6 +696,7 @@ IMP class_getMethodImplementation_stret(Class cls, SEL sel)
     }
     return imp;
 }
+#endif
 
 
 /***********************************************************************
@@ -856,13 +851,6 @@ Class _calloc_class(size_t size)
     return (Class) _calloc_internal(1, size);
 }
 
-
-const char *class_getName(Class cls)
-{
-    if (!cls) return "nil";
-    else return cls->getName();
-}
-
 Class class_getSuperclass(Class cls)
 {
     if (!cls) return nil;
@@ -920,45 +908,18 @@ char * method_copyArgumentType(Method m, unsigned int index)
 
 
 /***********************************************************************
-* objc_constructInstance
-* Creates an instance of `cls` at the location pointed to by `bytes`. 
-* `bytes` must point to at least class_getInstanceSize(cls) bytes of 
-*   well-aligned zero-filled memory.
-* The new object's isa is set. Any C++ constructors are called.
-* Returns `bytes` if successful. Returns nil if `cls` or `bytes` is 
-*   nil, or if C++ constructors fail.
-* Note: class_createInstance() and class_createInstances() preflight this.
+* _objc_constructOrFree
+* Call C++ constructors, and free() if they fail.
+* bytes->isa must already be set.
+* cls must have cxx constructors.
+* Returns the object, or nil.
 **********************************************************************/
-static id 
-_objc_constructInstance(Class cls, void *bytes) 
-{
-    id obj = (id)bytes;
-
-    // Set the isa pointer
-    obj->initIsa(cls);
-
-    // Call C++ constructors, if any.
-    if (!object_cxxConstruct(obj)) {
-        // Some C++ constructor threw an exception. 
-        return nil;
-    }
-
-    return obj;
-}
-
-
-id 
-objc_constructInstance(Class cls, void *bytes) 
-{
-    if (!cls  ||  !bytes) return nil;
-    return _objc_constructInstance(cls, bytes);
-}
-
-
 id
-_objc_constructOrFree(Class cls, void *bytes)
+_objc_constructOrFree(id bytes, Class cls)
 {
-    id obj = _objc_constructInstance(cls, bytes);
+    assert(cls->hasCxxCtor());  // for performance, not correctness
+
+    id obj = object_cxxConstructFromClass(bytes, cls);
     if (!obj) {
 #if SUPPORT_GC
         if (UseGC) {
@@ -986,9 +947,7 @@ _class_createInstancesFromZone(Class cls, size_t extraBytes, void *zone,
     unsigned num_allocated;
     if (!cls) return 0;
 
-    size_t size = cls->alignedInstanceSize() + extraBytes;
-    // CF requires all objects be at least 16 bytes.
-    if (size < 16) size = 16;
+    size_t size = cls->instanceSize(extraBytes);
 
 #if SUPPORT_GC
     if (UseGC) {
@@ -1014,8 +973,8 @@ _class_createInstancesFromZone(Class cls, size_t extraBytes, void *zone,
     bool ctor = cls->hasCxxCtor();
     for (i = 0; i < num_allocated; i++) {
         id obj = results[i];
-        if (ctor) obj = _objc_constructOrFree(cls, obj);
-        else if (obj) obj->initIsa(cls);
+        obj->initIsa(cls);    // fixme allow indexed
+        if (ctor) obj = _objc_constructOrFree(obj, cls);
 
         if (obj) {
             results[i-shift] = obj;
@@ -1035,17 +994,18 @@ void
 inform_duplicate(const char *name, Class oldCls, Class cls)
 {
 #if TARGET_OS_WIN32
-    _objc_inform ("Class %s is implemented in two different images.", name);
+    (DebugDuplicateClasses ? _objc_fatal : _objc_inform)
+        ("Class %s is implemented in two different images.", name);
 #else
     const header_info *oldHeader = _headerForClass(oldCls);
     const header_info *newHeader = _headerForClass(cls);
     const char *oldName = oldHeader ? oldHeader->fname : "??";
     const char *newName = newHeader ? newHeader->fname : "??";
-        
-    _objc_inform ("Class %s is implemented in both %s and %s. "
-                  "One of the two will be used. "
-                  "Which one is undefined.",
-                  name, oldName, newName);
+
+    (DebugDuplicateClasses ? _objc_fatal : _objc_inform)
+        ("Class %s is implemented in both %s and %s. "
+         "One of the two will be used. Which one is undefined.",
+         name, oldName, newName);
 #endif
 }
 

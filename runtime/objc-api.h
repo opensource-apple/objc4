@@ -65,7 +65,11 @@
 /* OBJC_ISA_AVAILABILITY: `isa` will be deprecated or unavailable 
  * in the future */
 #if !defined(OBJC_ISA_AVAILABILITY)
-#   define OBJC_ISA_AVAILABILITY  /* still available */
+#   if __OBJC2__
+#       define OBJC_ISA_AVAILABILITY  __attribute__((deprecated))
+#   else
+#       define OBJC_ISA_AVAILABILITY  /* still available */
+#   endif
 #endif
 
 
@@ -90,6 +94,17 @@
 #   else
 #       define OBJC_ARC_UNAVAILABLE
 #   endif
+#endif
+
+#if !defined(OBJC_HIDE_64)
+/* OBJC_ARM64_UNAVAILABLE: unavailable on arm64 (i.e. stret dispatch) */
+#if !defined(OBJC_ARM64_UNAVAILABLE)
+#   if defined(__arm64__)
+#       define OBJC_ARM64_UNAVAILABLE __attribute__((unavailable("not available in arm64")))
+#   else
+#       define OBJC_ARM64_UNAVAILABLE 
+#   endif
+#endif
 #endif
 
 /* OBJC_GC_UNAVAILABLE: unavailable with -fobjc-gc or -fobjc-gc-only */

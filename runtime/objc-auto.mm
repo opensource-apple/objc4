@@ -816,8 +816,6 @@ void gc_unregister_datasegment(uintptr_t base, size_t size) {
     auto_zone_unregister_datasegment(gc_zone, (void*)base, size);
 }
 
-#define countof(array) (sizeof(array) / sizeof(array[0]))
-
 
 /***********************************************************************
 * Initialization
@@ -1129,7 +1127,7 @@ static malloc_zone_t *objc_debug_zone(void)
 {
     static malloc_zone_t *z = nil;
     if (!z) {
-        z = malloc_create_zone(PAGE_SIZE, 0);
+        z = malloc_create_zone(PAGE_MAX_SIZE, 0);
         malloc_set_zone_name(z, "objc-auto debug");
     }
     return z;

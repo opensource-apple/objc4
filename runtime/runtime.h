@@ -140,6 +140,18 @@ OBJC_EXPORT Class object_getClass(id obj)
 OBJC_EXPORT Class object_setClass(id obj, Class cls) 
      __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 
+
+/** 
+ * Returns whether an object is a class object.
+ * 
+ * @param obj An Objective-C object.
+ * 
+ * @return true if the object is a class or metaclass, false otherwise.
+ */
+OBJC_EXPORT BOOL object_isClass(id obj)
+    __OSX_AVAILABLE_STARTING(__MAC_10_10, __IPHONE_8_0);
+
+
 /** 
  * Returns the class name of a given object.
  * 
@@ -517,7 +529,8 @@ OBJC_EXPORT IMP class_getMethodImplementation(Class cls, SEL name)
  *  with an instance of the class, or \c NULL if \e cls is \c Nil.
  */
 OBJC_EXPORT IMP class_getMethodImplementation_stret(Class cls, SEL name) 
-     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
+     __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0)
+     OBJC_ARM64_UNAVAILABLE;
 
 /** 
  * Returns a Boolean value that indicates whether instances of a class respond to a particular selector.
@@ -796,8 +809,6 @@ OBJC_EXPORT id class_createInstance(Class cls, size_t extraBytes)
  * @return \e bytes on success, \c nil otherwise. (For example, \e cls or \e bytes
  *  might be \c nil)
  *
- * @note \c class_createInstance and \c class_createInstances preflight this.
- * 
  * @see class_createInstance
  */
 OBJC_EXPORT id objc_constructInstance(Class cls, void *bytes) 
@@ -1163,7 +1174,7 @@ OBJC_EXPORT const char *protocol_getName(Protocol *p)
  *  If the protocol does not contain the specified method, returns an \c objc_method_description structure
  *  with the value \c {NULL, \c NULL}.
  * 
- * @note Methods in other protocols adopted by this protocol are not included.
+ * @note This function recursively searches any protocols that this protocol conforms to.
  */
 OBJC_EXPORT struct objc_method_description protocol_getMethodDescription(Protocol *p, SEL aSel, BOOL isRequiredMethod, BOOL isInstanceMethod)
      __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);

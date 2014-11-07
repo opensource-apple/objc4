@@ -57,6 +57,10 @@ static spin_lock_t PropertyLocks[1 << GOODPOWER] = { 0 };
 #define MUTABLE_COPY 2
 
 id objc_getProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
+    if (offset == 0) {
+        return object_getClass(self);
+    }
+
     // Retain release world
     id *slot = (id*) ((char*)self + offset);
     if (!atomic) return *slot;
@@ -76,6 +80,11 @@ static inline void reallySetProperty(id self, SEL _cmd, id newValue, ptrdiff_t o
 
 static inline void reallySetProperty(id self, SEL _cmd, id newValue, ptrdiff_t offset, bool atomic, bool copy, bool mutableCopy)
 {
+    if (offset == 0) {
+        object_setClass(self, newValue);
+        return;
+    }
+
     id oldValue;
     id *slot = (id*) ((char*)self + offset);
 

@@ -243,7 +243,7 @@ void objc_dump_class_hash(void)
     count = 0;
     state = NXInitHashState (table);
     while (NXNextHashState (table, &state, (void **) &data))
-        printf ("class %d: %s\n", ++count, data->getName());
+        printf ("class %d: %s\n", ++count, data->nameForLogging());
 }
 
 
@@ -408,7 +408,7 @@ static uintptr_t classHash(void *info, Class data)
         return 0;
 
     // Call through to real hash function
-    return _objc_strhash (data->getName());
+    return _objc_strhash (data->mangledName());
 }
 
 /***********************************************************************
@@ -419,7 +419,7 @@ static uintptr_t classHash(void *info, Class data)
 static int classIsEqual(void *info, Class name, Class cls)
 {
     // Standard string comparison
-    return strcmp(name->getName(), cls->getName()) == 0;
+    return strcmp(name->mangledName(), cls->mangledName()) == 0;
 }
 
 
@@ -529,6 +529,35 @@ Class _objc_allocateFutureClass(const char *name)
     cls = _calloc_class(sizeof(objc_class));
     makeFutureClass(cls, name);
     return cls;
+}
+
+
+/***********************************************************************
+* objc_getFutureClass.  Return the id of the named class.
+* If the class does not exist, return an uninitialized class 
+* structure that will be used for the class when and if it 
+* does get loaded.
+* Not thread safe. 
+**********************************************************************/
+Class objc_getFutureClass(const char *name)
+{
+    Class cls;
+
+    // YES unconnected, NO class handler
+    // (unconnected is OK because it will someday be the real class)
+    cls = look_up_class(name, YES, NO);
+    if (cls) {
+        if (PrintFuture) {
+            _objc_inform("FUTURE: found %p already in use for %s", 
+                         (void*)cls, name);
+        }
+        return cls;
+    }
+    
+    // No class or future class with that name yet. Make one.
+    // fixme not thread-safe with respect to 
+    // simultaneous library load or getFutureClass.
+    return _objc_allocateFutureClass(name);
 }
 
 
@@ -2111,7 +2140,7 @@ static BOOL versionIsExt(uintptr_t version, const char *names, size_t size)
     //   the only version number used on Mac OS X was 2.
     // gcc (10.5 and later) uses isa field for ext pointer
 
-    if (version < PAGE_SIZE) {
+    if (version < 4096 /* not PAGE_SIZE */) {
         return NO;
     }
 

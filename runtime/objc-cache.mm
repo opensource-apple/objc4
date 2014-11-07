@@ -62,7 +62,6 @@
  * Cache readers (PC-checked by collecting_in_critical())
  * objc_msgSend*
  * cache_getImp
- * cache_getMethod
  *
  * Cache writers (hold cacheUpdateLock while reading or writing; not PC-checked)
  * cache_fill         (acquires lock)
@@ -79,16 +78,6 @@
  * _class_printDuplicateCacheEntries
  * _class_printMethodCacheStatistics
  *
- * _class_lookupMethodAndLoadCache is a special case. It may read a 
- * method triplet out of one cache and store it in another cache. This 
- * is unsafe if the method triplet is a forward:: entry, because the 
- * triplet itself could be freed unless _class_lookupMethodAndLoadCache 
- * were PC-checked or used a lock. Additionally, storing the method 
- * triplet in both caches would result in double-freeing if both caches 
- * were flushed or expanded. The solution is for cache_getMethod to 
- * ignore all entries whose implementation is _objc_msgForward_impcache, 
- * so _class_lookupMethodAndLoadCache cannot look at a forward:: entry
- * unsafely or place it in multiple caches.
  ***********************************************************************/
 
 
@@ -149,7 +138,7 @@ asm("\n .section __TEXT,__const"
     );
 
 
-#if __i386__  ||  __arm__
+#if __arm__
 // objc_msgSend has few registers available.
 // Cache scan increments and wraps at special end-marking bucket.
 #define CACHE_END_MARKER 1
@@ -157,7 +146,7 @@ static inline mask_t cache_next(mask_t i, mask_t mask) {
     return (i+1) & mask;
 }
 
-#elif __x86_64__
+#elif __i386__  ||  __x86_64__  ||  __arm64__
 // objc_msgSend has lots of registers and/or memory operands available.
 // Cache scan decrements. No end marker needed.
 #define CACHE_END_MARKER 0
@@ -185,34 +174,62 @@ static inline mask_t cache_next(mask_t i, mask_t mask) {
         "cpuid" \
         : "=a" (_clbr) : "0" (0) : "rbx", "rcx", "rdx", "cc", "memory" \
                                                     ); } while(0)
+
 #elif __i386__
 #define mega_barrier() \
     do { unsigned long _clbr; __asm__ __volatile__( \
         "cpuid" \
         : "=a" (_clbr) : "0" (0) : "ebx", "ecx", "edx", "cc", "memory" \
                                                     ); } while(0)
+
 #elif __arm__
 #define mega_barrier() \
     __asm__ __volatile__( \
         "dsb    ish" \
         : : : "memory")
+
+#elif __arm64__
+// Use atomic double-word updates instead.
+// This requires cache buckets not cross cache line boundaries.
+#undef mega_barrier
+#define stp(onep, twop, destp)                  \
+    __asm__ ("stp %[one], %[two], [%[dest]]"    \
+             : "=m" (((uint64_t *)(destp))[0]), \
+               "=m" (((uint64_t *)(destp))[1])  \
+             : [one] "r" (onep),                \
+               [two] "r" (twop),                \
+               [dest] "r" (destp)               \
+             : /* no clobbers */                \
+             )
+#define ldp(onep, twop, srcp)                   \
+    __asm__ ("ldp %[one], %[two], [%[src]]"     \
+             : [one] "=r" (onep),               \
+               [two] "=r" (twop),               \
+             : "m" (((uint64_t *)(srcp))[0]),   \
+               "m" (((uint64_t *)(srcp))[1])    \
+               [src] "r" (srcp)                 \
+             : /* no clobbers */                \
+             )
+
 #else
 #error unknown architecture
 #endif
 
 
+// Class points to cache. SEL is key. Cache buckets store SEL+IMP.
+// Caches are never built in the dyld shared cache.
+
 static inline mask_t cache_hash(cache_key_t key, mask_t mask) 
 {
-    return (mask_t)((key >> MASK_SHIFT) & mask);
+    return (mask_t)(key & mask);
 }
 
-
-// Class points to cache. Cache buckets store SEL+IMP.
 cache_t *getCache(Class cls, SEL sel __unused) 
 {
     assert(cls);
     return &cls->cache;
 }
+
 cache_key_t getKey(Class cls __unused, SEL sel) 
 {
     assert(sel);
@@ -220,28 +237,163 @@ cache_key_t getKey(Class cls __unused, SEL sel)
 }
 
 
-struct bucket_t {
-    cache_key_t key;
-    IMP imp;
 
-    void set(cache_key_t newKey, IMP newImp)
-    {
-        // objc_msgSend uses key and imp with no locks.
-        // It is safe for objc_msgSend to see new imp but NULL key
-        // (It will get a cache miss but not dispatch to the wrong place.)
-        // It is unsafe for objc_msgSend to see old imp and new key.
-        // Therefore we write new imp, wait a lot, then write new key.
+#if __arm64__
 
-        assert(key == 0  ||  key == newKey);
-        
-        imp = newImp;
+void bucket_t::set(cache_key_t newKey, IMP newImp)
+{
+    assert(_key == 0  ||  _key == newKey);
 
-        if (key != newKey) {
-            mega_barrier();
-            key = newKey;
-        }
+    // LDP/STP guarantees that all observers get 
+    // either key/imp or newKey/newImp
+    stp(newKey, newImp, this);
+}
+
+void cache_t::setBucketsAndMask(struct bucket_t *newBuckets, mask_t newMask)
+{
+    // ensure other threads see buckets contents before buckets pointer
+    // see Barrier Litmus Tests and Cookbook, 
+    // "Address Dependency with object construction"
+    __sync_synchronize();
+
+    // LDP/STP guarantees that all observers get 
+    // old mask/buckets or new mask/buckets
+
+    mask_t newOccupied = 0;
+    uint64_t mask_and_occupied =
+        (uint64_t)newMask | ((uint64_t)newOccupied << 32);
+    stp(newBuckets, mask_and_occupied, this);
+}
+
+// arm64
+#else
+// not arm64
+
+void bucket_t::set(cache_key_t newKey, IMP newImp)
+{
+    assert(_key == 0  ||  _key == newKey);
+
+    // objc_msgSend uses key and imp with no locks.
+    // It is safe for objc_msgSend to see new imp but NULL key
+    // (It will get a cache miss but not dispatch to the wrong place.)
+    // It is unsafe for objc_msgSend to see old imp and new key.
+    // Therefore we write new imp, wait a lot, then write new key.
+    
+    _imp = newImp;
+    
+    if (_key != newKey) {
+        mega_barrier();
+        _key = newKey;
     }
-};
+}
+
+void cache_t::setBucketsAndMask(struct bucket_t *newBuckets, mask_t newMask)
+{
+    // objc_msgSend uses mask and buckets with no locks.
+    // It is safe for objc_msgSend to see new buckets but old mask.
+    // (It will get a cache miss but not overrun the buckets' bounds).
+    // It is unsafe for objc_msgSend to see old buckets and new mask.
+    // Therefore we write new buckets, wait a lot, then write new mask.
+    // objc_msgSend reads mask first, then buckets.
+
+    // ensure other threads see buckets contents before buckets pointer
+    mega_barrier();
+
+    _buckets = newBuckets;
+    
+    // ensure other threads see new buckets before new mask
+    mega_barrier();
+    
+    _mask = newMask;
+    _occupied = 0;
+}
+
+// not arm64
+#endif
+
+struct bucket_t *cache_t::buckets() 
+{
+    return _buckets; 
+}
+
+mask_t cache_t::mask() 
+{
+    return _mask; 
+}
+
+mask_t cache_t::occupied() 
+{
+    return _occupied;
+}
+
+void cache_t::incrementOccupied() 
+{
+    _occupied++;
+}
+
+void cache_t::setEmpty()
+{
+    bzero(this, sizeof(*this));
+    _buckets = (bucket_t *)&_objc_empty_cache;
+}
+
+
+mask_t cache_t::capacity() 
+{
+    return mask() ? mask()+1 : 0; 
+}
+
+
+#if CACHE_END_MARKER
+
+size_t cache_t::bytesForCapacity(uint32_t cap) 
+{
+    // fixme put end marker inline when capacity+1 malloc is inefficient
+    return sizeof(cache_t) * (cap + 1);
+}
+
+bucket_t *cache_t::endMarker(struct bucket_t *b, uint32_t cap) 
+{
+    // bytesForCapacity() chooses whether the end marker is inline or not
+    return (bucket_t *)((uintptr_t)b + bytesForCapacity(cap)) - 1;
+}
+
+bucket_t *allocateBuckets(mask_t newCapacity)
+{
+    // Allocate one extra bucket to mark the end of the list.
+    // This can't overflow mask_t because newCapacity is a power of 2.
+    // fixme instead put the end mark inline when +1 is malloc-inefficient
+    bucket_t *newBuckets = (bucket_t *)
+        _calloc_internal(cache_t::bytesForCapacity(newCapacity), 1);
+
+    bucket_t *end = cache_t::endMarker(newBuckets, newCapacity);
+
+#if __arm__
+    // End marker's key is 1 and imp points BEFORE the first bucket.
+    // This saves an instruction in objc_msgSend.
+    end->setKey((cache_key_t)(uintptr_t)1);
+    end->setImp((IMP)(newBuckets - 1));
+#else
+#   error unknown architecture
+#endif
+    
+    return newBuckets;
+}
+
+#else
+
+bucket_t *allocateBuckets(mask_t newCapacity)
+{
+    return (bucket_t *)_calloc_internal(newCapacity, sizeof(bucket_t));
+}
+
+#endif
+
+
+bool cache_t::canBeFreed()
+{
+    return buckets() != (bucket_t *)&_objc_empty_cache;
+}
 
 
 void cache_t::reallocate(mask_t oldCapacity, mask_t newCapacity)
@@ -260,51 +412,22 @@ void cache_t::reallocate(mask_t oldCapacity, mask_t newCapacity)
             }
         }
     }
-    
-    // objc_msgSend uses shiftmask and buckets with no locks.
-    // It is safe for objc_msgSend to see new buckets but old shiftmask.
-    // (It will get a cache miss but not overrun the buckets' bounds).
-    // It is unsafe for objc_msgSend to see old buckets and new shiftmask.
-    // Therefore we write new buckets, wait a lot, then write new shiftmask.
-    // objc_msgSend reads shiftmask first, then buckets.
 
-    bucket_t *oldBuckets = buckets;
-    
-#if CACHE_END_MARKER
-    // Allocate one extra bucket to mark the end of the list.
-    // fixme instead put the end mark inline when +1 is malloc-inefficient
-    bucket_t *newBuckets = 
-        (bucket_t *)_calloc_internal(newCapacity + 1, sizeof(bucket_t));
-    
-    // End marker's key is 1 and imp points to the first bucket.
-    newBuckets[newCapacity].key = (cache_key_t)(uintptr_t)1;
-# if __arm__
-    // Point before the first bucket instead to save an instruction in msgSend
-    newBuckets[newCapacity].imp = (IMP)(newBuckets - 1);
-# else
-    newBuckets[newCapacity].imp = (IMP)newBuckets;
-# endif
-#else
-    bucket_t *newBuckets = 
-        (bucket_t *)_calloc_internal(newCapacity, sizeof(bucket_t));
-#endif
-    
+    bool freeOld = canBeFreed();
+
+    bucket_t *oldBuckets = buckets();
+    bucket_t *newBuckets = allocateBuckets(newCapacity);
+
     // Cache's old contents are not propagated. 
     // This is thought to save cache memory at the cost of extra cache fills.
     // fixme re-measure this
+
+    assert(newCapacity > 0);
+    assert((uintptr_t)(mask_t)(newCapacity-1) == newCapacity-1);
+
+    setBucketsAndMask(newBuckets, newCapacity - 1);
     
-    // ensure other threads see buckets contents before buckets pointer
-    mega_barrier();
-    
-    buckets = newBuckets;
-    
-    // ensure other threads see new buckets before new shiftmask
-    mega_barrier();
-    
-    setCapacity(newCapacity);
-    occupied = 0;
-    
-    if (oldCapacity > 0) {
+    if (freeOld) {
         cache_collect_free(oldBuckets, oldCapacity * sizeof(bucket_t));
         cache_collect(false);
     }
@@ -313,20 +436,18 @@ void cache_t::reallocate(mask_t oldCapacity, mask_t newCapacity)
 
 // called by objc_msgSend
 extern "C" 
-void objc_msgSend_corrupt_cache_error(id receiver, SEL sel, Class isa, 
-                                      bucket_t *bucket)
+void objc_msgSend_corrupt_cache_error(id receiver, SEL sel, Class isa)
 {
-    cache_t::bad_cache(receiver, sel, isa, bucket);
+    cache_t::bad_cache(receiver, sel, isa);
 }
 
 extern "C" 
-void cache_getImp_corrupt_cache_error(id receiver, SEL sel, Class isa, 
-                                      bucket_t *bucket)
+void cache_getImp_corrupt_cache_error(id receiver, SEL sel, Class isa)
 {
-    cache_t::bad_cache(receiver, sel, isa, bucket);
+    cache_t::bad_cache(receiver, sel, isa);
 }
 
-void cache_t::bad_cache(id receiver, SEL sel, Class isa, bucket_t *bucket)
+void cache_t::bad_cache(id receiver, SEL sel, Class isa)
 {
     // Log in separate steps in case the logging itself causes a crash.
     _objc_inform_now_and_on_crash
@@ -335,18 +456,18 @@ void cache_t::bad_cache(id receiver, SEL sel, Class isa, bucket_t *bucket)
     cache_t *cache = &isa->cache;
     _objc_inform_now_and_on_crash
         ("%s %p, SEL %p, isa %p, cache %p, buckets %p, "
-         "mask 0x%x, occupied 0x%x, wrap bucket %p", 
+         "mask 0x%x, occupied 0x%x", 
          receiver ? "receiver" : "unused", receiver, 
-         sel, isa, cache, cache->buckets, 
-         cache->shiftmask >> MASK_SHIFT, cache->occupied, bucket);
+         sel, isa, cache, cache->_buckets, 
+         cache->_mask, cache->_occupied);
     _objc_inform_now_and_on_crash
         ("%s %zu bytes, buckets %zu bytes", 
          receiver ? "receiver" : "unused", malloc_size(receiver), 
-         malloc_size(cache->buckets));
+         malloc_size(cache->_buckets));
     _objc_inform_now_and_on_crash
         ("selector '%s'", sel_getName(sel));
     _objc_inform_now_and_on_crash
-        ("isa '%s'", isa->getName());
+        ("isa '%s'", isa->nameForLogging());
     _objc_fatal
         ("Method cache corrupted.");
 }
@@ -354,18 +475,21 @@ void cache_t::bad_cache(id receiver, SEL sel, Class isa, bucket_t *bucket)
 
 bucket_t * cache_t::find(cache_key_t k)
 {
+    assert(k != 0);
+
+    bucket_t *b = buckets();
     mask_t m = mask();
     mask_t begin = cache_hash(k, m);
     mask_t i = begin;
     do {
-        if (buckets[i].key == 0  ||  buckets[i].key == k) {
-            return &buckets[i];
+        if (b[i].key() == 0  ||  b[i].key() == k) {
+            return &b[i];
         }
     } while ((i = cache_next(i, m)) != begin);
 
     // hack
     Class cls = (Class)((uintptr_t)this - offsetof(objc_class, cache));
-    cache_t::bad_cache(nil, (SEL)k, cls, nil);
+    cache_t::bad_cache(nil, (SEL)k, cls);
 }
 
 
@@ -373,11 +497,12 @@ void cache_t::expand()
 {
     mutex_assert_locked(&cacheUpdateLock);
     
-    mask_t oldCapacity = capacity();
-    mask_t newCapacity = oldCapacity ? oldCapacity*2 : INIT_CACHE_SIZE;
+    uint32_t oldCapacity = capacity();
+    uint32_t newCapacity = oldCapacity ? oldCapacity*2 : INIT_CACHE_SIZE;
 
-    if ((((newCapacity-1) << MASK_SHIFT) >> MASK_SHIFT) != newCapacity-1) {
-        // shiftmask overflow - can't grow further
+    if ((uint32_t)(mask_t)newCapacity != newCapacity) {
+        // mask overflow - can't grow further
+        // fixme this wastes one bit of mask
         newCapacity = oldCapacity;
     }
 
@@ -400,7 +525,7 @@ static void cache_fill_nolock(Class cls, SEL sel, IMP imp)
     cache_key_t key = getKey(cls, sel);
 
     // Use the cache as-is if it is less than 3/4 full
-    mask_t newOccupied = cache->occupied + 1;
+    mask_t newOccupied = cache->occupied() + 1;
     if ((newOccupied * 4) <= (cache->mask() + 1) * 3) {
         // Cache is less than 3/4 full.
     } else {
@@ -412,7 +537,7 @@ static void cache_fill_nolock(Class cls, SEL sel, IMP imp)
     // There is guaranteed to be an empty slot because the 
     // minimum size is 4 and we resized at 3/4 full.
     bucket_t *bucket = cache->find(key);
-    if (bucket->key == 0) cache->occupied++;
+    if (bucket->key() == 0) cache->incrementOccupied();
     bucket->set(key, imp);
 }
 
@@ -438,8 +563,8 @@ static void cache_eraseMethod_nolock(Class cls, SEL sel)
     cache_key_t key = getKey(cls, sel);
 
     bucket_t *bucket = cache->find(key);
-    if (bucket->key == key) {
-        bucket->imp = _objc_msgSend_uncached_impcache;
+    if (bucket->key() == key) {
+        bucket->setImp(_objc_msgSend_uncached_impcache);
     }
 }
 
@@ -450,7 +575,7 @@ void cache_eraseMethods(Class cls, method_list_t *mlist)
     rwlock_assert_writing(&runtimeLock);
     mutex_lock(&cacheUpdateLock);
 
-    FOREACH_REALIZED_CLASS_AND_SUBCLASS(c, cls, {
+    foreach_realized_class_and_subclass(cls, ^(Class c){
         for (uint32_t m = 0; m < mlist->count; m++) {
             SEL sel = mlist->get(m).name;
             cache_eraseMethod_nolock(c, sel);
@@ -468,11 +593,11 @@ void cache_eraseImp_nolock(Class cls, SEL sel, IMP imp)
 
     cache_t *cache = getCache(cls, sel);
 
-    bucket_t *buckets = cache->buckets;
+    bucket_t *b = cache->buckets();
     mask_t count = cache->capacity();
     for (mask_t i = 0; i < count; i++) {
-        if (buckets[i].imp == imp) {
-            buckets[i].imp = _objc_msgSend_uncached_impcache;
+        if (b[i].imp() == imp) {
+            b[i].setImp(_objc_msgSend_uncached_impcache);
         }
     }
 }
@@ -493,7 +618,7 @@ void cache_erase_nolock(cache_t *cache)
     mutex_assert_locked(&cacheUpdateLock);
 
     mask_t capacity = cache->capacity();
-    if (capacity > 0  &&  cache->occupied > 0) {
+    if (capacity > 0  &&  cache->occupied() > 0) {
         cache->reallocate(capacity, capacity);
     }
 }
@@ -530,6 +655,13 @@ static uintptr_t _get_pc_for_thread(thread_t thread)
     arm_thread_state_t state;
     unsigned int count = ARM_THREAD_STATE_COUNT;
     kern_return_t okay = thread_get_state (thread, ARM_THREAD_STATE, (thread_state_t)&state, &count);
+    return (okay == KERN_SUCCESS) ? state.__pc : PC_SENTINEL;
+}
+#elif defined(__arm64__)
+{
+    arm_thread_state64_t state;
+    unsigned int count = ARM_THREAD_STATE64_COUNT;
+    kern_return_t okay = thread_get_state (thread, ARM_THREAD_STATE64, (thread_state_t)&state, &count);
     return (okay == KERN_SUCCESS) ? state.__pc : PC_SENTINEL;
 }
 #else

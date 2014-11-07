@@ -21,7 +21,8 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#ifdef __x86_64__
+#include <TargetConditionals.h>
+#if __x86_64__  &&  !TARGET_IPHONE_SIMULATOR
 
 /********************************************************************
  ********************************************************************
@@ -37,12 +38,6 @@
 ********************************************************************/
 
 .data
-// Substitute receiver for messages sent to nil (usually also nil)
-// id _objc_nilReceiver
-.align 4
-.private_extern __objc_nilReceiver
-__objc_nilReceiver:
-	.quad   0
 
 // _objc_entryPoints and _objc_exitPoints are used by objc
 // to get the critical regions for which method caches 
@@ -176,14 +171,11 @@ _gdb_objc_messenger_breakpoints:
 /********************************************************************
  * Names for relative labels
  * DO NOT USE THESE LABELS ELSEWHERE
- * Reserved labels: 5: 6: 7: 8: 9:
+ * Reserved labels: 6: 7: 8: 9:
  ********************************************************************/
-#define LCacheMiss 	5
-#define LCacheMiss_f 	5f
-#define LCacheMiss_b 	5b
-#define LNilTestDone 	6
-#define LNilTestDone_f 	6f
-#define LNilTestDone_b 	6b
+#define LCacheMiss 	6
+#define LCacheMiss_f 	6f
+#define LCacheMiss_b 	6b
 #define LNilTestSlow 	7
 #define LNilTestSlow_f 	7f
 #define LNilTestSlow_b 	7b
@@ -252,6 +244,7 @@ _gdb_objc_messenger_breakpoints:
 	.globl	$0
 	.align	6, 0x90
 $0:
+	.cfi_startproc
 .endmacro
 
 .macro STATIC_ENTRY
@@ -259,6 +252,7 @@ $0:
 	.private_extern	$0
 	.align	2, 0x90
 $0:
+	.cfi_startproc
 .endmacro
 
 //////////////////////////////////////////////////////////////////////
@@ -272,170 +266,19 @@ $0:
 //////////////////////////////////////////////////////////////////////
 
 .macro END_ENTRY
-LExit$0:	
-.endmacro
-
-
-/* DWARF support
-   These macros work for objc_msgSend variants and others that call
-   CacheLookup/MethodTableLookup or SaveRegisters/RestoreRegisters
-   without otherwise building a frame or clobbering callee-save registers
-
-   The macros build appropriate FDEs and tie them to the CIE.
-*/
-
-#define DW_CFA_offset 0x80
-#define DW_CFA_restore 0xc0
-#define DW_CFA_advance_loc4 0x4
-#define DW_CFA_same_value 0x8
-#define DW_CFA_def_cfa 0xc
-#define DW_CFA_def_cfa_register 0xd
-#define DW_CFA_def_cfa_offset 0xe
-#define DW_CFA_offset_extended_sf 0x11
-#define DW_CFA_def_cfa_offset_sf 0x13
-#define DW_rax 0
-#define DW_rdx 1
-#define DW_rcx 2
-#define DW_rsi 4
-#define DW_rdi 5
-#define DW_rbp 6
-#define DW_rsp 7
-#define DW_r8  8
-#define DW_r9  9
-#define DW_r10 10
-#define DW_ra 16
-#define DW_xmm0 17
-#define DW_xmm1 18
-#define DW_xmm2 19
-#define DW_xmm3 20
-#define DW_xmm4 21
-#define DW_xmm5 22
-#define DW_xmm6 23
-#define DW_xmm7 24
-#define DW_a1  DW_rdi
-#define DW_a2  DW_rsi
-#define DW_a3  DW_rdx
-#define DW_a4  DW_rcx
-#define DW_a5  DW_r8
-#define DW_a6  DW_r9
-
-// CIE
-// 8-byte data multiplier
-// 1-byte insn multiplier
-// PC-relative everything
-// No prologue
-	
-	.section __TEXT,__eh_frame,coalesced,no_toc+strip_static_syms+live_support
-CIE:
-	.set	L$set$0,LECIE1-LSCIE1
-	.long	L$set$0	# Length of Common Information Entry
-LSCIE1:
-	.long	0	# CIE Identifier Tag
-	.byte	0x3	# CIE Version
-	.ascii	"zPR\0"	# CIE Augmentation: size + personality + FDE encoding
-	.byte	0x1	# uleb128 0x1; CIE Code Alignment Factor
-	.byte	0x78	# sleb128 -0x8; CIE Data Alignment Factor
-	.byte	0x10	# CIE RA Column
-	.byte	0x6	# uleb128 0x1; Augmentation size
-	// Personality augmentation
-	.byte	0x9b
-	.long	___objc_personality_v0+4@GOTPCREL
-	// FDE-encoding augmentation
-	.byte	0x10
-	// Prefix instructions
-	// CFA is %rsp+8
-	.byte	DW_CFA_def_cfa
-	.byte	DW_rsp
-	.byte	8
-	// RA is at 0(%rsp) aka 1*-8(CFA)
-	.byte	DW_CFA_offset | DW_ra
-	.byte	1
-	
-	.align 3
-LECIE1:
-
-
-.macro EMIT_FDE
-
-	.section __TEXT,__eh_frame,coalesced,no_toc+strip_static_syms+live_support
-	
-// FDE header
-.globl $0.eh
-$0.eh:
-LSFDE$0:
-	.set 	LLENFDE$0, LEFDE$0-LASFDE$0
-	.long 	LLENFDE$0		# FDE Length
-LASFDE$0:
-	.long 	LASFDE$0-CIE		# FDE CIE offset
-	.quad	L_dw_start_$0-.		# FDE address start
-	.quad	L_dw_len_$0		# FDE address range
-	.byte	0x0			# uleb128 0x0; Augmentation size
-
-	// DW_START: set by CIE
-
-.if $1 == 1
-	// Save/RestoreRegisters or MethodTableLookup
-
-	// enter
-	.byte 	DW_CFA_advance_loc4
-	.long	L_dw_enter_$0 - L_dw_start_$0
-	.byte   DW_CFA_def_cfa_offset
-	.byte   16
-	.byte	DW_CFA_offset | DW_rbp	// rbp => 2*-8(CFA)
-	.byte	2
-	.byte	DW_CFA_def_cfa_register	// CFA = rbp+16 (offset unchanged)
-	.byte	DW_rbp
-	
-	// leave
-	.byte 	DW_CFA_advance_loc4
-	.long	L_dw_leave_$0 - L_dw_enter_$0
-
-	.byte 	DW_CFA_same_value	// rbp = original value
-	.byte	DW_rbp
-	.byte	DW_CFA_def_cfa		// CFA = rsp+8
-	.byte	DW_rsp
-	.byte	8
-
-.endif
-
-	.align 3
-LEFDE$0:
-	.text
-	
-.endmacro
-
-
-// Start of function
-.macro DW_START
-L_dw_start_$0:
-.endmacro
-	
-// After `enter` in SaveRegisters
-.macro DW_ENTER
-L_dw_enter_$0:	
-.endmacro
-
-// After `leave` in RestoreRegisters
-.macro DW_LEAVE
-L_dw_leave_$0:
-.endmacro
-	
-// End of function
-// $1 == 1 iff you called MethodTableLookup or Save/RestoreRegsters
-.macro DW_END
-	.set 	L_dw_len_$0, . - L_dw_start_$0
-	EMIT_FDE $0, $1
+	.cfi_endproc
+LExit$0:
 .endmacro
 
 
 /////////////////////////////////////////////////////////////////////
 //
-// SaveRegisters caller
+// SaveRegisters
 //
 // Pushes a stack frame and saves all registers that might contain
 // parameter values.
 //
-// On entry:	%0 = caller's symbol name for DWARF
+// On entry:
 //		stack = ret
 //
 // On exit: 
@@ -444,10 +287,15 @@ L_dw_leave_$0:
 /////////////////////////////////////////////////////////////////////
 
 .macro SaveRegisters
-	// These instructions must match the DWARF data in EMIT_FDE.
+
+	push	%rbp
+	.cfi_def_cfa_offset 16
+	.cfi_offset rbp, -16
 	
-	enter	$$0x80+8, $$0		// +8 for alignment
-	DW_ENTER $0
+	mov	%rsp, %rbp
+	.cfi_def_cfa_register rbp
+	
+	sub	$$0x80+8, %rsp		// +8 for alignment
 
 	movdqa	%xmm0, -0x80(%rbp)
 	push	%rax			// might be xmm parameter count
@@ -465,7 +313,6 @@ L_dw_leave_$0:
 	push	%a6
 	movdqa	%xmm7, -0x10(%rbp)
 	
-	// These instructions must match the DWARF data in EMIT_FDE.
 .endmacro
 
 /////////////////////////////////////////////////////////////////////
@@ -474,7 +321,7 @@ L_dw_leave_$0:
 //
 // Pops a stack frame pushed by SaveRegisters
 //
-// On entry:	$0 = caller's symbol name for DWARF
+// On entry:
 //		%rbp unchanged since SaveRegisters
 //
 // On exit: 
@@ -483,7 +330,6 @@ L_dw_leave_$0:
 /////////////////////////////////////////////////////////////////////
 
 .macro RestoreRegisters
-	// These instructions must match the DWARF data in EMIT_FDE.
 
 	movdqa	-0x80(%rbp), %xmm0
 	pop	%a6
@@ -502,9 +348,9 @@ L_dw_leave_$0:
 	movdqa	-0x10(%rbp), %xmm7
 	
 	leave
-	DW_LEAVE $0
+	.cfi_def_cfa rsp, 8
+	.cfi_same_value rbp
 
-	// These instructions must match the DWARF data in EMIT_FDE.
 .endmacro
 
 
@@ -578,7 +424,7 @@ L_dw_leave_$0:
 	
 .endmacro
 
-	
+
 .macro	CacheLookup
 .if $0 != STRET  &&  $0 != SUPER_STRET  &&  $0 != SUPER2_STRET
 	movq	%a2, %r10		// r10 = _cmd
@@ -606,6 +452,7 @@ L_dw_leave_$0:
 	je	3f			// if (bucket == cache->buckets) wrap
 
 	subq	$$16, %r10		// bucket--
+2:	
 .if $0 != STRET  &&  $0 != SUPER_STRET  &&  $0 != SUPER2_STRET
 	cmpq	(%r10), %a2		// if (bucket->sel != _cmd)
 .else
@@ -653,22 +500,21 @@ L_dw_leave_$0:
 				// a1 = receiver
 				// a2 = SEL
 	movq	%r11, %a3	// a3 = isa
-	movq	%r10, %a4	// a4 = bucket
 .if $0 == GETIMP
 	jmp	_cache_getImp_corrupt_cache_error
 .else
 	jmp	_objc_msgSend_corrupt_cache_error
 .endif
+
 .endmacro
 
 
 /////////////////////////////////////////////////////////////////////
 //
-// MethodTableLookup classRegister, selectorRegister, caller
+// MethodTableLookup classRegister, selectorRegister
 //
 // Takes:	$0 = class to search (a1 or a2 or r10 ONLY)
 //		$1 = selector to search for (a2 or a3 ONLY)
-//		$2 = caller's symbol name for DWARF
 // 		r11 = class to search
 //
 // On exit: imp in %r11
@@ -678,7 +524,7 @@ L_dw_leave_$0:
 
 	MESSENGER_END_SLOW
 	
-	SaveRegisters $2
+	SaveRegisters
 
 	// _class_lookupMethodAndLoadCache3(receiver, selector, class)
 
@@ -690,7 +536,7 @@ L_dw_leave_$0:
 	// IMP is now in %rax
 	movq	%rax, %r11
 
-	RestoreRegisters $2
+	RestoreRegisters
 
 .endmacro
 
@@ -714,12 +560,14 @@ L_dw_leave_$0:
 	testb	$$1, %a1b
 	PN
 	jnz	LGetIsaSlow_f
-	movq	(%a1), %r11
+	movq	$$0x00007ffffffffff8, %r11
+	andq	(%a1), %r11
 .else
 	testb	$$1, %a2b
 	PN
 	jnz	LGetIsaSlow_f
-	movq	(%a2), %r11
+	movq	$$0x00007ffffffffff8, %r11
+	andq	(%a2), %r11
 .endif
 LGetIsaDone:	
 .endmacro
@@ -779,21 +627,11 @@ LGetIsaDone:
 .endif
 	PN
 	jz	LNilTestSlow_f
-LNilTestDone:
 .endmacro
 
 .macro NilTestSupport
 	.align 3
 LNilTestSlow:
-.if $0 != STRET
-	movq	__objc_nilReceiver(%rip), %a1
-	testq	%a1, %a1	// if (receiver != nil)
-.else
-	movq	__objc_nilReceiver(%rip), %a2
-	testq	%a2, %a2	// if (receiver != nil)
-.endif
-	jne	LNilTestDone_b	//   send to new receiver
-
 .if $0 == FPRET
 	fldz
 .elseif $0 == FP2RET
@@ -824,7 +662,6 @@ LNilTestSlow:
  ********************************************************************/
 
 	STATIC_ENTRY _cache_getImp
-	DW_START _cache_getImp
 
 // do lookup
 	movq	%a1, %r11		// move class to r11 for CacheLookup
@@ -836,7 +673,6 @@ LCacheMiss:
 	ret
 
 LGetImpExit:
-	DW_END		_cache_getImp, 0
 	END_ENTRY 	_cache_getImp
 
 
@@ -853,7 +689,6 @@ _objc_debug_taggedpointer_classes:
 	.fill 16, 8, 0
 
 	ENTRY	_objc_msgSend
-	DW_START _objc_msgSend
 	MESSENGER_START
 
 	NilTest	NORMAL
@@ -868,11 +703,10 @@ _objc_debug_taggedpointer_classes:
 // cache miss: go search the method lists
 LCacheMiss:
 	// isa still in r11
-	MethodTableLookup %a1, %a2, _objc_msgSend	// r11 = IMP
+	MethodTableLookup %a1, %a2	// r11 = IMP
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSend, 1
 	END_ENTRY	_objc_msgSend
 
 	
@@ -899,7 +733,6 @@ LCacheMiss:
  ********************************************************************/
 	
 	ENTRY	_objc_msgSendSuper
-	DW_START _objc_msgSendSuper
 	MESSENGER_START
 	
 // search the cache (objc_super in %a1)
@@ -910,12 +743,11 @@ LCacheMiss:
 LCacheMiss:
 	// class still in r11
 	movq	receiver(%a1), %r10
-	MethodTableLookup %r10, %a2, _objc_msgSendSuper	// r11 = IMP
+	MethodTableLookup %r10, %a2	// r11 = IMP
 	movq	receiver(%a1), %a1	// load real receiver
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 	
-	DW_END 		_objc_msgSendSuper, 1
 	END_ENTRY	_objc_msgSendSuper
 
 
@@ -924,7 +756,6 @@ LCacheMiss:
  ********************************************************************/
 
 	ENTRY _objc_msgSendSuper2
-	DW_START _objc_msgSendSuper2
 	MESSENGER_START
 	
 	// objc_super->class is superclass of class to search
@@ -938,12 +769,11 @@ LCacheMiss:
 LCacheMiss:
 	// superclass still in r11
 	movq	receiver(%a1), %r10
-	MethodTableLookup %r10, %a2, _objc_msgSendSuper2	// r11 = IMP
+	MethodTableLookup %r10, %a2	// r11 = IMP
 	movq	receiver(%a1), %a1	// load real receiver
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 	
-	DW_END 		_objc_msgSendSuper2, 1
 	END_ENTRY	_objc_msgSendSuper2
 
 	
@@ -967,7 +797,6 @@ LCacheMiss:
  ********************************************************************/
 
 	ENTRY	_objc_msgSend_fpret
-	DW_START _objc_msgSend_fpret
 	MESSENGER_START
 	
 	NilTest	FPRET
@@ -982,11 +811,10 @@ LCacheMiss:
 // cache miss: go search the method lists
 LCacheMiss:
 	// isa still in r11
-	MethodTableLookup %a1, %a2, _objc_msgSend_fpret	// r11 = IMP
+	MethodTableLookup %a1, %a2	// r11 = IMP
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSend_fpret, 1
 	END_ENTRY	_objc_msgSend_fpret
 
 	
@@ -1010,7 +838,6 @@ LCacheMiss:
  ********************************************************************/
 
 	ENTRY	_objc_msgSend_fp2ret
-	DW_START _objc_msgSend_fp2ret
 	MESSENGER_START
 	
 	NilTest	FP2RET
@@ -1025,11 +852,10 @@ LCacheMiss:
 // cache miss: go search the method lists
 LCacheMiss:
 	// isa still in r11
-	MethodTableLookup %a1, %a2, _objc_msgSend_fp2ret	// r11 = IMP
+	MethodTableLookup %a1, %a2	// r11 = IMP
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSend_fp2ret, 1
 	END_ENTRY	_objc_msgSend_fp2ret
 
 
@@ -1059,7 +885,6 @@ LCacheMiss:
  ********************************************************************/
 
 	ENTRY	_objc_msgSend_stret
-	DW_START _objc_msgSend_stret
 	MESSENGER_START
 	
 	NilTest	STRET
@@ -1074,11 +899,10 @@ LCacheMiss:
 // cache miss: go search the method lists
 LCacheMiss:
 	// isa still in r11
-	MethodTableLookup %a2, %a3, _objc_msgSend_stret	// r11 = IMP
+	MethodTableLookup %a2, %a3	// r11 = IMP
 	test	%r11, %r11		// set ne (stret) for forward; r11!=0
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSend_stret, 1
 	END_ENTRY	_objc_msgSend_stret
 
 
@@ -1114,7 +938,6 @@ LCacheMiss:
  ********************************************************************/
 
 	ENTRY	_objc_msgSendSuper_stret
-	DW_START _objc_msgSendSuper_stret
 	MESSENGER_START
 	
 // search the cache (objc_super in %a2)
@@ -1125,12 +948,11 @@ LCacheMiss:
 LCacheMiss:
 	// class still in r11
 	movq	receiver(%a2), %r10
-	MethodTableLookup %r10, %a3, _objc_msgSendSuper_stret	// r11 = IMP
+	MethodTableLookup %r10, %a3	// r11 = IMP
 	movq	receiver(%a2), %a2	// load real receiver
 	test	%r11, %r11		// set ne (stret) for forward; r11!=0
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSendSuper_stret, 1
 	END_ENTRY	_objc_msgSendSuper_stret
 
 
@@ -1139,7 +961,6 @@ LCacheMiss:
  ********************************************************************/
 
 	ENTRY	_objc_msgSendSuper2_stret
-	DW_START _objc_msgSendSuper2_stret
 	MESSENGER_START
 	
 // search the cache (objc_super in %a2)
@@ -1151,12 +972,11 @@ LCacheMiss:
 LCacheMiss:
 	// superclass still in r11
 	movq	receiver(%a2), %r10
-	MethodTableLookup %r10, %a3, _objc_msgSendSuper2_stret	// r11 = IMP
+	MethodTableLookup %r10, %a3	// r11 = IMP
 	movq	receiver(%a2), %a2	// load real receiver
 	test	%r11, %r11		// set ne (stret) for forward; r11!=0
 	jmp	*%r11			// goto *imp
 
-	DW_END 		_objc_msgSendSuper2_stret, 1
 	END_ENTRY	_objc_msgSendSuper2_stret
 
 	
@@ -1201,61 +1021,40 @@ LCacheMiss:
 
 
 	STATIC_ENTRY __objc_msgSend_uncached
-	DW_START __objc_msgSend_uncached
 
 	// THIS IS NOT A CALLABLE C FUNCTION
 	// Out-of-band r11 is the searched class
 
 	// r11 is already the class to search
-	MethodTableLookup %a1, %a2, __objc_msgSend_uncached	// r11 = IMP
+	MethodTableLookup %a1, %a2	// r11 = IMP
 	cmp	%r11, %r11		// set eq (nonstret) for forwarding
 	jmp	*%r11			// goto *imp
 
-	DW_END __objc_msgSend_uncached, 1
 	END_ENTRY __objc_msgSend_uncached
 
 	
 	STATIC_ENTRY __objc_msgSend_stret_uncached
-	DW_START __objc_msgSend_stret_uncached
 	// THIS IS NOT A CALLABLE C FUNCTION
 	// Out-of-band r11 is the searched class
 
 	// r11 is already the class to search
-	MethodTableLookup %a2, %a3, __objc_msgSend_stret_uncached  // r11 = IMP
+	MethodTableLookup %a2, %a3	// r11 = IMP
 	test	%r11, %r11		// set ne (stret) for forward; r11!=0
 	jmp	*%r11			// goto *imp
 
-	DW_END __objc_msgSend_stret_uncached, 1
 	END_ENTRY __objc_msgSend_stret_uncached
 
 	
 /********************************************************************
- *
- * id _objc_msgForward(id self, SEL _cmd,...);
- *
- ********************************************************************/
-
-// _FwdSel is @selector(forward::), set up in map_images().
-// ALWAYS dereference _FwdSel to get to "forward::" !!
-	.data
-	.align 3
-	.private_extern _FwdSel
-_FwdSel: .quad 0
-
-	.cstring
-	.align 3
-LUnkSelStr: .ascii "Does not recognize selector %s (while forwarding %s)\0"
-
-	.data
-	.align 3
-	.private_extern __objc_forward_handler
-__objc_forward_handler:	.quad 0
-
-	.data
-	.align 3
-	.private_extern __objc_forward_stret_handler
-__objc_forward_stret_handler:	.quad 0
-
+*
+* id _objc_msgForward(id self, SEL _cmd,...);
+*
+* _objc_msgForward and _objc_msgForward_stret are the externally-callable
+*   functions returned by things like method_getImplementation().
+* _objc_msgForward_impcache is the function pointer actually stored in
+*   method caches.
+*
+********************************************************************/
 
 	STATIC_ENTRY	__objc_msgForward_impcache
 	// Method cache version
@@ -1276,152 +1075,17 @@ __objc_forward_stret_handler:	.quad 0
 	ENTRY	__objc_msgForward
 	// Non-stret version
 
-	// Call user handler, if any
 	movq	__objc_forward_handler(%rip), %r11
-	testq	%r11, %r11		// if (handler == NULL)
-	je	1f			//   skip handler
-	jmp	*%r11			// else goto handler
-1:	
-	// No user handler
-
-	// Die if forwarding "forward::"
-	cmpq	%a2, _FwdSel(%rip)
-	je	LMsgForwardError
-
-	// Record current return address. It will be copied elsewhere in 
-	// the marg_list because this location is needed for register args
-	movq	(%rsp), %r11
-
-	// Push stack frame
-	// Space for: fpArgs + regArgs + linkage - ret (already on stack)
-	subq	$ 8*16 + 6*8 + (4-1)*8, %rsp
-
-	// Save return address in linkage area.
-	movq	%r11, 16+LINK_AREA(%rsp)
-	
-	// Save parameter registers
-	movq	%a1,  0+REG_AREA(%rsp)
-	movq	%a2,  8+REG_AREA(%rsp)
-	movq	%a3, 16+REG_AREA(%rsp)
-	movq	%a4, 24+REG_AREA(%rsp)
-	movq	%a5, 32+REG_AREA(%rsp)
-	movq	%a6, 40+REG_AREA(%rsp)
-
-	// Save side parameter registers
-	// movq	%r10, 0+LINK_AREA(%rsp)	// static chain pointer == Pascal
-	movq	%rax, 8+LINK_AREA(%rsp)	// xmm count
-	// 16+LINK_AREA is return address
-
-	// Save xmm registers
-	movdqa	%xmm0, 0+FP_AREA(%rsp)
-	movdqa	%xmm1, 16+FP_AREA(%rsp)
-	movdqa	%xmm2, 32+FP_AREA(%rsp)
-	movdqa	%xmm3, 48+FP_AREA(%rsp)
-	movdqa	%xmm4, 64+FP_AREA(%rsp)
-	movdqa	%xmm5, 80+FP_AREA(%rsp)
-	movdqa	%xmm6, 96+FP_AREA(%rsp)
-	movdqa	%xmm7, 112+FP_AREA(%rsp)
-
-	// Call [receiver forward:sel :margs]
-	movq	%rsp, %a4		// marg_list
-	movq	%a2, %a3		// sel
-	movq	_FwdSel(%rip), %a2	// forward::
-	// %a1 is already the receiver
-
-	call	_objc_msgSend
-	
-	// Retrieve return address from linkage area
-	movq	16+LINK_AREA(%rsp), %r11
-	// Pop stack frame
-	addq	$ 8*16 + 6*8 + (4-1)*8, %rsp
-	// Put return address back
-	movq	%r11, (%rsp)
-	ret
-
-LMsgForwardError:
-	// Tail-call __objc_error(receiver, "unknown selector %s %s", "forward::", forwardedSel)
-	// %a1 is already the receiver
-	movq	%a3, %a4		// the forwarded selector
-	leaq	LUnkSelStr(%rip), %a2	// "unknown selector %s %s"
-	movq	_FwdSel(%rip), %a3	// forward::
-	jmp	___objc_error		// never returns
+	jmp	*%r11
 
 	END_ENTRY	__objc_msgForward
 
 
 	ENTRY	__objc_msgForward_stret
 	// Struct-return version
-	
-	// Call user handler, if any
+
 	movq	__objc_forward_stret_handler(%rip), %r11
-	testq	%r11, %r11		// if (handler == NULL)
-	je	1f			//   skip handler
-	jmp	*%r11			// else goto handler
-1:	
-	// No user handler
-	// Die if forwarding "forward::"
-	cmpq	%a3, _FwdSel(%rip)
-	je	LMsgForwardStretError
-
-	// Record current return address. It will be copied elsewhere in 
-	// the marg_list because this location is needed for register args
-	movq	(%rsp), %r11
-
-	// Push stack frame
-	// Space for: fpArgs + regArgs + linkage - ret (already on stack)
-	subq	$ 8*16 + 6*8 + (4-1)*8, %rsp
-
-	// Save return address in linkage area.
-	movq	%r11, 16+LINK_AREA(%rsp)
-	
-	// Save parameter registers
-	movq	%a1,  0+REG_AREA(%rsp)  // note: used again below
-	movq	%a2,  8+REG_AREA(%rsp)
-	movq	%a3, 16+REG_AREA(%rsp)
-	movq	%a4, 24+REG_AREA(%rsp)
-	movq	%a5, 32+REG_AREA(%rsp)
-	movq	%a6, 40+REG_AREA(%rsp)
-
-	// Save side parameter registers
-	// movq	%r10, 0+LINK_AREA(%rsp)	// static chain pointer == Pascal
-	movq	%rax, 8+LINK_AREA(%rsp)	// xmm count
-	// 16+LINK_AREA is return address
-
-	// Save xmm registers
-	movdqa	%xmm0, 0+FP_AREA(%rsp)
-	movdqa	%xmm1, 16+FP_AREA(%rsp)
-	movdqa	%xmm2, 32+FP_AREA(%rsp)
-	movdqa	%xmm3, 48+FP_AREA(%rsp)
-	movdqa	%xmm4, 64+FP_AREA(%rsp)
-	movdqa	%xmm5, 80+FP_AREA(%rsp)
-	movdqa	%xmm6, 96+FP_AREA(%rsp)
-	movdqa	%xmm7, 112+FP_AREA(%rsp)
-
-	// Call [receiver forward:sel :margs]
-	movq	%a2, %a1		// receiver
-	movq	_FwdSel(%rip), %a2	// forward::
-	// %a3 is already the selector
-	movq	%rsp, %a4		// marg_list
-
-	call	_objc_msgSend		// forward:: is NOT struct-return
-	
-	// Set return value register to the passed-in struct address
-	movq	0+REG_AREA(%rsp), %rax
-	// Retrieve return address from linkage area
-	movq	16+LINK_AREA(%rsp), %r11
-	// Pop stack frame
-	addq	$ 8*16 + 6*8 + (4-1)*8, %rsp
-	// Put return address back
-	movq	%r11, (%rsp)
-	ret
-
-LMsgForwardStretError:
-	// Tail-call __objc_error(receiver, "unknown selector %s %s", "forward::", forwardedSel)
-	// %a4 is already the forwarded selector
-	movq	%a2, %a1		// receiver
-	leaq	LUnkSelStr(%rip), %a2	// "unknown selector %s %s"
-	movq	_FwdSel(%rip), %a3	// forward::
-	jmp	___objc_error		// never returns
+	jmp	*%r11
 
 	END_ENTRY	__objc_msgForward_stret
 

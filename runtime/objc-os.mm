@@ -603,6 +603,41 @@ static const char *gc_enforcer(enum dyld_image_states state,
 #endif
 
 
+
+/***********************************************************************
+* getSDKVersion
+* Look up the build-time SDK version for an image.
+* Version X.Y.Z is encoded as 0xXXXXYYZZ.
+* Images without the load command are assumed to be old (version 0.0.0).
+**********************************************************************/
+#if TARGET_OS_IPHONE
+    // Simulator binaries encode an iOS version
+#   define LC_VERSION_MIN LC_VERSION_MIN_IPHONEOS
+#elif TARGET_OS_MAC
+#   define LC_VERSION_MIN LC_VERSION_MIN_MACOSX
+#else
+#   error unknown OS
+#endif
+
+static uint32_t 
+getSDKVersion(const header_info *hi)
+{
+    const struct version_min_command *cmd;
+    unsigned long i;
+    
+    cmd = (const struct version_min_command *) (hi->mhdr + 1);
+    for (i = 0; i < hi->mhdr->ncmds; i++){
+        if (cmd->cmd == LC_VERSION_MIN  &&  cmd->cmdsize >= 16) {
+            return cmd->sdk;
+        }
+        cmd = (const struct version_min_command *)((char *)cmd + cmd->cmdsize);
+    }
+
+    // Lack of version load command is assumed to be old.
+    return 0;
+}
+
+
 /***********************************************************************
 * map_images_nolock
 * Process the given images which are being mapped in by dyld.
@@ -661,6 +696,10 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
             continue;
         }
         if (mhdr->filetype == MH_EXECUTE) {
+            // Record main executable's build SDK version
+            AppSDKVersion = getSDKVersion(hi);
+
+            // Size some data structures based on main executable's size
 #if __OBJC2__
             size_t count;
             _getObjc2SelectorRefs(hi, &count);
@@ -722,10 +761,7 @@ map_images_nolock(enum dyld_image_states state, uint32_t infoCount,
 #endif
 
     if (firstTime) {
-        extern SEL FwdSel;  // in objc-msg-*.s
         sel_init(wantsGC, selrefCount);
-        FwdSel = sel_registerName("forward::");
-
         arr_init();
     }
 
@@ -990,7 +1026,7 @@ malloc_zone_t *_objc_internal_zone(void)
     if (z == (malloc_zone_t *)-1) {
         if (UseInternalZone) {
             z = malloc_create_zone(vm_page_size, 0);
-            malloc_set_zone_name(z, "ObjC");
+            malloc_set_zone_name(z, "ObjC_Internal");
         } else {
             z = malloc_default_zone();
         }

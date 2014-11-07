@@ -354,10 +354,11 @@ static void cycle(void)
 
 int main()
 {
+    int count = 1000;
+
     cycle();
     cycle();
 
-    int count = 1000;
     leak_mark();
     while (count--) {
         testonthread(^{ cycle(); });

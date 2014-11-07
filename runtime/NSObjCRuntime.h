@@ -22,5 +22,4 @@ typedef unsigned int NSUInteger;
 
 #define NSINTEGER_DEFINED 1
 
-
 #endif

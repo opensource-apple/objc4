@@ -5,6 +5,8 @@
 #ifndef _OBJC_NSOBJECT_H_
 #define _OBJC_NSOBJECT_H_
 
+#if __OBJC__
+
 #include <objc/objc.h>
 #include <objc/NSObjCRuntime.h>
 
@@ -13,12 +15,11 @@
 @protocol NSObject
 
 - (BOOL)isEqual:(id)object;
-- (NSUInteger)hash;
+@property (readonly) NSUInteger hash;
 
-- (Class)superclass;
+@property (readonly) Class superclass;
 - (Class)class;
-- (id)self;
-- (struct _NSZone *)zone OBJC_ARC_UNAVAILABLE;
+- (instancetype)self;
 
 - (id)performSelector:(SEL)aSelector;
 - (id)performSelector:(SEL)aSelector withObject:(id)object;
@@ -32,14 +33,16 @@
 
 - (BOOL)respondsToSelector:(SEL)aSelector;
 
-- (id)retain OBJC_ARC_UNAVAILABLE;
+- (instancetype)retain OBJC_ARC_UNAVAILABLE;
 - (oneway void)release OBJC_ARC_UNAVAILABLE;
-- (id)autorelease OBJC_ARC_UNAVAILABLE;
+- (instancetype)autorelease OBJC_ARC_UNAVAILABLE;
 - (NSUInteger)retainCount OBJC_ARC_UNAVAILABLE;
 
-- (NSString *)description;
+- (struct _NSZone *)zone OBJC_ARC_UNAVAILABLE;
+
+@property (readonly, copy) NSString *description;
 @optional
-- (NSString *)debugDescription;
+@property (readonly, copy) NSString *debugDescription;
 
 @end
 
@@ -54,11 +57,11 @@ OBJC_EXPORT
 + (void)load;
 
 + (void)initialize;
-- (id)init;
+- (instancetype)init;
 
-+ (id)new;
-+ (id)allocWithZone:(struct _NSZone *)zone;
-+ (id)alloc;
++ (instancetype)new;
++ (instancetype)allocWithZone:(struct _NSZone *)zone;
++ (instancetype)alloc;
 - (void)dealloc;
 
 - (void)finalize;
@@ -69,8 +72,6 @@ OBJC_EXPORT
 + (id)copyWithZone:(struct _NSZone *)zone OBJC_ARC_UNAVAILABLE;
 + (id)mutableCopyWithZone:(struct _NSZone *)zone OBJC_ARC_UNAVAILABLE;
 
-+ (Class)superclass;
-+ (Class)class;
 + (BOOL)instancesRespondToSelector:(SEL)aSelector;
 + (BOOL)conformsToProtocol:(Protocol *)protocol;
 - (IMP)methodForSelector:(SEL)aSelector;
@@ -86,13 +87,19 @@ OBJC_EXPORT
 - (BOOL)allowsWeakReference UNAVAILABLE_ATTRIBUTE;
 - (BOOL)retainWeakReference UNAVAILABLE_ATTRIBUTE;
 
-+ (NSString *)description;
-
 + (BOOL)isSubclassOfClass:(Class)aClass;
 
 + (BOOL)resolveClassMethod:(SEL)sel __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 + (BOOL)resolveInstanceMethod:(SEL)sel __OSX_AVAILABLE_STARTING(__MAC_10_5, __IPHONE_2_0);
 
++ (NSUInteger)hash;
++ (Class)superclass;
++ (Class)class;
++ (NSString *)description;
++ (NSString *)debugDescription;
+
 @end
+
+#endif
 
 #endif

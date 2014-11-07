@@ -71,6 +71,11 @@ OBJC_ROOT_CLASS
 
 long long forward_handler(id self, SEL _cmd, long i1, long i2, long i3, long i4, long i5, long i6, long i7, long i8, long i9, long i10, long i11, long i12, long i13, double f1, double f2, double f3, double f4, double f5, double f6, double f7, double f8, double f9, double f10, double f11, double f12, double f13, double f14, double f15)
 {
+#if __arm64__
+    void *struct_addr;
+    __asm__ volatile("mov %0, x8" : "=r" (struct_addr) : : "x8");
+#endif
+
     testassert(self == receiver);
 
     testassert(i1 == 1);
@@ -141,6 +146,8 @@ long long forward_handler(id self, SEL _cmd, long i1, long i2, long i3, long i4,
         } result;
         result.fpval = FP_RESULT;
         return result.llval;
+#elif defined(__arm64__)
+        __asm__ volatile("ldr d0, %0" : : "m" (FP_RESULT));
 #else
 #       error unknown architecture
 #endif
@@ -150,7 +157,16 @@ long long forward_handler(id self, SEL _cmd, long i1, long i2, long i3, long i4,
              _cmd == @selector(stre2::::::::::::::::::::::::::::)  ||  
              _cmd == @selector(stre3::::::::::::::::::::::::::::)) 
     {
+#if __i386__  ||  __x86_64__  ||  __arm__
         fail("stret message sent to non-stret forward_handler");
+#elif __arm64__
+        testassert(state == 17);
+        state = 18;
+        memcpy(struct_addr, &STRET_RESULT, sizeof(STRET_RESULT));
+        return 0;
+#else
+#       error unknown architecture
+#endif
     } 
     else {
         fail("unknown selector %s in forward_handler", sel_getName(_cmd));
@@ -223,6 +239,9 @@ struct stret forward_stret_handler(id self, SEL _cmd, long i1, long i2, long i3,
 +(void)initialize { }
 +(id)class { return self; }
 
+#if __OBJC2__
+// forward:: not supported
+#else
 -(long long) forward:(SEL)sel :(marg_list)args
 {
     char *p;
@@ -378,6 +397,8 @@ struct stret forward_stret_handler(id self, SEL _cmd, long i1, long i2, long i3,
     return 0;
 }
 
+#endif
+
 @end
 
 typedef id (*id_fn_t)(id self, SEL _cmd, long i1, long i2, long i3, long i4, long i5, long i6, long i7, long i8, long i9, long i10, long i11, long i12, long i13, double f1, double f2, double f3, double f4, double f5, double f6, double f7, double f8, double f9, double f10, double f11, double f12, double f13, double f14, double f15);
@@ -402,6 +423,8 @@ __END_DECLS
     asm(".text \n _getSP: movl %esp, %eax \n ret \n");
 #elif defined(__arm__)
     asm(".text \n _getSP: mov r0, sp \n bx lr \n");
+#elif defined(__arm64__)
+    asm(".text \n _getSP: mov x0, sp \n ret \n");
 #else
 #   error unknown architecture
 #endif
@@ -418,8 +441,18 @@ int main()
     void *sp1 = (void*)1;
     void *sp2 = (void*)2;
 
+    st_fn_t stret_fwd;
+#if __arm64__
+    stret_fwd = (st_fn_t)_objc_msgForward;
+#else
+    stret_fwd = (st_fn_t)_objc_msgForward_stret;
+#endif
+
     receiver = [Super class];
 
+#if __OBJC2__
+    // forward:: not supported
+#else
     // Test default forward handler
 
     state = 1;
@@ -591,7 +624,7 @@ int main()
 
     state = 7;
     sp1 = getSP();
-    stval = ((st_fn_t)_objc_msgForward_stret)(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    stval = stret_fwd(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     sp2 = getSP();
     testassert(sp1 == sp2);
     testassert(state == 8);
@@ -638,7 +671,7 @@ int main()
 
     state = 7;
     sp1 = getSP();
-    stval = ((st_fn_t)_objc_msgForward_stret)(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    stval = stret_fwd(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     sp2 = getSP();
     testassert(sp1 == sp2);
     testassert(state == 8);
@@ -687,7 +720,7 @@ int main()
 
     state = 7;
     sp1 = getSP();
-    stval = ((st_fn_t)_objc_msgForward_stret)(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    stval = stret_fwd(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     sp2 = getSP();
     testassert(sp1 == sp2);
     testassert(state == 8);
@@ -703,6 +736,9 @@ int main()
     testassert(state == 8);
     testassert(stret_equal(stval, STRET_RESULT));
     testassert(stptr == &stval);    
+#endif
+
+// !__OBJC2__
 #endif
 
 
@@ -880,7 +916,7 @@ int main()
 
     state = 17;
     sp1 = getSP();
-    stval = ((st_fn_t)_objc_msgForward_stret)(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    stval = stret_fwd(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     sp2 = getSP();
     testassert(sp1 == sp2);
     testassert(state == 18);
@@ -915,7 +951,7 @@ int main()
 
     state = 17;
     sp1 = getSP();
-    stval = ((st_fn_t)_objc_msgForward_stret)(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    stval = stret_fwd(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     sp2 = getSP();
     testassert(sp1 == sp2);
     testassert(state == 18);
@@ -952,7 +988,7 @@ int main()
 
     state = 17;
     sp1 = getSP();
-    stval = ((st_fn_t)_objc_msgForward_stret)(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    stval = stret_fwd(receiver, @selector(stre2::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     sp2 = getSP();
     testassert(sp1 == sp2);
     testassert(state == 18);

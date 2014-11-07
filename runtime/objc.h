@@ -31,6 +31,7 @@
 #include <sys/types.h>      // for __DARWIN_NULL
 #include <Availability.h>
 #include <objc/objc-api.h>
+#include <stdbool.h>
 
 #if !OBJC_TYPES_DEFINED
 /// An opaque type that represents an Objective-C class.
@@ -58,16 +59,20 @@ typedef id (*IMP)(id, SEL, ...);
 #define OBJC_BOOL_DEFINED
 
 /// Type to represent a boolean value.
+#if !defined(OBJC_HIDE_64) && TARGET_OS_IPHONE && __LP64__
+typedef bool BOOL;
+#else
 typedef signed char BOOL; 
 // BOOL is explicitly signed so @encode(BOOL) == "c" rather than "C" 
 // even if -funsigned-char is used.
+#endif
 
 #if __has_feature(objc_bool)
-#define YES             __objc_yes
-#define NO              __objc_no
+#define YES __objc_yes
+#define NO  __objc_no
 #else
-#define YES             ((BOOL)1)
-#define NO              ((BOOL)0)
+#define YES ((BOOL)1)
+#define NO  ((BOOL)0)
 #endif
 
 #ifndef Nil

@@ -9,5 +9,9 @@ __ZdlPv
 __ZdlPvRKSt9nothrow_t
 __ZTISt9bad_alloc
 __ZTISt9exception
+__ZTISt11logic_error
+__ZTISt12length_error
 __ZTSSt9bad_alloc
 __ZTSSt9exception
+__ZTSSt11logic_error
+__ZTSSt12length_error

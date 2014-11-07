@@ -116,7 +116,7 @@ int main()
 
     objc_setForwardHandler((void*)&forward_handler, (void*)&forward_handler);
 
-#if defined(__arm__)
+#if defined(__arm__)  ||  defined(__arm64__)
     int count = 10;
 #else
     int count = is_guardmalloc() ? 10 : 100;

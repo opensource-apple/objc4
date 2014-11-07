@@ -63,10 +63,27 @@
 #   define SUPPORT_TAGGED_POINTERS 1
 #endif
 
+// Define SUPPORT_MSB_TAGGED_POINTERS to use the MSB 
+// as the tagged pointer marker instead of the LSB.
+// Be sure to edit tagged pointer SPI in objc-internal.h as well.
+#if !SUPPORT_TAGGED_POINTERS  ||  !TARGET_OS_IPHONE
+#   define SUPPORT_MSB_TAGGED_POINTERS 0
+#else
+#   define SUPPORT_MSB_TAGGED_POINTERS 1
+#endif
+
+// Define SUPPORT_NONPOINTER_ISA=1 to enable extra data in the isa field.
+#if !__LP64__  ||  TARGET_OS_WIN32  ||  TARGET_IPHONE_SIMULATOR  ||  __x86_64__
+#   define SUPPORT_NONPOINTER_ISA 0
+#else
+#   define SUPPORT_NONPOINTER_ISA 1
+#endif
+
 // Define SUPPORT_FIXUP=1 to repair calls sites for fixup dispatch.
 // Fixup messaging itself is no longer supported.
 // Be sure to edit objc-abi.h as well (objc_msgSend*_fixup)
-#if !__OBJC2__  ||  !defined(__x86_64__)
+// Note TARGET_OS_MAC is also set for iOS simulator.
+#if !__x86_64__  ||  !TARGET_OS_MAC
 #   define SUPPORT_FIXUP 0
 #else
 #   define SUPPORT_FIXUP 1
@@ -109,6 +126,13 @@
 #   define SUPPORT_RETURN_AUTORELEASE 0
 #else
 #   define SUPPORT_RETURN_AUTORELEASE 1
+#endif
+
+// Define SUPPORT_STRET on architectures that need separate struct-return ABI.
+#if defined(__arm64__)
+#   define SUPPORT_STRET 0
+#else
+#   define SUPPORT_STRET 1
 #endif
 
 // Define SUPPORT_MESSAGE_LOGGING to enable NSObjCMessageLoggingEnabled

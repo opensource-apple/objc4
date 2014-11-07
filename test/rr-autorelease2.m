@@ -9,12 +9,14 @@
 #   define RR_RETAIN(o) [o retain]
 #   define RR_RELEASE(o) [o release]
 #   define RR_AUTORELEASE(o) [o autorelease]
+#   define RR_RETAINCOUNT(o) [o retainCount]
 #else
 #   define RR_PUSH() _objc_autoreleasePoolPush()
 #   define RR_POP(p) _objc_autoreleasePoolPop(p)
 #   define RR_RETAIN(o) _objc_rootRetain((id)o)
 #   define RR_RELEASE(o) _objc_rootRelease((id)o)
 #   define RR_AUTORELEASE(o) _objc_rootAutorelease((id)o)
+#   define RR_RETAINCOUNT(o) _objc_rootRetainCount((id)o)
 #endif
 
 #include <objc/objc-internal.h>
@@ -97,6 +99,9 @@ void *autorelease_lots_fn(void *singlePool)
 
     id obj = RR_AUTORELEASE([[Deallocator alloc] init]);
 
+    // last pool has only 1 autorelease in it
+    pools[p++] = RR_PUSH();
+
     for (int i = 0; i < COUNT; i++) {
         if (rand() % 1000 == 0  &&  !singlePool) {
             pools[p++] = RR_PUSH();
@@ -110,6 +115,7 @@ void *autorelease_lots_fn(void *singlePool)
         RR_POP(pools[p]);
     }
     testassert(state == 0);
+    testassert(RR_RETAINCOUNT(obj) == 1);
     RR_POP(pools[0]);
     testassert(state == 1);
     free(pools);

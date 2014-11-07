@@ -9,7 +9,7 @@
 
 #if OBJC_HAVE_TAGGED_POINTERS
 
-#if !__OBJC2__  ||  !__x86_64__
+#if !__OBJC2__  ||  (!__x86_64__  &&  !__arm64__)
 #error wrong architecture for tagged pointers
 #endif
 
@@ -41,6 +41,8 @@ OBJC_ROOT_CLASS
 @end
 
 @implementation TaggedBaseClass
+-(id) self { return self; }
+
 + (void) initialize {
 }
 
@@ -142,42 +144,64 @@ retaincount_fn(void *self, SEL _cmd __unused) {
 }
 @end
 
-void testGenericTaggedPointer(objc_tag_index_t tag, const char *classname)
+void testTaggedPointerValue(Class cls, objc_tag_index_t tag, uintptr_t value)
 {
-    testprintf("%s\n", classname);
+    void *taggedAddress = _objc_makeTaggedPointer(tag, value);
+    testprintf("obj %p, tag %p, value %p\n", 
+               taggedAddress, (void*)tag, (void*)value);
 
-    Class cls = objc_getClass(classname);
-    testassert(cls);
+    // _objc_makeTaggedPointer must quietly mask out of range values for now
+    value = (value << 4) >> 4;
 
-    void *taggedAddress = _objc_makeTaggedPointer(tag, 1234);
     testassert(_objc_isTaggedPointer(taggedAddress));
     testassert(_objc_getTaggedPointerTag(taggedAddress) == tag);
-    testassert(_objc_getTaggedPointerValue(taggedAddress) == 1234);
+    testassert(_objc_getTaggedPointerValue(taggedAddress) == value);
 
     testassert((uintptr_t)taggedAddress & objc_debug_taggedpointer_mask);
     uintptr_t slot = ((uintptr_t)taggedAddress >> objc_debug_taggedpointer_slot_shift) & objc_debug_taggedpointer_slot_mask;
     testassert(objc_debug_taggedpointer_classes[slot] == cls);
-    testassert((((uintptr_t)taggedAddress << objc_debug_taggedpointer_payload_lshift) >> objc_debug_taggedpointer_payload_rshift) == 1234);
-    
+    testassert((((uintptr_t)taggedAddress << objc_debug_taggedpointer_payload_lshift) >> objc_debug_taggedpointer_payload_rshift) == value);
+
     id taggedPointer = objc_unretainedObject(taggedAddress);
+    testassert(!object_isClass(taggedPointer));
     testassert(object_getClass(taggedPointer) == cls);
-    testassert([taggedPointer taggedValue] == 1234);
+    testassert([taggedPointer taggedValue] == value);
 
     didIt = NO;
     [taggedPointer instanceMethod];
-    testassert(didIt);    
+    testassert(didIt);
     
     struct stret orig = STRET_RESULT;
     testassert(stret_equal(orig, [taggedPointer stret: orig]));
     
-    long double value = 3.14156789;
-    testassert(value == [taggedPointer fpret: value]);
+    long double dblvalue = 3.14156789;
+    testassert(dblvalue == [taggedPointer fpret: dblvalue]);
+
+    objc_setAssociatedObject(taggedPointer, (__bridge void *)taggedPointer, taggedPointer, OBJC_ASSOCIATION_RETAIN);
+    testassert(objc_getAssociatedObject(taggedPointer, (__bridge void *)taggedPointer) == taggedPointer);
+    objc_setAssociatedObject(taggedPointer, (__bridge void *)taggedPointer, nil, OBJC_ASSOCIATION_RETAIN);
+    testassert(objc_getAssociatedObject(taggedPointer, (__bridge void *)taggedPointer) == nil);
+}
+
+void testGenericTaggedPointer(objc_tag_index_t tag, Class cls)
+{
+    testassert(cls);
+    testprintf("%s\n", class_getName(cls));
+
+    testTaggedPointerValue(cls, tag, 0);
+    testTaggedPointerValue(cls, tag, 1UL << 0);
+    testTaggedPointerValue(cls, tag, 1UL << 1);
+    testTaggedPointerValue(cls, tag, 1UL << 58);
+    testTaggedPointerValue(cls, tag, 1UL << 59);
+    testTaggedPointerValue(cls, tag, ~0UL >> 4);
+    testTaggedPointerValue(cls, tag, ~0UL);
 
     // Tagged pointers should bypass refcount tables and autorelease pools
     // and weak reference tables
     WeakContainer *w = [WeakContainer new];
 #if !__has_feature(objc_arc)
     // prime method caches before leak checking
+    id taggedPointer = (id)_objc_makeTaggedPointer(tag, 1234);
     [taggedPointer retain];
     [taggedPointer release];
     [taggedPointer autorelease];
@@ -257,17 +281,17 @@ int main()
         _objc_registerTaggedPointerClass(OBJC_TAG_1, 
                                          objc_getClass("TaggedBaseClass"));
         testGenericTaggedPointer(OBJC_TAG_1, 
-                                 "TaggedBaseClass");
+                                 objc_getClass("TaggedBaseClass"));
         
         _objc_registerTaggedPointerClass(OBJC_TAG_7, 
                                          objc_getClass("TaggedSubclass"));
         testGenericTaggedPointer(OBJC_TAG_7, 
-                                 "TaggedSubclass");
+                                 objc_getClass("TaggedSubclass"));
         
         _objc_registerTaggedPointerClass(OBJC_TAG_NSManagedObjectID, 
                                          objc_getClass("TaggedNSObjectSubclass"));
         testGenericTaggedPointer(OBJC_TAG_NSManagedObjectID, 
-                                 "TaggedNSObjectSubclass");
+                                 objc_getClass("TaggedNSObjectSubclass"));
     } POP_POOL;
 
     succeed(__FILE__);
@@ -283,7 +307,6 @@ int main()
 {
 #if __OBJC2__
     testassert(objc_debug_taggedpointer_mask == 0);
-    testassert(!_objc_taggedPointersEnabled());
 #else
     testassert(!dlsym(RTLD_DEFAULT, "objc_debug_taggedpointer_mask"));
 #endif

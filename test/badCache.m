@@ -18,7 +18,7 @@ END
 
 #include "test.h"
 
-#if !__OBJC2__
+#if !__OBJC2__  ||  __arm__
 
 int main()
 {

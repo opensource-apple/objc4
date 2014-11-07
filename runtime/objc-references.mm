@@ -291,8 +291,7 @@ void _object_set_associative_reference(id object, void *key, id value, uintptr_t
                 ObjectAssociationMap *refs = new ObjectAssociationMap;
                 associations[disguised_object] = refs;
                 (*refs)[key] = ObjcAssociation(policy, new_value);
-                Class cls = object->getIsa();
-                cls->setInstancesHaveAssociatedObjects();
+                object->setHasAssociatedObjects();
             }
         } else {
             // setting the association to nil breaks the association.

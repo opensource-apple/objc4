@@ -229,7 +229,7 @@ static const char
 
 - (BOOL)isKindOf:aClass
 {
-	register Class cls;
+	Class cls;
 	for (cls = isa; cls; cls = cls->superclass) 
 		if (cls == (Class)aClass)
 			return YES;
@@ -243,7 +243,7 @@ static const char
 
 - (BOOL)isKindOfClassNamed:(const char *)aClassName
 {
-	register Class cls;
+	Class cls;
 	for (cls = isa; cls; cls = cls->superclass) 
 		if (strcmp(aClassName, class_getName(cls)) == 0)
 			return YES;

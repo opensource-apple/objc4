@@ -29,6 +29,7 @@
 		834EC0A411614167009B2563 /* objc-abi.h in Headers */ = {isa = PBXBuildFile; fileRef = 834EC0A311614167009B2563 /* objc-abi.h */; settings = {ATTRIBUTES = (Private, ); }; };
 		83725F4A14CA5BFA0014370E /* objc-opt.mm in Sources */ = {isa = PBXBuildFile; fileRef = 83725F4914CA5BFA0014370E /* objc-opt.mm */; };
 		83725F4C14CA5C210014370E /* objc-opt.mm in Sources */ = {isa = PBXBuildFile; fileRef = 83725F4914CA5BFA0014370E /* objc-opt.mm */; };
+		8379996E13CBAF6F007C2B5F /* a1a2-blocktramps-arm64.s in Sources */ = {isa = PBXBuildFile; fileRef = 8379996D13CBAF6F007C2B5F /* a1a2-blocktramps-arm64.s */; };
 		8383A3A3122600E9009290B8 /* a1a2-blocktramps-arm.s in Sources */ = {isa = PBXBuildFile; fileRef = 8383A3A1122600E9009290B8 /* a1a2-blocktramps-arm.s */; };
 		8383A3A4122600E9009290B8 /* a2a3-blocktramps-arm.s in Sources */ = {isa = PBXBuildFile; fileRef = 8383A3A2122600E9009290B8 /* a2a3-blocktramps-arm.s */; };
 		8383A3AC122600FB009290B8 /* a1a2-blocktramps-arm.s in Sources */ = {isa = PBXBuildFile; fileRef = 8383A3A1122600E9009290B8 /* a1a2-blocktramps-arm.s */; settings = {COMPILER_FLAGS = " -Qunused-arguments"; }; };
@@ -121,6 +122,10 @@
 		83BE02E80FCCB24D00661494 /* objc-file-old.h in Headers */ = {isa = PBXBuildFile; fileRef = 83BE02E50FCCB24D00661494 /* objc-file-old.h */; };
 		83BE02E90FCCB24D00661494 /* objc-file.h in Headers */ = {isa = PBXBuildFile; fileRef = 83BE02E60FCCB24D00661494 /* objc-file.h */; };
 		83BE02EA0FCCB24D00661494 /* objc-runtime-old.h in Headers */ = {isa = PBXBuildFile; fileRef = 83BE02E70FCCB24D00661494 /* objc-runtime-old.h */; };
+		83C9C3391668B50E00F4E544 /* objc-msg-simulator-x86_64.s in Sources */ = {isa = PBXBuildFile; fileRef = 83C9C3381668B50E00F4E544 /* objc-msg-simulator-x86_64.s */; };
+		83C9C33A1668B56300F4E544 /* objc-msg-simulator-x86_64.s in Sources */ = {isa = PBXBuildFile; fileRef = 83C9C3381668B50E00F4E544 /* objc-msg-simulator-x86_64.s */; };
+		83D49E4F13C7C84F0057F1DD /* objc-msg-arm64.s in Sources */ = {isa = PBXBuildFile; fileRef = 83D49E4E13C7C84F0057F1DD /* objc-msg-arm64.s */; };
+		83D49E5013C7C84F0057F1DD /* objc-msg-arm64.s in Sources */ = {isa = PBXBuildFile; fileRef = 83D49E4E13C7C84F0057F1DD /* objc-msg-arm64.s */; };
 		83E50CDB0FF19E8200D74C19 /* hashtable2.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485B70D6D687300CEA253 /* hashtable2.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		83E50CDC0FF19E8200D74C19 /* maptable.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485BB0D6D687300CEA253 /* maptable.h */; settings = {ATTRIBUTES = (Private, ); }; };
 		83E50CDD0FF19E8200D74C19 /* objc-api.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485C80D6D68A200CEA253 /* objc-api.h */; settings = {ATTRIBUTES = (Public, ); }; };
@@ -205,6 +210,7 @@
 		834DF8B615993EE1002F2BC9 /* objc-sel-old.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-sel-old.mm"; path = "runtime/objc-sel-old.mm"; sourceTree = "<group>"; };
 		834EC0A311614167009B2563 /* objc-abi.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-abi.h"; path = "runtime/objc-abi.h"; sourceTree = "<group>"; };
 		83725F4914CA5BFA0014370E /* objc-opt.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-opt.mm"; path = "runtime/objc-opt.mm"; sourceTree = "<group>"; };
+		8379996D13CBAF6F007C2B5F /* a1a2-blocktramps-arm64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "a1a2-blocktramps-arm64.s"; path = "runtime/a1a2-blocktramps-arm64.s"; sourceTree = "<group>"; };
 		8383A3A1122600E9009290B8 /* a1a2-blocktramps-arm.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "a1a2-blocktramps-arm.s"; path = "runtime/a1a2-blocktramps-arm.s"; sourceTree = "<group>"; };
 		8383A3A2122600E9009290B8 /* a2a3-blocktramps-arm.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "a2a3-blocktramps-arm.s"; path = "runtime/a2a3-blocktramps-arm.s"; sourceTree = "<group>"; };
 		838485B30D6D682B00CEA253 /* libobjc.order */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = libobjc.order; sourceTree = "<group>"; };
@@ -260,6 +266,8 @@
 		83BE02E50FCCB24D00661494 /* objc-file-old.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-file-old.h"; path = "runtime/objc-file-old.h"; sourceTree = "<group>"; };
 		83BE02E60FCCB24D00661494 /* objc-file.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-file.h"; path = "runtime/objc-file.h"; sourceTree = "<group>"; };
 		83BE02E70FCCB24D00661494 /* objc-runtime-old.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-runtime-old.h"; path = "runtime/objc-runtime-old.h"; sourceTree = "<group>"; };
+		83C9C3381668B50E00F4E544 /* objc-msg-simulator-x86_64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-simulator-x86_64.s"; path = "runtime/Messengers.subproj/objc-msg-simulator-x86_64.s"; sourceTree = "<group>"; };
+		83D49E4E13C7C84F0057F1DD /* objc-msg-arm64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-arm64.s"; path = "runtime/Messengers.subproj/objc-msg-arm64.s"; sourceTree = "<group>"; };
 		83E50D2A0FF19E8200D74C19 /* libobjc.A.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libobjc.A.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
 		83E50D2B0FF19E9E00D74C19 /* IndigoSDK.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = IndigoSDK.xcconfig; path = AppleInternal/XcodeConfig/IndigoSDK.xcconfig; sourceTree = DEVELOPER_DIR; };
 		83EB007A121C9EC200B92C16 /* objc-sel-table.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-sel-table.s"; path = "runtime/objc-sel-table.s"; sourceTree = "<group>"; };
@@ -361,13 +369,16 @@
 				834DF8B615993EE1002F2BC9 /* objc-sel-old.mm */,
 				838485EA0D6D68A200CEA253 /* objc-sync.mm */,
 				838485EB0D6D68A200CEA253 /* objc-typeencoding.mm */,
+				8379996D13CBAF6F007C2B5F /* a1a2-blocktramps-arm64.s */,
 				E8923D9C116AB2820071B552 /* a1a2-blocktramps-i386.s */,
 				E8923D9D116AB2820071B552 /* a1a2-blocktramps-x86_64.s */,
 				E8923D9E116AB2820071B552 /* a2a3-blocktramps-i386.s */,
 				E8923D9F116AB2820071B552 /* a2a3-blocktramps-x86_64.s */,
 				830F2A690D737FB800392440 /* objc-msg-arm.s */,
+				83D49E4E13C7C84F0057F1DD /* objc-msg-arm64.s */,
 				830F2A6A0D737FB800392440 /* objc-msg-i386.s */,
 				83B1A8BC0FF1AC0D0019EA5B /* objc-msg-simulator-i386.s */,
+				83C9C3381668B50E00F4E544 /* objc-msg-simulator-x86_64.s */,
 				830F2A720D737FB800392440 /* objc-msg-x86_64.s */,
 				87BB4E900EC39633005D08E1 /* objc-probes.d */,
 			);
@@ -582,6 +593,7 @@
 				83E50CFC0FF19E8200D74C19 /* Sources */,
 				83E50D240FF19E8200D74C19 /* Frameworks */,
 				83E50D260FF19E8200D74C19 /* Run Script (symlink) */,
+				96895502173DB369006D6747 /* Run Script (RC_HIDE_64) */,
 			);
 			buildRules = (
 			);
@@ -601,6 +613,7 @@
 				D289988505E68E00004EDB86 /* Frameworks */,
 				830F2AB60D739AB600392440 /* Run Script (markgc) */,
 				830F2AFA0D73BC5800392440 /* Run Script (symlink) */,
+				96BF404516F7DC5300DA41F6 /* Run Script (RC_HIDE_64) */,
 			);
 			buildRules = (
 			);
@@ -686,6 +699,34 @@
 			shellPath = /bin/sh;
 			shellScript = "cd \"${INSTALL_DIR}\"\n/bin/ln -s libobjc.A.dylib libobjc.dylib\n";
 		};
+		96895502173DB369006D6747 /* Run Script (RC_HIDE_64) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 8;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Run Script (RC_HIDE_64)";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+			shellPath = /bin/sh;
+			shellScript = "cd \"${DSTROOT}\"\nif [ -n \"${RC_HIDE_64}\" ]\nthen\n    find . -type f -name \"*.h\" | while read\n    do\n        unifdef -DOBJC_HIDE_64=1 -o \"$REPLY.tmp\" \"$REPLY\"\n        sed 's/OBJC_ARM64_UNAVAILABLE//g' < \"$REPLY.tmp\" > \"$REPLY\"\n        rm \"$REPLY.tmp\"\n    done\nfi";
+		};
+		96BF404516F7DC5300DA41F6 /* Run Script (RC_HIDE_64) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 8;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Run Script (RC_HIDE_64)";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+			shellPath = /bin/sh;
+			shellScript = "cd \"${DSTROOT}\"\nif [ -n \"${RC_HIDE_64}\" ]\nthen\n    find . -type f -name \"*.h\" | while read\n    do\n        unifdef -DOBJC_HIDE_64=1 -o \"$REPLY.tmp\" \"$REPLY\"\n        sed 's/OBJC_ARM64_UNAVAILABLE//g' < \"$REPLY.tmp\" > \"$REPLY\"\n        rm \"$REPLY.tmp\"\n    done\nfi";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -745,8 +786,10 @@
 				8383A3D4122600FB009290B8 /* objc-probes.d in Sources */,
 				8383A3DC1226291C009290B8 /* objc-externalref.mm in Sources */,
 				39ABD72612F0B61800D1054C /* objc-weak.mm in Sources */,
+				83D49E5013C7C84F0057F1DD /* objc-msg-arm64.s in Sources */,
 				9672F7EF14D5F488007CEC96 /* NSObject.mm in Sources */,
 				83725F4C14CA5C210014370E /* objc-opt.mm in Sources */,
+				83C9C33A1668B56300F4E544 /* objc-msg-simulator-x86_64.s in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -798,10 +841,13 @@
 				8383A3A4122600E9009290B8 /* a2a3-blocktramps-arm.s in Sources */,
 				399BC72E1224831B007FBDF0 /* objc-externalref.mm in Sources */,
 				39ABD72412F0B61800D1054C /* objc-weak.mm in Sources */,
+				83D49E4F13C7C84F0057F1DD /* objc-msg-arm64.s in Sources */,
+				8379996E13CBAF6F007C2B5F /* a1a2-blocktramps-arm64.s in Sources */,
 				9672F7EE14D5F488007CEC96 /* NSObject.mm in Sources */,
 				83725F4A14CA5BFA0014370E /* objc-opt.mm in Sources */,
 				83F550E0155E030800E95D3B /* objc-cache-old.mm in Sources */,
 				834DF8B715993EE1002F2BC9 /* objc-sel-old.mm in Sources */,
+				83C9C3391668B50E00F4E544 /* objc-msg-simulator-x86_64.s in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -836,17 +882,22 @@
 					"$(CONFIGURATION_BUILD_DIR)/usr/local/include/**",
 				);
 				INSTALL_PATH = /usr/lib;
-				ORDER_FILE = libobjc.order;
+				ORDER_FILE = "$(SDKROOT)/AppleInternal/OrderFiles/libobjc.order";
 				OTHER_CFLAGS = (
 					"-fdollars-in-identifiers",
 					"$(OTHER_CFLAGS)",
 				);
-				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = "-lc++abi";
+				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = (
+					"-lc++abi",
+					"-Wl,-segalign,0x4000",
+					"-Xlinker -sectalign -Xlinker __DATA -Xlinker __objc_data -Xlinker 0x1000",
+				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=*]" = "-l_BUILD_objc-simulator_TARGET_INSTEAD";
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"-lCrashReporterClient",
 					"-lauto",
 					"-lc++abi",
+					"-Xlinker -sectalign -Xlinker __DATA -Xlinker __objc_data -Xlinker 0x1000",
 				);
 				PRIVATE_HEADERS_FOLDER_PATH = /usr/local/include/objc;
 				PRODUCT_NAME = objc.A;
@@ -870,17 +921,22 @@
 					"$(CONFIGURATION_BUILD_DIR)/usr/local/include/**",
 				);
 				INSTALL_PATH = /usr/lib;
-				ORDER_FILE = libobjc.order;
+				ORDER_FILE = "$(SDKROOT)/AppleInternal/OrderFiles/libobjc.order";
 				OTHER_CFLAGS = (
 					"-fdollars-in-identifiers",
 					"$(OTHER_CFLAGS)",
 				);
-				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = "-lc++abi";
+				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = (
+					"-lc++abi",
+					"-Wl,-segalign,0x4000",
+					"-Xlinker -sectalign -Xlinker __DATA -Xlinker __objc_data -Xlinker 0x1000",
+				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=*]" = "-l_BUILD_objc-simulator_TARGET_INSTEAD";
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"-lCrashReporterClient",
 					"-lauto",
 					"-lc++abi",
+					"-Xlinker -sectalign -Xlinker __DATA -Xlinker __objc_data -Xlinker 0x1000",
 				);
 				PRIVATE_HEADERS_FOLDER_PATH = /usr/local/include/objc;
 				PRODUCT_NAME = objc.A;

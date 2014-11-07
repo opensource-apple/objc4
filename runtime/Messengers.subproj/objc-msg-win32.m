@@ -486,7 +486,6 @@ OBJC_EXPORT __declspec(naked) id _objc_msgForward(id a, SEL b, ...)
 {
     __asm {
         mov ecx, _objc_forward_handler
-        // forward:: support omitted here
         jmp ecx
     }
 }
@@ -495,7 +494,6 @@ OBJC_EXPORT __declspec(naked) id _objc_msgForward_stret(id a, SEL b, ...)
 {
     __asm {
         mov ecx, _objc_forward_stret_handler
-        // forward:: support omitted here
         jmp ecx
     }
 }

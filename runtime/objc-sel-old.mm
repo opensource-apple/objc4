@@ -35,7 +35,6 @@
 
 #if SUPPORT_PREOPT
 #include <objc-shared-cache.h>
-using namespace objc_opt;
 static const objc_selopt_t *builtins = NULL;
 #endif
 
@@ -45,42 +44,6 @@ static size_t SelrefCount = 0;
 
 static const char *_objc_empty_selector = "";
 static struct __objc_sel_set *_objc_selectors = NULL;
-
-
-#if SUPPORT_PREOPT
-void dump_builtins(void)
-{
-    uint32_t occupied = builtins->occupied;
-    uint32_t capacity = builtins->capacity;
-
-    _objc_inform("BUILTIN SELECTORS: %d selectors", occupied);
-    _objc_inform("BUILTIN SELECTORS: %d/%d (%d%%) hash table occupancy", 
-                 occupied, capacity, (int)(occupied/(double)capacity * 100));
-    _objc_inform("BUILTIN SELECTORS: using __TEXT,__objc_selopt at %p", 
-                 builtins);
-    _objc_inform("BUILTIN SELECTORS: capacity: %u", builtins->capacity);
-    _objc_inform("BUILTIN SELECTORS: occupied: %u", builtins->occupied);
-    _objc_inform("BUILTIN SELECTORS: shift: %u", builtins->shift);
-    _objc_inform("BUILTIN SELECTORS: mask: 0x%x", builtins->mask);
-    _objc_inform("BUILTIN SELECTORS: zero: %u", builtins->zero);
-    _objc_inform("BUILTIN SELECTORS: salt: 0x%llx", builtins->salt);
-
-    const int32_t *offsets = builtins->offsets();
-    uint32_t i;
-    for (i = 0; i < capacity; i++) {
-        if (offsets[i] != offsetof(objc_stringhash_t, zero)) {
-            const char *str = (const char *)builtins + offsets[i];
-            _objc_inform("BUILTIN SELECTORS:     %6d: %+8d %s", 
-                         i, offsets[i], str);
-            if ((const char *)sel_registerName(str) != str) {
-                _objc_fatal("bogus");
-            }
-        } else {
-            _objc_inform("BUILTIN SELECTORS:     %6d: ", i);
-        }
-    }
-}
-#endif
 
 
 static SEL _objc_search_builtins(const char *key) 
@@ -97,8 +60,7 @@ static SEL _objc_search_builtins(const char *key)
     if ('\0' == *key) return (SEL)_objc_empty_selector;
 
 #if SUPPORT_PREOPT
-    assert(builtins);
-    return (SEL)builtins->get(key);
+    if (builtins) return (SEL)builtins->get(key);
 #endif
 
     return (SEL)0;
@@ -277,10 +239,18 @@ void sel_init(BOOL wantsGC, size_t selrefCount)
     s(retainCount);
     s(alloc);
     t(allocWithZone:, allocWithZone);
+    s(dealloc);
     s(copy);
     s(new);
     s(finalize);
     t(forwardInvocation:, forwardInvocation);
+    t(_tryRetain, tryRetain);
+    t(_isDeallocating, isDeallocating);
+    s(retainWeakReference);
+    s(allowsWeakReference);
+
+    extern SEL FwdSel;
+    FwdSel = sel_registerNameNoLock("forward::", NO);
 
     sel_unlock();
 

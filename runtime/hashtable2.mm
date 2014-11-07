@@ -485,8 +485,8 @@ uintptr_t NXPtrHash (const void *info, const void *data) {
     };
     
 uintptr_t NXStrHash (const void *info, const void *data) {
-    register uintptr_t	hash = 0;
-    register unsigned char	*s = (unsigned char *) data;
+    uintptr_t	hash = 0;
+    unsigned char	*s = (unsigned char *) data;
     /* unsigned to avoid a sign-extend */
     /* unroll the loop */
     if (s) for (; ; ) { 

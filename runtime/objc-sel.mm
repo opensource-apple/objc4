@@ -27,8 +27,6 @@
 #include "objc-cache.h"
 
 #if SUPPORT_PREOPT
-#include <objc-shared-cache.h>
-using namespace objc_opt;
 static const objc_selopt_t *builtins = NULL;
 #endif
 
@@ -55,6 +53,17 @@ void sel_init(BOOL wantsGC, size_t selrefCount)
 
 #if SUPPORT_PREOPT
     builtins = preoptimizedSelectors();
+
+    if (PrintPreopt  &&  builtins) {
+        uint32_t occupied = builtins->occupied;
+        uint32_t capacity = builtins->capacity;
+        
+        _objc_inform("PREOPTIMIZATION: using selopt at %p", builtins);
+        _objc_inform("PREOPTIMIZATION: %u selectors", occupied);
+        _objc_inform("PREOPTIMIZATION: %u/%u (%u%%) hash table occupancy",
+                     occupied, capacity,
+                     (unsigned)(occupied/(double)capacity*100));
+        }
 #endif
 
     // Register selectors used by libobjc
@@ -82,10 +91,15 @@ void sel_init(BOOL wantsGC, size_t selrefCount)
     s(retainCount);
     s(alloc);
     t(allocWithZone:, allocWithZone);
+    s(dealloc);
     s(copy);
     s(new);
     s(finalize);
     t(forwardInvocation:, forwardInvocation);
+    t(_tryRetain, tryRetain);
+    t(_isDeallocating, isDeallocating);
+    s(retainWeakReference);
+    s(allowsWeakReference);
 
     sel_unlock();
 
@@ -112,12 +126,13 @@ BOOL sel_isMapped(SEL sel)
 {
     if (!sel) return NO;
 
-    const char *name = (const char *)sel;
+    const char *name = (const char *)(void *)sel;
 
     if (sel == search_builtins(name)) return YES;
 
+    bool result = false;
     rwlock_read(&selLock);
-    bool result = (sel == (SEL)NXMapGet(namedSelectors, name));
+    if (namedSelectors) result = (sel == (SEL)NXMapGet(namedSelectors, name));
     rwlock_unlock_read(&selLock);
 
     return result;

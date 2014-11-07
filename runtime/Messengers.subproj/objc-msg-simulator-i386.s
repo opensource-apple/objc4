@@ -195,6 +195,7 @@ _gdb_objc_messenger_breakpoints:
 	.globl	$0
 	.align	2, 0x90
 $0:
+	.cfi_startproc
 .endmacro
 
 .macro STATIC_ENTRY
@@ -202,6 +203,7 @@ $0:
 	.private_extern	$0
 	.align	4, 0x90
 $0:
+	.cfi_startproc
 .endmacro
 
 //////////////////////////////////////////////////////////////////////
@@ -215,6 +217,7 @@ $0:
 //////////////////////////////////////////////////////////////////////
 
 .macro END_ENTRY
+	.cfi_endproc
 .endmacro
 
 
@@ -293,11 +296,12 @@ $0:
 
 1:
 	// loop
-	cmpl	$$1, (%eax)
-	je	3f			// if (bucket->sel == 1) cache wrap
-	jb	LCacheMiss_f		// if (bucket->sel == 0) cache miss
+	cmpl	$$0, (%eax)
+	je	LCacheMiss_f		// if (bucket->sel == 0) cache miss
+	cmpl	8(%edx), %eax
+	je	3f			// if (bucket = cache->buckets) wrap
 	
-	addl	$$8, %eax		// bucket++
+	subl	$$8, %eax		// bucket--
 2:
 	cmpl	(%eax), %ecx		// if (bucket->sel != sel)
 	jne	1b			//     scan more
@@ -306,10 +310,52 @@ $0:
 
 3:	
 	// wrap
-	// eax is last bucket, bucket->imp is first bucket
-	movl	4(%eax), %eax
-	jmp	2b
+	movzwl	12(%edx), %eax		// eax = mask
+	shll	$$3, %eax		// eax = offset = mask * 8
+	addl	8(%edx), %eax		// eax = bucket = cache->buckets+offset
+	jmp	2f
 
+	// clone scanning loop to crash instead of hang when cache is corrupt
+
+1:
+	// loop
+	cmpl	$$0, (%eax)
+	je	LCacheMiss_f		// if (bucket->sel == 0) cache miss
+	cmpl	8(%edx), %eax
+	je	3f			// if (bucket = cache->buckets) wrap
+	
+	subl	$$8, %eax		// bucket--
+2:
+	cmpl	(%eax), %ecx		// if (bucket->sel != sel)
+	jne	1b			//     scan more
+	// The `jne` above sets flags for CacheHit
+	CacheHit $0			// call or return imp
+
+3:	
+	// double wrap - busted
+
+	pushl	%ebp
+	movl	%esp, %ebp
+	pushl	$$0
+	pushl	$$0
+	pushl	$$0		// stack alignment
+	pushl	%edx		// isa
+	pushl	%ecx		// SEL
+.if $0 == STRET  ||  $0 == SUPER_STRET
+	movl	self_stret+4(%ebp), %ecx
+.elseif $0 == GETIMP
+	movl	$$0, %ecx
+.else
+	movl	self+4(%ebp), %ecx
+.endif
+	pushl	%ecx		// receiver
+
+.if $0 == GETIMP
+	call	_cache_getImp_corrupt_cache_error
+.else
+	call	_objc_msgSend_corrupt_cache_error
+.endif
+	
 .endmacro
 
 
@@ -330,7 +376,12 @@ $0:
 .macro MethodTableLookup
 	MESSENGER_END_SLOW
 	pushl	%ebp
+	.cfi_def_cfa_offset 8
+	.cfi_offset ebp, -8
+	
 	movl	%esp, %ebp
+	.cfi_def_cfa_register ebp
+	
 	sub	$$12, %esp		// align stack
 	
 	pushl	%edx			// class
@@ -341,6 +392,8 @@ $0:
 	// imp in eax
 	
 	leave
+	.cfi_def_cfa esp, 4
+	.cfi_same_value ebp
 
 .if $0 == SUPER
 	// replace "super" arg with "receiver"
@@ -403,7 +456,7 @@ LNilTestSlow:
 	ret
 .elseif $0 == STRET
 	MESSENGER_END_NIL
-	ret $4
+	ret $$4
 .elseif $0 == NORMAL
 	// eax is already zero
 	xorl	%edx, %edx
@@ -422,8 +475,7 @@ LNilTestSlow:
  * If not found, returns NULL.
  ********************************************************************/
 
-	.private_extern _cache_getImp
-	ENTRY _cache_getImp
+	STATIC_ENTRY _cache_getImp
 
 // load the class and selector
 	movl    selector(%esp), %ecx
@@ -695,36 +747,27 @@ LMsgSendSuper2StretExit:
 	END_ENTRY __objc_msgSend_stret_uncached
 
 
+	
 /********************************************************************
- *
- * id _objc_msgForward(id self, SEL _cmd,...);
- *
- ********************************************************************/
+*
+* id _objc_msgForward(id self, SEL _cmd,...);
+*
+* _objc_msgForward and _objc_msgForward_stret are the externally-callable
+*   functions returned by things like method_getImplementation().
+* _objc_msgForward_impcache is the function pointer actually stored in
+*   method caches.
+*
+********************************************************************/
 
-// _FwdSel is @selector(forward::), set up in map_images().
-// ALWAYS dereference _FwdSel to get to "forward::" !!
-	.data
-	.align 2
-	.private_extern _FwdSel
-_FwdSel: .long 0
+	.non_lazy_symbol_pointer
+L_forward_handler:
+	.indirect_symbol __objc_forward_handler
+	.long 0
+L_forward_stret_handler:
+	.indirect_symbol __objc_forward_stret_handler
+	.long 0
 
-
-	.cstring
-	.align 2
-LUnkSelStr: .ascii "Does not recognize selector %s\0"
-
-	.data
-	.align 2
-	.private_extern __objc_forward_handler
-__objc_forward_handler:	.long 0
-
-	.data
-	.align 2
-	.private_extern __objc_forward_stret_handler
-__objc_forward_stret_handler:	.long 0
-
-	ENTRY	__objc_msgForward_impcache
-	.private_extern __objc_msgForward_impcache
+	STATIC_ENTRY	__objc_msgForward_impcache
 	// Method cache version
 	
 	// THIS IS NOT A CALLABLE C FUNCTION
@@ -743,52 +786,10 @@ __objc_forward_stret_handler:	.long 0
 	ENTRY	__objc_msgForward
 	// Non-struct return version
 
-	// Get PIC base into %edx
-	call	L__objc_msgForward$pic_base
-L__objc_msgForward$pic_base:
-	popl	%edx
-	
-	// Call user handler, if any
-	movl	__objc_forward_handler-L__objc_msgForward$pic_base(%edx),%ecx
-	testl	%ecx, %ecx		// if not NULL
-	je	1f			//   skip to default handler
-	jmp	*%ecx			// call __objc_forward_handler
-1:	
-	// No user handler
-	// Push stack frame
-	pushl   %ebp
-	movl    %esp, %ebp
-	
-	// Die if forwarding "forward::"
-	movl    (selector+4)(%ebp), %eax
-	movl	_FwdSel-L__objc_msgForward$pic_base(%edx),%ecx
-	cmpl	%ecx, %eax
-	je	LMsgForwardError
-
-	// Call [receiver forward:sel :margs]
-	subl    $8, %esp		// 16-byte align the stack
-	leal    (self+4)(%ebp), %ecx
-	pushl	%ecx			// &margs
-	pushl	%eax			// sel
-	movl	_FwdSel-L__objc_msgForward$pic_base(%edx),%ecx
-	pushl	%ecx			// forward::
-	pushl   (self+4)(%ebp)		// receiver
-	
-	call	_objc_msgSend
-	
-	movl    %ebp, %esp
-	popl    %ebp
-	ret
-
-LMsgForwardError:
-	// Call __objc_error(receiver, "unknown selector %s", "forward::")
-	subl    $12, %esp		// 16-byte align the stack
-	movl	_FwdSel-L__objc_msgForward$pic_base(%edx),%eax
-	pushl 	%eax
-	leal	LUnkSelStr-L__objc_msgForward$pic_base(%edx),%eax
-	pushl 	%eax
-	pushl   (self+4)(%ebp)
-	call	___objc_error	// never returns
+	call	1f
+1:	popl	%edx
+	movl	L_forward_handler-1b(%edx), %edx
+	jmp	*(%edx)
 
 	END_ENTRY	__objc_msgForward
 
@@ -796,52 +797,10 @@ LMsgForwardError:
 	ENTRY	__objc_msgForward_stret
 	// Struct return version
 
-	// Get PIC base into %edx
-	call	L__objc_msgForwardStret$pic_base
-L__objc_msgForwardStret$pic_base:
-	popl	%edx
-
-	// Call user handler, if any
-	movl	__objc_forward_stret_handler-L__objc_msgForwardStret$pic_base(%edx), %ecx
-	testl	%ecx, %ecx		// if not NULL
-	je	1f			//   skip to default handler
-	jmp	*%ecx			// call __objc_forward_stret_handler
-1:	
-	// No user handler
-	// Push stack frame
-	pushl	%ebp
-	movl	%esp, %ebp
-
-	// Die if forwarding "forward::"
-	movl	selector_stret+4(%ebp), %eax
-	movl	_FwdSel-L__objc_msgForwardStret$pic_base(%edx), %ecx
-	cmpl	%ecx, %eax
-	je	LMsgForwardStretError
-
-	// Call [receiver forward:sel :margs]
-	subl    $8, %esp		// 16-byte align the stack
-	leal    (self_stret+4)(%ebp), %ecx
-	pushl	%ecx			// &margs
-	pushl	%eax			// sel
-	movl	_FwdSel-L__objc_msgForwardStret$pic_base(%edx),%ecx
-	pushl	%ecx			// forward::
-	pushl   (self_stret+4)(%ebp)	// receiver
-	
-	call	_objc_msgSend
-	
-	movl    %ebp, %esp
-	popl    %ebp
-	ret	$4			// pop struct return address (#2995932)
-
-LMsgForwardStretError:
-	// Call __objc_error(receiver, "unknown selector %s", "forward::")
-	subl    $12, %esp		// 16-byte align the stack
-	leal	_FwdSel-L__objc_msgForwardStret$pic_base(%edx),%eax
-	pushl 	%eax
-	leal	LUnkSelStr-L__objc_msgForwardStret$pic_base(%edx),%eax
-	pushl 	%eax
-	pushl   (self_stret+4)(%ebp)
-	call	___objc_error	// never returns
+	call	1f
+1:	popl	%edx
+	movl	L_forward_stret_handler-1b(%edx), %edx
+	jmp	*(%edx)
 
 	END_ENTRY	__objc_msgForward_stret
 

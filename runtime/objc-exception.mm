@@ -239,6 +239,7 @@ void _destroyAltHandlerList(struct alt_handler_list *list)
 
 #include "objc-private.h"
 #include <objc/objc-exception.h>
+#include <objc/NSObject.h>
 #include <execinfo.h>
 
 // unwind library types and functions
@@ -631,12 +632,12 @@ static bool _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo,
     }
     else if ((*exception_matcher)(handler_cls, exception)) {
         if (PrintExceptions) _objc_inform("EXCEPTIONS: catch(%s)", 
-                                          handler_cls->getName());
+                                          handler_cls->nameForLogging());
         return true;
     }
 
     if (PrintExceptions) _objc_inform("EXCEPTIONS: skipping catch(%s)", 
-                                      handler_cls->getName());
+                                      handler_cls->nameForLogging());
 
     return false;
 }

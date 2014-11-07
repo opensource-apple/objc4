@@ -24,6 +24,7 @@ OPTION( PrintDeprecation,         OBJC_PRINT_DEPRECATION_WARNINGS, "warn about c
 OPTION( PrintPoolHiwat,           OBJC_PRINT_POOL_HIGHWATER,       "log high-water marks for autorelease pools")
 OPTION( PrintCustomRR,            OBJC_PRINT_CUSTOM_RR,            "log classes with un-optimized custom retain/release methods")
 OPTION( PrintCustomAWZ,           OBJC_PRINT_CUSTOM_AWZ,           "log classes with un-optimized custom allocWithZone methods")
+OPTION( PrintRawIsa,              OBJC_PRINT_RAW_ISA,              "log classes that require raw pointer isa fields")
 
 OPTION( DebugUnload,              OBJC_DEBUG_UNLOAD,               "warn about poorly-behaving bundles when unloaded")
 OPTION( DebugFragileSuperclasses, OBJC_DEBUG_FRAGILE_SUPERCLASSES, "warn about subclasses that may have been broken by subsequent changes to superclasses")
@@ -32,6 +33,7 @@ OPTION( DebugNilSync,             OBJC_DEBUG_NIL_SYNC,             "warn about @
 OPTION( DebugNonFragileIvars,     OBJC_DEBUG_NONFRAGILE_IVARS,     "capriciously rearrange non-fragile ivars")
 OPTION( DebugAltHandlers,         OBJC_DEBUG_ALT_HANDLERS,         "record more info about bad alt handler use")
 OPTION( DebugMissingPools,        OBJC_DEBUG_MISSING_POOLS,        "warn about autorelease with no pool in place, which may be a leak")
+OPTION( DebugDuplicateClasses,    OBJC_DEBUG_DUPLICATE_CLASSES,    "halt when multiple classes with the same name are present")
 
 OPTION( UseInternalZone,          OBJC_USE_INTERNAL_ZONE,          "allocate runtime data in a dedicated malloc zone")
 
@@ -39,3 +41,4 @@ OPTION( DisableGC,                OBJC_DISABLE_GC,                 "force GC OFF
 OPTION( DisableVtables,           OBJC_DISABLE_VTABLES,            "disable vtable dispatch")
 OPTION( DisablePreopt,            OBJC_DISABLE_PREOPTIMIZATION,    "disable preoptimization courtesy of dyld shared cache")
 OPTION( DisableTaggedPointers,    OBJC_DISABLE_TAGGED_POINTERS,    "disable tagged pointer optimization of NSNumber et al.") 
+OPTION( DisableIndexedIsa,        OBJC_DISABLE_NONPOINTER_ISA,     "disable non-pointer isa fields")

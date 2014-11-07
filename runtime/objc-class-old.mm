@@ -344,8 +344,8 @@ log_and_fill_cache(Class cls, Class implementer, Method meth, SEL sel)
 #if SUPPORT_MESSAGE_LOGGING
     if (objcMsgLogEnabled) {
         bool cacheIt = logMessageSend(implementer->isMetaClass(), 
-                                      cls->getName(),
-                                      implementer->getName(), 
+                                      cls->nameForLogging(),
+                                      implementer->nameForLogging(), 
                                       sel);
         if (!cacheIt) return;
     }
@@ -742,6 +742,16 @@ int class_getVersion(Class cls)
 {
     if (!cls) return 0;
     return (int)cls->version;
+}
+
+
+/***********************************************************************
+* class_getName.
+**********************************************************************/
+const char *class_getName(Class cls)
+{
+    if (!cls) return "nil";
+    else return cls->demangledName();
 }
 
 
@@ -2408,6 +2418,31 @@ void objc_disposeClassPair(Class cls)
 }
 
 
+/***********************************************************************
+* objc_constructInstance
+* Creates an instance of `cls` at the location pointed to by `bytes`. 
+* `bytes` must point to at least class_getInstanceSize(cls) bytes of 
+*   well-aligned zero-filled memory.
+* The new object's isa is set. Any C++ constructors are called.
+* Returns `bytes` if successful. Returns nil if `cls` or `bytes` is 
+*   nil, or if C++ constructors fail.
+**********************************************************************/
+id 
+objc_constructInstance(Class cls, void *bytes) 
+{
+    if (!cls  ||  !bytes) return nil;
+
+    id obj = (id)bytes;
+
+    obj->initIsa(cls);
+
+    if (cls->hasCxxCtor()) {
+        return object_cxxConstructFromClass(obj, cls);
+    } else {
+        return obj;
+    }
+}
+
 
 /***********************************************************************
 * _class_createInstanceFromZone.  Allocate an instance of the
@@ -2418,7 +2453,7 @@ void objc_disposeClassPair(Class cls)
 id 
 _class_createInstanceFromZone(Class cls, size_t extraBytes, void *zone)
 {
-    id obj;
+    void *bytes;
     size_t size;
 
     // Can't create something for nothing
@@ -2432,24 +2467,17 @@ _class_createInstanceFromZone(Class cls, size_t extraBytes, void *zone)
 
 #if SUPPORT_GC
     if (UseGC) {
-        obj = (id)auto_zone_allocate_object(gc_zone, size,
-                                            AUTO_OBJECT_SCANNED, 0, 1);
+        bytes = auto_zone_allocate_object(gc_zone, size,
+                                          AUTO_OBJECT_SCANNED, 0, 1);
     } else 
 #endif
     if (zone) {
-        obj = (id)malloc_zone_calloc((malloc_zone_t *)zone, 1, size);
+        bytes = malloc_zone_calloc((malloc_zone_t *)zone, 1, size);
     } else {
-        obj = (id)calloc(1, size);
-    }
-    if (!obj) return nil;
-
-    obj->initIsa(cls);
-
-    if (cls->hasCxxCtor()) {
-        obj = _objc_constructOrFree(cls, obj);
+        bytes = calloc(1, size);
     }
 
-    return obj;
+    return objc_constructInstance(cls, bytes);
 }
 
 
@@ -2651,6 +2679,18 @@ id object_reallocFromZone(id obj, size_t nBytes, void *z)
     OBJC_WARN_DEPRECATED;
     if (UseGC) return _object_reallocFromZone(obj, nBytes, z);
     else return (*_zoneRealloc)(obj, nBytes, z); 
+}
+
+
+/***********************************************************************
+* object_getIndexedIvars.
+**********************************************************************/
+void *object_getIndexedIvars(id obj)
+{
+    // ivars are tacked onto the end of the object
+    if (!obj) return nil;
+    if (obj->isTaggedPointer()) return nil;
+    return ((char *) obj) + obj->ISA()->alignedInstanceSize();
 }
 
 

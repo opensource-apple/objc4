@@ -1,5 +1,13 @@
 // TEST_CONFIG
 
+#if USE_FOUNDATION
+#define SUPERCLASS NSObject
+#define FILENAME "nscdtors.mm"
+#else
+#define SUPERCLASS TestRoot
+#define FILENAME "cdtors.mm"
+#endif
+
 #include "test.h"
 
 #include <pthread.h>
@@ -41,7 +49,7 @@ class cxx2 {
 */
 
 
-@interface CXXBase : TestRoot {
+@interface CXXBase : SUPERCLASS {
     cxx1 baseIvar;
 }
 @end
@@ -293,5 +301,5 @@ int main()
     // Batch allocation, ctors fail for every object
     // Batch allocation, ctors fail for every other object
 
-    succeed(__FILE__);
+    succeed(FILENAME);
 }

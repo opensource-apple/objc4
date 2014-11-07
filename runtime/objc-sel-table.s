@@ -7,7 +7,7 @@ __objc_opt_data:
 .long 0 /* table.selopt_offset */
 .long 0 /* table.headeropt_offset */
 .long 0 /* table.clsopt_offset */
-.space PAGE_SIZE-16
+.space PAGE_MAX_SIZE-16
 
 /* space for selopt, smax/capacity=262144, blen/mask=65535+1 */
 .space 65536
@@ -15,11 +15,11 @@ __objc_opt_data:
 .space 262144*4  /* offsets */
 
 	
-/* space for clsopt, smax/capacity=16384, blen/mask=4095+1 */
-.space PAGE_SIZE
-.space 16384    	/* checkbytes */
-.space 16384*12 	/* offsets to name and class and header_info */
-.space PAGE_SIZE	/* some duplicate classes */
+/* space for clsopt, smax/capacity=32768, blen/mask=4095+1 */
+.space PAGE_MAX_SIZE
+.space 32768    	/* checkbytes */
+.space 32768*12 	/* offsets to name and class and header_info */
+.space PAGE_MAX_SIZE	/* some duplicate classes */
 
 
 .section __DATA,__objc_opt_rw
@@ -27,4 +27,4 @@ __objc_opt_data:
 .private_extern __objc_opt_rw_data
 __objc_opt_rw_data:
 /* space for header_info structures */
-.space 16384
+.space 32768

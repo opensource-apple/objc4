@@ -15,6 +15,7 @@
 #include <sys/param.h>
 #include <malloc/malloc.h>
 #include <mach/mach.h>
+#include <mach/vm_param.h>
 #include <mach/mach_time.h>
 #include <objc/objc.h>
 #include <objc/runtime.h>
@@ -23,6 +24,21 @@
 #include <objc/objc-auto.h>
 #include <objc/objc-internal.h>
 #include <TargetConditionals.h>
+
+// Configuration macros
+
+#if !__LP64__ || TARGET_OS_WIN32 || __OBJC_GC__ || TARGET_IPHONE_SIMULATOR || (TARGET_OS_MAC  &&  !TARGET_OS_IPHONE)
+#   define SUPPORT_NONPOINTER_ISA 0
+#elif __x86_64__
+#   define SUPPORT_NONPOINTER_ISA 1
+#elif __arm64__
+#   define SUPPORT_NONPOINTER_ISA 1
+#else
+#   error unknown architecture
+#endif
+
+
+// Test output
 
 static inline void succeed(const char *name)  __attribute__((noreturn));
 static inline void succeed(const char *name)
@@ -176,6 +192,8 @@ static inline void testonthread(__unsafe_unretained testblock_t code)
    `#define TEST_CALLS_OPERATOR_NEW` before including test.h.
  */
 #if __cplusplus  &&  !defined(TEST_CALLS_OPERATOR_NEW)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winline-new-delete"
 #import <new>
 inline void* operator new(std::size_t) throw (std::bad_alloc) { fail("called global operator new"); }
 inline void* operator new[](std::size_t) throw (std::bad_alloc) { fail("called global operator new[]"); }
@@ -185,6 +203,7 @@ inline void operator delete(void*) throw() { fail("called global operator delete
 inline void operator delete[](void*) throw() { fail("called global operator delete[]"); }
 inline void operator delete(void*, const std::nothrow_t&) throw() { fail("called global operator delete(nothrow)"); }
 inline void operator delete[](void*, const std::nothrow_t&) throw() { fail("called global operator delete[](nothrow)"); }
+#pragma clang diagnostic pop
 #endif
 
 
@@ -212,7 +231,12 @@ static inline size_t leak_inuse(void)
         malloc_zone_t *zone = (malloc_zone_t *)zones[i];
         if (!zone->introspect || !zone->introspect->enumerator) continue;
 
+        // skip DispatchContinuations because it sometimes claims to be 
+        // using lots of memory that then goes away later
+        if (0 == strcmp(zone->zone_name, "DispatchContinuations")) continue;
+
         zone->introspect->enumerator(mach_task_self(), &inuse, MALLOC_PTR_IN_USE_RANGE_TYPE, (vm_address_t)zone, NULL, leak_recorder);
+        // fprintf(stderr, "%zu in use for zone %s\n", inuse, zone->zone_name);
         total += inuse;
     }
 

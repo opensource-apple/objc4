@@ -1285,16 +1285,16 @@ static void _cache_print(Cache cache)
 void _class_printMethodCaches(Class cls)
 {
     if (_cache_isEmpty(cls->cache)) {
-        printf("no instance-method cache for class %s\n", cls->getName());
+        printf("no instance-method cache for class %s\n",cls->nameForLogging());
     } else {
-        printf("instance-method cache for class %s:\n", cls->getName());
+        printf("instance-method cache for class %s:\n", cls->nameForLogging());
         _cache_print(cls->cache);
     }
 
     if (_cache_isEmpty(cls->ISA()->cache)) {
-        printf("no class-method cache for class %s\n", cls->getName());
+        printf("no class-method cache for class %s\n", cls->nameForLogging());
     } else {
-        printf ("class-method cache for class %s:\n", cls->getName());
+        printf ("class-method cache for class %s:\n", cls->nameForLogging());
         _cache_print(cls->ISA()->cache);
     }
 }
@@ -1356,7 +1356,7 @@ void _class_printDuplicateCacheEntries(BOOL detail)
                                 (char *) cache->buckets[index2]->name)) == 0)
                     {
                         if (detail)
-                            printf ("%s %s\n", cls->getName(), sel_getName(cache->buckets[index1]->name));
+                            printf ("%s %s\n", cls->nameForLogging(), sel_getName(cache->buckets[index1]->name));
                         duplicates += 1;
                         break;
                     }

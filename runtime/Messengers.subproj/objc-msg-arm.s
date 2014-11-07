@@ -601,7 +601,7 @@ LMsgSendSuper2StretExit:
 	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache3)
 	mov     r12, r0			// r12 = IMP
 
-	teq	r12, r12		// set eq for nonstret forwarding
+	movs	r9, #0			// r9=0, Z=1 for nonstret forwarding
 	ldmfd	sp!, {r0-r3,r7,lr}
 	bx	r12
 
@@ -623,7 +623,7 @@ LMsgSendSuper2StretExit:
 	MI_CALL_EXTERNAL(__class_lookupMethodAndLoadCache3)
 	mov     r12, r0			// r12 = IMP
 
-	tst	r12, r12		// set ne for stret forwarding (r12!=0)
+	movs	r9, #1			// r9=1, Z=0 for stret forwarding
 	ldmfd	sp!, {r0-r3,r7,lr}
 	bx	r12
 	
@@ -631,65 +631,19 @@ LMsgSendSuper2StretExit:
 
 	
 /********************************************************************
- *
- * id		_objc_msgForward(id	self,
- *				SEL	sel,
- *					...);
- * struct_type	_objc_msgForward_stret	(id	self,
- *					SEL	sel,
- *					...);
- *
- * Both _objc_msgForward and _objc_msgForward_stret 
- * send the message to a method having the signature:
- *
- *      - forward:(SEL)sel :(marg_list)args;
- * 
- * The marg_list's layout is:
- * d0   <-- args
- * d1
- * d2   |  increasing address
- * d3   v
- * d4
- * d5
- * d6
- * d7
- * r0
- * r1
- * r2
- * r3
- * stack args...
- * 
- * typedef struct objc_sendv_margs {
- *	int		a[4];
- *	int		stackArgs[...];
- * };
- *
- ********************************************************************/
+*
+* id _objc_msgForward(id self, SEL _cmd,...);
+*
+* _objc_msgForward and _objc_msgForward_stret are the externally-callable
+*   functions returned by things like method_getImplementation().
+* _objc_msgForward_impcache is the function pointer actually stored in
+*   method caches.
+*
+********************************************************************/
 
-
-	.cstring
-LUnkSelStr:	
-	.ascii "Does not recognize selector %s\0"
-
-.private_extern _FwdSel
-	.data
-	.align 2
-_FwdSel:
-	.long 0
-
-.private_extern __objc_forward_handler
-	.data
-	.align 2
-__objc_forward_handler:
-	.long 0
-
-.private_extern __objc_forward_stret_handler
-	.data
-	.align 2
-__objc_forward_stret_handler:
-	.long 0
-
-
+	MI_EXTERN(__objc_forward_handler)
+	MI_EXTERN(__objc_forward_stret_handler)
+	
 	STATIC_ENTRY   _objc_msgForward_impcache
 	// Method cache version
 
@@ -713,43 +667,9 @@ __objc_forward_stret_handler:
 	ENTRY   _objc_msgForward
 	// Non-stret version
 
-// check for user-installed forwarding handler
-	MI_GET_ADDRESS(r12, __objc_forward_handler)
+	MI_GET_EXTERN(r12, __objc_forward_handler)
 	ldr	r12, [r12]
-	teq	r12, #0
-	it	ne
-	bxne	r12
-
-// build marg_list
-	stmfd   sp!, {r0-r3}             // push args to marg_list
-
-// build forward::'s parameter list  (self, forward::, original sel, marg_list)
-	// r0 already is self
-	mov     r2, r1                   // original sel
-	MI_GET_ADDRESS(r1, _FwdSel)  // "forward::"
-	ldr	r1, [r1]
-	mov     r3, sp                   // marg_list
-
-// check for forwarding of forward:: itself
-	teq     r1, r2
-	beq     LMsgForwardError         // original sel == forward:: - give up
-
-// push stack frame
-	str     lr, [sp, #-(2*4)]!       // save lr and align stack
-
-// send it
-	bl      _objc_msgSend
-
-// pop stack frame and return
-	ldr	lr, [sp]
-	add	sp, sp, #(4 + 4 + 4*4) 		// skip lr, pad, r0..r3
-	bx	lr
-
-LMsgForwardError:
-	// currently r0=self, r1=forward::, r2 = original sel, r3 = marg_list
-	// call __objc_error(self, format, original sel)
-	MI_GET_ADDRESS(r1, LUnkSelStr)
-	MI_CALL_EXTERNAL(___objc_error)
+	bx	r12
 
 	END_ENTRY _objc_msgForward
 
@@ -757,43 +677,9 @@ LMsgForwardError:
 	ENTRY   _objc_msgForward_stret
 	// Struct-return version
 
-// check for user-installed forwarding handler
-	MI_GET_ADDRESS(r12, __objc_forward_stret_handler)
+	MI_GET_EXTERN(r12, __objc_forward_stret_handler)
 	ldr	r12, [r12]
-	teq	r12, #0
-	it	ne
-	bxne	r12
-
-// build marg_list
-	stmfd   sp!, {r0-r3}             // push args to marg_list
-
-// build forward::'s parameter list  (self, forward::, original sel, marg_list)
-	mov     r0, r1                   // self
-	MI_GET_ADDRESS(r1, _FwdSel)      // "forward::"
-	ldr	r1, [r1]
-	// r2 is already original sel
-	mov     r3, sp                   // marg_list
-
-// check for forwarding of forward:: itself
-	teq     r1, r2
-	beq     LMsgForwardStretError    // original sel == forward:: - give up
-
-// push stack frame
-	str     lr, [sp, #-(2*4)]!       // save lr and align stack
-
-// send it
-	bl      _objc_msgSend
-
-// pop stack frame and return
-	ldr	lr, [sp]
-	add	sp, sp, #(4 + 4 + 4*4) 		// skip lr, pad, r0..r3
-	bx	lr
-
-LMsgForwardStretError:
-	// currently r0=self, r1=forward::, r2 = original sel, r3 = marglist
-	// call __objc_error(self, format, original sel)
-	MI_GET_ADDRESS(r1, LUnkSelStr)
-	MI_CALL_EXTERNAL(___objc_error)
+	bx	r12
 
 	END_ENTRY _objc_msgForward_stret
 

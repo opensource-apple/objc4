@@ -44,6 +44,7 @@ options:
 
     CC=<compiler name>
 
+    LANGUAGE=c,c++,objective-c,objective-c++,swift
     MEM=mrc,arc,gc
     STDLIB=libc++,libstdc++
     GUARDMALLOC=0|1
@@ -82,8 +83,8 @@ my %ALL_TESTS;
 
 # things you can multiplex on the command line
 # ARCH=i386,x86_64,armv6,armv7
-# SDK=system,macosx,iphoneos,iphonesimulator
-# LANGUAGE=c,c++,objective-c,objective-c++
+# SDK=macosx,iphoneos,iphonesimulator
+# LANGUAGE=c,c++,objective-c,objective-c++,swift
 # CC=clang,gcc-4.2,llvm-gcc-4.2
 # MEM=mrc,arc,gc
 # STDLIB=libc++,libstdc++
@@ -162,9 +163,10 @@ my %extensions_for_language = (
     "c"     => ["c"],     
     "objective-c" => ["c", "m"], 
     "c++" => ["c", "cc", "cp", "cpp", "cxx", "c++"], 
-    "objective-c++" => ["c", "m", "cc", "cp", "cpp", "cxx", "c++", "mm"],
+    "objective-c++" => ["c", "m", "cc", "cp", "cpp", "cxx", "c++", "mm"], 
+    "swift" => ["swift"], 
 
-    "any" => ["c", "m", "cc", "cp", "cpp", "cxx", "c++", "mm"],
+    "any" => ["c", "m", "cc", "cp", "cpp", "cxx", "c++", "mm", "swift"], 
     );
 
 # map extension to languages
@@ -177,6 +179,7 @@ my %languages_for_extension = (
     "cpp" => ["c++", "objective-c++"], 
     "cxx" => ["c++", "objective-c++"], 
     "c++" => ["c++", "objective-c++"], 
+    "swift" => ["swift"], 
     );
 
 # Run some newline-separated commands like `make` would, stopping if any fail
@@ -250,11 +253,18 @@ sub cplusplus {
     return $c . "++";                         # e.g. clang => clang++
 }
 
+# Turn a C compiler name into a Swift compiler name
+sub swift {
+    my ($c) = @_;
+    $c =~ s#[^/]*$#swift#;
+    return $c;
+}
+
 # Returns an array of all sdks from `xcodebuild -showsdks`
 my @sdks_memo;
 sub getsdks {
     if (!@sdks_memo) {
-        @sdks_memo = ("system", `xcodebuild -showsdks` =~ /-sdk (.+)$/mg);
+        @sdks_memo = (`xcodebuild -showsdks` =~ /-sdk (.+)$/mg);
     }
     return @sdks_memo;
 }
@@ -262,7 +272,6 @@ sub getsdks {
 # Returns whether the given sdk supports -lauto
 sub supportslibauto {
     my ($sdk) = @_;
-    return 1 if $sdk eq "system";
     return 1 if $sdk =~ /^macosx/;
     return 0 if $sdk =~ /^iphone/;
     die;
@@ -338,6 +347,7 @@ sub check_output {
     my $bad = "";
     my $warn = "";
     my $runerror = $T{TEST_RUN_OUTPUT};
+    filter_hax(\@output);
     filter_verbose(\@output);
     $warn = filter_warn(\@output);
     $bad |= filter_guardmalloc(\@output) if ($C{GUARDMALLOC});
@@ -432,6 +442,20 @@ sub filter_verbose
     my @new_output;
     for my $line (@$outputref) {
 	if ($line !~ /^VERBOSE: (.*)/) {
+	    push @new_output, $line;
+	}
+    }
+
+    @$outputref = @new_output;
+}
+
+sub filter_hax
+{
+    my $outputref = shift;
+
+    my @new_output;
+    for my $line (@$outputref) {
+	if ($line !~ /Class OS_tcp_/) {
 	    push @new_output, $line;
 	}
     }
@@ -540,6 +564,40 @@ sub filter_guardmalloc
     return $bad;
 }
 
+# TEST_SOMETHING
+# text
+# text
+# END
+sub extract_multiline {
+    my ($flag, $contents, $name) = @_;
+    if ($contents =~ /$flag\n/) {
+        my ($output) = ($contents =~ /$flag\n(.*?\n)END[ *\/]*\n/s);
+        die "$name used $flag without END\n"  if !defined($output);
+        return $output;
+    }
+    return undef;
+}
+
+
+# TEST_SOMETHING
+# text
+# OR
+# text
+# END
+sub extract_multiple_multiline {
+    my ($flag, $contents, $name) = @_;
+    if ($contents =~ /$flag\n/) {
+        my ($output) = ($contents =~ /$flag\n(.*?\n)END[ *\/]*\n/s);
+        die "$name used $flag without END\n"  if !defined($output);
+
+        $output =~ s/\nOR\n/\n|/sg;
+        $output = "^(" . $output . ")\$";
+        return $output;
+    }
+    return undef;
+}
+
+
 sub gather_simple {
     my $CREF = shift;
     my %C = %{$CREF};
@@ -567,9 +625,9 @@ sub gather_simple {
     my ($conditionstring) = ($contents =~ /\bTEST_CONFIG\b(.*)$/m);
     my ($envstring) = ($contents =~ /\bTEST_ENV\b(.*)$/m);
     my ($cflags) = ($contents =~ /\bTEST_CFLAGS\b(.*)$/m);
-    my ($buildcmd) = ($contents =~ /TEST_BUILD\n(.*?\n)END[ *\/]*\n/s);
-    my ($builderror) = ($contents =~ /TEST_BUILD_OUTPUT\n(.*?\n)END[ *\/]*\n/s);
-    my ($runerror) = ($contents =~ /TEST_RUN_OUTPUT\n(.*?\n)END[ *\/]*\n/s);
+    my ($buildcmd) = extract_multiline("TEST_BUILD", $contents, $name);
+    my ($builderror) = extract_multiple_multiline("TEST_BUILD_OUTPUT", $contents, $name);
+    my ($runerror) = extract_multiple_multiline("TEST_RUN_OUTPUT", $contents, $name);
 
     return 0 if !$test_h && !$disabled && !$crashes && !defined($conditionstring) && !defined($envstring) && !defined($cflags) && !defined($buildcmd) && !defined($builderror) && !defined($runerror);
 
@@ -599,11 +657,6 @@ sub gather_simple {
         next if !defined($testvalue);
         # testvalue is the configuration being run now
         # condvalues are the allowed values for this test
-
-        # special case: look up the name of SDK "system" 
-        if ($condkey eq "SDK"  &&  $testvalue eq "system") {
-            $testvalue = systemsdkname();
-        }
         
         my $ok = 0;
         for my $condvalue (@condvalues) {
@@ -616,10 +669,9 @@ sub gather_simple {
 
             $ok = 1  if ($testvalue eq $condvalue);
 
-            # special case: SDK allows prefixes, and "system" is "macosx"
+            # special case: SDK allows prefixes
             if ($condkey eq "SDK") {
                 $ok = 1  if ($testvalue =~ /^$condvalue/);
-                $ok = 1  if ($testvalue eq "system"  &&  "macosx" =~ /^$condvalue/);
             }
 
             # special case: CC and CXX allow substring matches
@@ -635,17 +687,6 @@ sub gather_simple {
             print "SKIP: $name    ($condkey=$testvalue, but test requires $plural", join(' ', @condvalues), ")\n";
             return 0;
         }
-    }
-
-    # builderror is multiple REs separated by OR
-    if (defined $builderror) {
-        $builderror =~ s/\nOR\n/\n|/sg;
-        $builderror = "^(" . $builderror . ")\$";
-    }
-    # runerror is multiple REs separated by OR
-    if (defined $runerror) {
-        $runerror =~ s/\nOR\n/\n|/sg;
-        $runerror = "^(" . $runerror . ")\$";
     }
 
     # save some results for build and run phases
@@ -681,6 +722,9 @@ sub build_simple {
     my $cmd = $T{TEST_BUILD} ? eval "return \"$T{TEST_BUILD}\"" : "$C{COMPILE}   $T{TEST_CFLAGS} $file -o $name.out";
 
     my $output = make($cmd);
+
+    # rdar://10163155
+    $output =~ s/ld: warning: could not create compact unwind for [^\n]+: does not use standard frame\n//g;
 
     my $ok;
     if (my $builderror = $T{TEST_BUILD_OUTPUT}) {
@@ -745,7 +789,8 @@ sub run_simple {
         # run on iOS device
 
         my $remotedir = "/var/root/test/" . basename($C{DIR}) . "/$name.build";
-        my $remotedyld = " DYLD_LIBRARY_PATH=$remotedir";
+        my $remotedyld = "";
+        $remotedyld .= " DYLD_LIBRARY_PATH=$remotedir";
         $remotedyld .= ":/var/root/test/"  if ($C{TESTLIB} ne $TESTLIBPATH);
 
         # elide host-specific paths
@@ -777,11 +822,7 @@ sub find_compiler {
     my $result = $compiler_memo{$key};
     return $result if defined $result;
     
-    if ($sdk eq "system") {
-        $result  = `xcrun -find $cc 2>/dev/null`;
-    } else {
-        $result  = `xcrun -sdk $sdk -find $cc 2>/dev/null`;
-    }
+    $result  = `xcrun -sdk $sdk -find $cc 2>/dev/null`;
 
     chomp $result;
     $compiler_memo{$key} = $result;
@@ -829,10 +870,7 @@ sub make_one_config {
     (my $configdir = $configname) =~ s#/##g;
     $C{DIR} = "$BUILDDIR/$configdir";
 
-    $C{SDK_PATH} = "/";
-    if ($C{SDK} ne "system") {
-        ($C{SDK_PATH}) = (`xcodebuild -version -sdk $C{SDK} Path` =~ /^\s*(.+?)\s*$/);
-    }
+    ($C{SDK_PATH}) = (`xcodebuild -version -sdk $C{SDK} Path` =~ /^\s*(.+?)\s*$/);
 
     # Look up test library (possible in root or SDK_PATH)
     
@@ -878,15 +916,19 @@ sub make_one_config {
     # Look up compilers
     my $cc = $C{CC};
     my $cxx = cplusplus($C{CC});
+    my $swift = swift($C{CC});
     if (! $BUILD) {
         $C{CC} = $cc;
         $C{CXX} = $cxx;
+        $C{SWIFT} = $swift
     } else {
         $C{CC} = find_compiler($cc, $C{SDK}, $C{SDK_PATH});
         $C{CXX} = find_compiler($cxx, $C{SDK}, $C{SDK_PATH});
+        $C{SWIFT} = find_compiler($swift, $C{SDK}, $C{SDK_PATH});
 
         die "No compiler '$cc' ('$C{CC}') in SDK '$C{SDK}'\n" if !-e $C{CC};
         die "No compiler '$cxx' ('$C{CXX}') in SDK '$C{SDK}'\n" if !-e $C{CXX};
+        die "No compiler '$swift' ('$C{SWIFT}') in SDK '$C{SDK}'\n" if !-e $C{SWIFT};
     }    
     
     # Populate cflags
@@ -894,21 +936,31 @@ sub make_one_config {
     # save-temps so dsymutil works so debug info works
     my $cflags = "-I$DIR -W -Wall -Wno-deprecated-declarations -Wshorten-64-to-32 -g -save-temps -Os -arch $C{ARCH} ";
     my $objcflags = "";
+    my $swiftflags = "-g ";
     
-    if ($C{SDK} ne "system") {
-        $cflags .= " -isysroot '$C{SDK_PATH}'";
-        $cflags .= " '-Wl,-syslibroot,$C{SDK_PATH}'";
-    }
+    $cflags .= " -isysroot '$C{SDK_PATH}'";
+    $cflags .= " '-Wl,-syslibroot,$C{SDK_PATH}'";
+    $swiftflags .= " -sdk '$C{SDK_PATH}'";
     
+    my $target = "";
     if ($C{SDK} =~ /^iphoneos[0-9]/  &&  $cflags !~ /-mios-version-min/) {
-        my ($vers) = ($C{SDK} =~ /^iphoneos([0-9]+\.[0-9+])/);
+        my ($vers) = ($C{SDK} =~ /^iphoneos([0-9]+\.[0-9]+)/);
         $cflags .= " -mios-version-min=$vers";
+        $target = "$C{ARCH}-apple-ios$vers";
     }
-    if ($C{SDK} =~ /^iphonesimulator[0-9]/  &&  $cflags !~ /-mios-simulator-version-min/) {
-        my ($vers) = ($C{SDK} =~ /^iphonesimulator([0-9]+\.[0-9+])/);
+    elsif ($C{SDK} =~ /^iphonesimulator[0-9]/  &&  $cflags !~ /-mios-simulator-version-min/) {
+        my ($vers) = ($C{SDK} =~ /^iphonesimulator([0-9]+\.[0-9]+)/);
         $cflags .= " -mios-simulator-version-min=$vers";
+        $target = "$C{ARCH}-apple-ios$vers";
     }
-    if ($C{SDK} =~ /^iphonesimulator/) {
+    else {
+        my ($vers) = ($C{SDK} =~ /^macosx([0-9]+\.[0-9]+)/);
+        $vers = ""  if !defined($vers);
+        $target = "$C{ARCH}-apple-macosx$vers";
+    }
+    $swiftflags .= " -target $target";
+
+    if ($C{SDK} =~ /^iphonesimulator/  &&  $C{ARCH} eq "i386") {
         $objcflags .= " -fobjc-abi-version=2 -fobjc-legacy-dispatch";
     }
     
@@ -926,7 +978,8 @@ sub make_one_config {
 
     if ($C{CC} =~ /clang/) {
         $cflags .= " -Qunused-arguments -fno-caret-diagnostics";
-        $cflags .= " -stdlib=$C{STDLIB} -fno-objc-link-runtime";
+        $cflags .= " -stdlib=$C{STDLIB}"; # fixme -fno-objc-link-runtime"
+        $cflags .= " -Wl,-segalign,0x4000 ";
     }
 
     
@@ -980,11 +1033,13 @@ sub make_one_config {
     $C{COMPILE_CXX} = "env LANG=C '$C{CXX}' $cflags -x c++";
     $C{COMPILE_M}   = "env LANG=C '$C{CC}'  $cflags $objcflags -x objective-c -std=gnu99";
     $C{COMPILE_MM}  = "env LANG=C '$C{CXX}' $cflags $objcflags -x objective-c++";
+    $C{COMPILE_SWIFT} = "env LANG=C '$C{SWIFT}' $swiftflags";
     
-    $C{COMPILE} = $C{COMPILE_C}    if $C{LANGUAGE} eq "c";
-    $C{COMPILE} = $C{COMPILE_CXX}  if $C{LANGUAGE} eq "c++";
-    $C{COMPILE} = $C{COMPILE_M}    if $C{LANGUAGE} eq "objective-c";
-    $C{COMPILE} = $C{COMPILE_MM}   if $C{LANGUAGE} eq "objective-c++";
+    $C{COMPILE} = $C{COMPILE_C}      if $C{LANGUAGE} eq "c";
+    $C{COMPILE} = $C{COMPILE_CXX}    if $C{LANGUAGE} eq "c++";
+    $C{COMPILE} = $C{COMPILE_M}      if $C{LANGUAGE} eq "objective-c";
+    $C{COMPILE} = $C{COMPILE_MM}     if $C{LANGUAGE} eq "objective-c++";
+    $C{COMPILE} = $C{COMPILE_SWIFT}  if $C{LANGUAGE} eq "swift";
     die "unknown language '$C{LANGUAGE}'\n" if !defined $C{COMPILE};
 
     ($C{COMPILE_NOMEM} = $C{COMPILE}) =~ s/ -fobjc-(?:gc|arc)\S*//g;
@@ -1016,6 +1071,13 @@ sub make_one_config {
     if ($C{STDLIB} ne "libstdc++"  &&  $C{CC} !~ /clang/) {
         print "note: skipping configuration $C{NAME}\n";
         print "note:   because CC=$C{CC} does not support STDLIB=$C{STDLIB}\n";
+        return 0;
+    }
+
+    # fixme 
+    if ($C{LANGUAGE} eq "swift"  &&  $C{ARCH} =~ /^arm/) {
+        print "note: skipping configuration $C{NAME}\n";
+        print "note:   because ARCH=$C{ARCH} does not support LANGAUGE=SWIFT\n";
         return 0;
     }
 
@@ -1122,11 +1184,7 @@ sub run_one_config {
 
             # upload library to iOS device
             if ($C{TESTLIB} ne $TESTLIBPATH) {
-                # hack - send thin library because device may use lib=armv7 
-                # even though app=armv6, and we want to set the lib's arch
-                make("xcrun -sdk $C{SDK} lipo -output /tmp/$TESTLIBNAME -thin $C{ARCH} $C{TESTLIB}  ||  cp $C{TESTLIB} /tmp/$TESTLIBNAME");
-                die "Couldn't thin $C{TESTLIB} to $C{ARCH}\n" if ($?);
-                make("RSYNC_PASSWORD=alpine rsync -av /tmp/$TESTLIBNAME rsync://root\@localhost:10873/root/var/root/test/");
+                make("RSYNC_PASSWORD=alpine rsync -av $C{TESTLIB} rsync://root\@localhost:10873/root/var/root/test/");
                 die "Couldn't rsync $C{TESTLIB} to device\n" if ($?);
                 make("RSYNC_PASSWORD=alpine rsync -av $C{TESTDSYM} rsync://root\@localhost:10873/root/var/root/test/");
             }
@@ -1161,7 +1219,7 @@ sub getargs {
         return [split ',', $value] if defined $value;
     }
 
-    return [$default];
+    return [split ',', $default];
 }
 
 # Return 1 or 0 if set by "$argname=1" or "$argname=0" on the 
@@ -1196,10 +1254,10 @@ my $default_arch = (`/usr/sbin/sysctl hw.optional.x86_64` eq "hw.optional.x86_64
 $args{ARCH} = getargs("ARCH", 0);
 $args{ARCH} = getargs("ARCHS", $default_arch)  if !@{$args{ARCH}}[0];
 
-$args{SDK} = getargs("SDK", "system");
+$args{SDK} = getargs("SDK", "macosx");
 
 $args{MEM} = getargs("MEM", "mrc");
-$args{LANGUAGE} = [ map { lc($_) } @{getargs("LANGUAGE", "objective-c")} ];
+$args{LANGUAGE} = [ map { lc($_) } @{getargs("LANGUAGE", "objective-c,swift")} ];
 $args{STDLIB} = getargs("STDLIB", "libstdc++");
 
 $args{CC} = getargs("CC", "clang");

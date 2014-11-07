@@ -31,25 +31,27 @@ __BEGIN_DECLS
 
 /*
 The weak table is a hash table governed by a single spin lock.
-An allocated blob of memory, most often an object, but under GC any such allocation,
-may have its address stored in a __weak marked storage location through use of
-compiler generated write-barriers or hand coded uses of the register weak primitive.
-Associated with the registration can be a callback block for the case when one of
- the allocated chunks of memory is reclaimed.
-The table is hashed on the address of the allocated memory.  When __weak marked memory
- changes its reference, we count on the fact that we can still see its previous reference.
+An allocated blob of memory, most often an object, but under GC any such 
+allocation, may have its address stored in a __weak marked storage location 
+through use of compiler generated write-barriers or hand coded uses of the 
+register weak primitive. Associated with the registration can be a callback 
+block for the case when one of the allocated chunks of memory is reclaimed. 
+The table is hashed on the address of the allocated memory.  When __weak 
+marked memory changes its reference, we count on the fact that we can still 
+see its previous reference.
 
-So, in the hash table, indexed by the weakly referenced item, is a list of all locations
- where this address is currently being stored.
+So, in the hash table, indexed by the weakly referenced item, is a list of 
+all locations where this address is currently being stored.
  
-For ARR, we also keep track of whether an arbitrary object is being deallocated by
- briefly placing it in the table just prior to invoking dealloc, and removing it
- via objc_clear_deallocating just prior to memory reclamation.
- 
+For ARR, we also keep track of whether an arbitrary object is being 
+deallocated by briefly placing it in the table just prior to invoking 
+dealloc, and removing it via objc_clear_deallocating just prior to memory 
+reclamation.
+
 */
 
 /// The address of a __weak object reference
-typedef id * weak_referrer_t;
+typedef objc_object ** weak_referrer_t;
 
 #if __LP64__
 #define PTR_MINUS_1 63
@@ -65,7 +67,7 @@ typedef id * weak_referrer_t;
  */
 #define WEAK_INLINE_COUNT 4
 struct weak_entry_t {
-    id              referent;
+    DisguisedPtr<objc_object> referent;
     union {
         struct {
             weak_referrer_t *referrers;
@@ -97,6 +99,11 @@ id weak_register_no_lock(weak_table_t *weak_table, id referent, id *referrer);
 
 /// Removes an (object, weak pointer) pair from the weak table.
 void weak_unregister_no_lock(weak_table_t *weak_table, id referent, id *referrer);
+
+#if !NDEBUG
+/// Returns true if an object is weakly referenced somewhere.
+bool weak_is_registered_no_lock(weak_table_t *weak_table, id referent);
+#endif
 
 /// Assert a weak pointer is valid and retain the object during its use.
 id weak_read_no_lock(weak_table_t *weak_table, id *referrer);
