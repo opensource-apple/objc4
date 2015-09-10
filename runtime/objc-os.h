@@ -331,15 +331,17 @@ extern void _objc_fatal(const char *fmt, ...) __attribute__((noreturn, format (p
 
 
 // Thread keys reserved by libc for our use.
-// Keys [0..4] are used by autozone.
-#if defined(__PTK_FRAMEWORK_OBJC_KEY5)
+#if defined(__PTK_FRAMEWORK_OBJC_KEY0)
 #   define SUPPORT_DIRECT_THREAD_KEYS 1
-#   define TLS_DIRECT_KEY        ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY5)
-#   define SYNC_DATA_DIRECT_KEY  ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY6)
-#   define SYNC_COUNT_DIRECT_KEY ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY7)
-#   define AUTORELEASE_POOL_KEY  ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY8)
+#   define TLS_DIRECT_KEY        ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY0)
+#   define SYNC_DATA_DIRECT_KEY  ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY1)
+#   define SYNC_COUNT_DIRECT_KEY ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY2)
+#   define AUTORELEASE_POOL_KEY  ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY3)
 # if SUPPORT_RETURN_AUTORELEASE
-#   define AUTORELEASE_POOL_RECLAIM_KEY ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY9)
+#   define AUTORELEASE_POOL_RECLAIM_KEY ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY4)
+# endif
+# if SUPPORT_QOS_HACK
+#   define QOS_KEY               ((tls_key_t)__PTK_FRAMEWORK_OBJC_KEY5)
 # endif
 #else
 #   define SUPPORT_DIRECT_THREAD_KEYS 0
@@ -661,6 +663,9 @@ static bool is_valid_direct_key(tls_key_t k) {
 #   if SUPPORT_RETURN_AUTORELEASE
             || k == AUTORELEASE_POOL_RECLAIM_KEY
 #   endif
+#   if SUPPORT_QOS_HACK
+            || k == QOS_KEY
+#   endif
                );
 }
 #endif
@@ -734,6 +739,28 @@ static inline void tls_set_direct(tls_key_t k, void *value)
 #endif
 
 // SUPPORT_DIRECT_THREAD_KEYS
+#endif
+
+
+static inline pthread_t pthread_self_direct()
+{
+    return (pthread_t)
+        _pthread_getspecific_direct(_PTHREAD_TSD_SLOT_PTHREAD_SELF);
+}
+
+static inline mach_port_t mach_thread_self_direct() 
+{
+    return (mach_port_t)(uintptr_t)
+        _pthread_getspecific_direct(_PTHREAD_TSD_SLOT_MACH_THREAD_SELF);
+}
+
+#if SUPPORT_QOS_HACK
+static inline pthread_priority_t pthread_self_priority_direct() 
+{
+    pthread_priority_t pri = (pthread_priority_t)
+        _pthread_getspecific_direct(_PTHREAD_TSD_SLOT_PTHREAD_QOS_CLASS);
+    return pri & ~_PTHREAD_PRIORITY_FLAGS_MASK;
+}
 #endif
 
 
@@ -817,6 +844,59 @@ static inline semaphore_t create_semaphore(void)
 }
 
 
+#if SUPPORT_QOS_HACK
+// Override QOS class to avoid priority inversion in rwlocks
+// <rdar://17697862> do a qos override before taking rw lock in objc
+
+#include <pthread/workqueue_private.h>
+extern pthread_priority_t BackgroundPriority;
+extern pthread_priority_t MainPriority;
+
+static inline void qosStartOverride()
+{
+    uintptr_t overrideRefCount = (uintptr_t)tls_get_direct(QOS_KEY);
+    if (overrideRefCount > 0) {
+        // If there is a qos override, increment the refcount and continue
+        tls_set_direct(QOS_KEY, (void *)(overrideRefCount + 1));
+    }
+    else {
+        pthread_priority_t currentPriority = pthread_self_priority_direct();
+        // Check if override is needed. Only override if we are background qos
+        if (currentPriority <= BackgroundPriority) {
+            int res __unused = _pthread_override_qos_class_start_direct(mach_thread_self_direct(), MainPriority);
+            assert(res == 0);
+            // Once we override, we set the reference count in the tsd 
+            // to know when to end the override
+            tls_set_direct(QOS_KEY, (void *)1);
+        }
+    }
+}
+
+static inline void qosEndOverride()
+{
+    uintptr_t overrideRefCount = (uintptr_t)tls_get_direct(QOS_KEY);
+    if (overrideRefCount == 0) return;
+
+    if (overrideRefCount == 1) {
+        // end the override
+        int res __unused = _pthread_override_qos_class_end_direct(mach_thread_self_direct());
+        assert(res == 0);
+    }
+
+    // decrement refcount
+    tls_set_direct(QOS_KEY, (void *)(overrideRefCount - 1));
+}
+
+// SUPPORT_QOS_HACK
+#else
+// not SUPPORT_QOS_HACK
+
+static inline void qosStartOverride() { }
+static inline void qosEndOverride() { }
+
+// not SUPPORT_QOS_HACK
+#endif
+
 /* Custom read-write lock
    - reader is atomic add/subtract 
    - writer is pthread mutex plus atomic add/subtract
@@ -840,6 +920,7 @@ static inline void rwlock_init(rwlock_t *l)
 
 static inline void _rwlock_read_nodebug(rwlock_t *l)
 {
+    qosStartOverride();
     int err __unused = pthread_rwlock_rdlock(&l->rwl);
     assert(err == 0);
 }
@@ -848,19 +929,27 @@ static inline void _rwlock_unlock_read_nodebug(rwlock_t *l)
 {
     int err __unused = pthread_rwlock_unlock(&l->rwl);
     assert(err == 0);
+    qosEndOverride();
 }
 
 
 static inline bool _rwlock_try_read_nodebug(rwlock_t *l)
 {
+    qosStartOverride();
     int err = pthread_rwlock_tryrdlock(&l->rwl);
-    assert(err == 0  ||  err == EBUSY);
-    return (err == 0);
+    assert(err == 0  ||  err == EBUSY  ||  err == EAGAIN);
+    if (err == 0) {
+        return true;
+    } else {
+        qosEndOverride();
+        return false;
+    }
 }
 
 
 static inline void _rwlock_write_nodebug(rwlock_t *l)
 {
+    qosStartOverride();
     int err __unused = pthread_rwlock_wrlock(&l->rwl);
     assert(err == 0);
 }
@@ -869,13 +958,20 @@ static inline void _rwlock_unlock_write_nodebug(rwlock_t *l)
 {
     int err __unused = pthread_rwlock_unlock(&l->rwl);
     assert(err == 0);
+    qosEndOverride();
 }
 
 static inline bool _rwlock_try_write_nodebug(rwlock_t *l)
 {
+    qosStartOverride();
     int err = pthread_rwlock_trywrlock(&l->rwl);
     assert(err == 0  ||  err == EBUSY);
-    return (err == 0);
+    if (err == 0) {
+        return true;
+    } else {
+        qosEndOverride();
+        return false;
+    }
 }
 
 

@@ -142,6 +142,13 @@
 #   define SUPPORT_MESSAGE_LOGGING 1
 #endif
 
+// Define SUPPORT_QOS_HACK to work around deadlocks due to QoS bugs.
+#if !__OBJC2__  ||  TARGET_OS_WIN32
+#   define SUPPORT_QOS_HACK 0
+#else
+#   define SUPPORT_QOS_HACK 1
+#endif
+
 // OBJC_INSTRUMENTED controls whether message dispatching is dynamically
 // monitored.  Monitoring introduces substantial overhead.
 // NOTE: To define this condition, do so in the build command, NOT by

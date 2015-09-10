@@ -9,14 +9,13 @@ __objc_opt_data:
 .long 0 /* table.clsopt_offset */
 .space PAGE_MAX_SIZE-16
 
-/* space for selopt, smax/capacity=262144, blen/mask=65535+1 */
-.space 65536
+/* space for selopt, smax/capacity=262144, blen/mask=131071+1 */
+.space 131072    /* mask tab */
 .space 262144    /* checkbytes */
 .space 262144*4  /* offsets */
 
-	
-/* space for clsopt, smax/capacity=32768, blen/mask=4095+1 */
-.space PAGE_MAX_SIZE
+/* space for clsopt, smax/capacity=32768, blen/mask=16383+1 */
+.space 16384            /* mask tab */
 .space 32768    	/* checkbytes */
 .space 32768*12 	/* offsets to name and class and header_info */
 .space PAGE_MAX_SIZE	/* some duplicate classes */

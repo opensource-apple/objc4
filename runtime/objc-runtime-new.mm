@@ -75,11 +75,30 @@ rwlock_t selLock;
 mutex_t cacheUpdateLock = MUTEX_INITIALIZER;
 recursive_mutex_t loadMethodLock = RECURSIVE_MUTEX_INITIALIZER;
 
+#if SUPPORT_QOS_HACK
+pthread_priority_t BackgroundPriority = 0;
+pthread_priority_t MainPriority = 0;
+# if !NDEBUG
+static __unused void destroyQOSKey(void *arg) {
+    _objc_fatal("QoS override level at thread exit is %zu instead of zero", 
+                (size_t)(uintptr_t)arg);
+}
+# endif
+#endif
+
 void lock_init(void)
 {
     rwlock_init(&selLock);
     rwlock_init(&runtimeLock);
     recursive_mutex_init(&loadMethodLock);
+
+#if SUPPORT_QOS_HACK
+    BackgroundPriority = _pthread_qos_class_encode(QOS_CLASS_BACKGROUND, 0, 0);
+    MainPriority = _pthread_qos_class_encode(qos_class_main(), 0, 0);
+# if !NDEBUG
+    pthread_key_init_np(QOS_KEY, &destroyQOSKey);
+# endif
+#endif
 }
 
 
