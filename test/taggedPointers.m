@@ -272,6 +272,11 @@ void testGenericTaggedPointer(objc_tag_index_t tag, Class cls)
 
 int main()
 {
+    if (objc_collecting_enabled()) {
+        // GC's block objects crash without this
+        dlopen("/System/Library/Frameworks/Foundation.framework/Foundation", RTLD_LAZY);
+    }
+
     testassert(objc_debug_taggedpointer_mask != 0);
     testassert(_objc_taggedPointersEnabled());
 

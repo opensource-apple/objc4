@@ -19,6 +19,15 @@ END
 @protocol SuperProto2 @end
 @protocol UnrelatedProto @end
 
+
+void Crash(id self, SEL _cmd)
+{
+    fail("%c[%s %s] called unexpectedly", 
+         class_isMetaClass(object_getClass(self)) ? '+' : '-', 
+         object_getClassName(self), sel_getName(_cmd));
+}
+
+
 int main()
 {
     Protocol *proto, *proto2;
@@ -26,6 +35,13 @@ int main()
     struct objc_method_description *desclist;
     objc_property_t *proplist;
     unsigned int count;
+
+    // If objc_registerProtocol() fails to preserve the retain count
+    // then ARC will deallocate Protocol objects too early.
+    class_replaceMethod(objc_getClass("Protocol"), 
+                        sel_registerName("dealloc"), (IMP)Crash, "v@:");
+    class_replaceMethod(objc_getClass("__IncompleteProtocol"), 
+                        sel_registerName("dealloc"), (IMP)Crash, "v@:");
 
     // make sure binary contains hard copies of these protocols
     proto = @protocol(SuperProto);

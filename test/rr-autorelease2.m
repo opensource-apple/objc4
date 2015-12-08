@@ -180,6 +180,30 @@ void cycle(void)
         testassert(state == 1);
     }
 
+
+    // Autorelease with no pool.
+    testprintf("-- Autorelease with no pool.\n");
+    {
+        state = 0;
+        testonthread(^{
+            RR_AUTORELEASE([[Deallocator alloc] init]);
+        });
+        testassert(state == 1);
+    }
+
+    // Autorelease with no pool after popping the top-level pool.
+    testprintf("-- Autorelease with no pool after popping the last pool.\n");
+    {
+        state = 0;
+        testonthread(^{
+            void *pool = RR_PUSH();
+            RR_AUTORELEASE([[Deallocator alloc] init]);
+            RR_POP(pool);
+            RR_AUTORELEASE([[Deallocator alloc] init]);
+        });
+        testassert(state == 2);
+    }
+
     // Top-level thread pool not popped.
     // The runtime should clean it up.
 #if FOUNDATION
@@ -220,28 +244,6 @@ void cycle(void)
         RR_POP(pool);
         testassert(state == 1);
     }
-#endif
-
-
-#if !FOUNDATION
-    // NSThread calls NSPopAutoreleasePool(0)
-    // rdar://9167170 but that currently breaks CF
-    {
-        static bool warned;
-        if (!warned) testwarn("rdar://9167170 ignore NSPopAutoreleasePool(0)");
-        warned = true;
-    }
-    /*
-    testprintf("-- pop(0).\n");
-    {
-        RR_PUSH();
-        state = 0;
-        RR_AUTORELEASE([[AutoreleaseDuringDealloc alloc] init]);
-        testassert(state == 0);
-        RR_POP(0);
-        testassert(state == 2);
-    }
-    */
 #endif
 }
 
@@ -306,25 +308,46 @@ int main()
     }
 #endif
 
-
-    for (int i = 0; i < 100; i++) {
-        cycle();
+    // preheat
+    {
+        for (int i = 0; i < 100; i++) {
+            cycle();
+        }
+        
+        slow_cycle();
     }
-
-    slow_cycle();
     
-    leak_mark();
-
-    for (int i = 0; i < 1000; i++) {
-        cycle();
+    // check for leaks using top-level pools
+    {
+        leak_mark();
+        
+        for (int i = 0; i < 1000; i++) {
+            cycle();
+        }
+        
+        leak_check(0);
+        
+        slow_cycle();
+        
+        leak_check(0);
     }
-
-    leak_check(0);
-
-    slow_cycle();
-
-    leak_check(0);
-
+    
+    // check for leaks using pools not at top level
+    void *pool = RR_PUSH();
+    {
+        leak_mark();
+        
+        for (int i = 0; i < 1000; i++) {
+            cycle();
+        }
+        
+        leak_check(0);
+        
+        slow_cycle();
+        
+        leak_check(0);
+    }
+    RR_POP(pool);
 
     // NSThread.
     // Can't leak check this because it's too noisy.

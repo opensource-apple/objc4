@@ -1,4 +1,4 @@
-// TEST_CONFIG SDK=iphoneos ARCH=arm64
+// TEST_CONFIG OS=iphoneos ARCH=arm64
 
 #include "test.h"
 

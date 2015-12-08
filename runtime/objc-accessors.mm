@@ -41,18 +41,7 @@
 - (id)mutableCopyWithZone:(void *)zone;
 @end
 
-
-typedef uintptr_t spin_lock_t;
-OBJC_EXTERN void _spin_lock(spin_lock_t *lockp);
-OBJC_EXTERN int  _spin_lock_try(spin_lock_t *lockp);
-OBJC_EXTERN void _spin_unlock(spin_lock_t *lockp);
-
-/* need to consider cache line contention - space locks out XXX */
-
-#define GOODPOWER 7
-#define GOODMASK ((1<<GOODPOWER)-1)
-#define GOODHASH(x) (((long)x >> 5) & GOODMASK)
-static spin_lock_t PropertyLocks[1 << GOODPOWER] = { 0 };
+static StripedMap<spinlock_t> PropertyLocks;
 
 #define MUTABLE_COPY 2
 
@@ -66,10 +55,10 @@ id objc_getProperty_non_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
     if (!atomic) return *slot;
         
     // Atomic retain release world
-    spin_lock_t *slotlock = &PropertyLocks[GOODHASH(slot)];
-    _spin_lock(slotlock);
+    spinlock_t& slotlock = PropertyLocks[slot];
+    slotlock.lock();
     id value = objc_retain(*slot);
-    _spin_unlock(slotlock);
+    slotlock.unlock();
     
     // for performance, we (safely) issue the autorelease OUTSIDE of the spinlock.
     return objc_autoreleaseReturnValue(value);
@@ -89,9 +78,9 @@ static inline void reallySetProperty(id self, SEL _cmd, id newValue, ptrdiff_t o
     id *slot = (id*) ((char*)self + offset);
 
     if (copy) {
-        newValue = [newValue copyWithZone:NULL];
+        newValue = [newValue copyWithZone:nil];
     } else if (mutableCopy) {
-        newValue = [newValue mutableCopyWithZone:NULL];
+        newValue = [newValue mutableCopyWithZone:nil];
     } else {
         if (*slot == newValue) return;
         newValue = objc_retain(newValue);
@@ -101,11 +90,11 @@ static inline void reallySetProperty(id self, SEL _cmd, id newValue, ptrdiff_t o
         oldValue = *slot;
         *slot = newValue;
     } else {
-        spin_lock_t *slotlock = &PropertyLocks[GOODHASH(slot)];
-        _spin_lock(slotlock);
+        spinlock_t& slotlock = PropertyLocks[slot];
+        slotlock.lock();
         oldValue = *slot;
         *slot = newValue;        
-        _spin_unlock(slotlock);
+        slotlock.unlock();
     }
 
     objc_release(oldValue);
@@ -148,7 +137,7 @@ id objc_getProperty_gc(id self, SEL _cmd, ptrdiff_t offset, BOOL atomic) {
 
 void objc_setProperty_gc(id self, SEL _cmd, ptrdiff_t offset, id newValue, BOOL atomic, signed char shouldCopy) {
     if (shouldCopy) {
-        newValue = (shouldCopy == MUTABLE_COPY ? [newValue mutableCopyWithZone:NULL] : [newValue copyWithZone:NULL]);
+        newValue = (shouldCopy == MUTABLE_COPY ? [newValue mutableCopyWithZone:nil] : [newValue copyWithZone:nil]);
     }
     objc_assign_ivar(newValue, self, offset);
 }
@@ -177,23 +166,13 @@ objc_setProperty(id self, SEL _cmd, ptrdiff_t offset, id newValue,
 // if simultaneously used for a setter then there would be contention on src.
 // So we need two locks - one of which will be contended.
 void objc_copyStruct(void *dest, const void *src, ptrdiff_t size, BOOL atomic, BOOL hasStrong) {
-    static spin_lock_t StructLocks[1 << GOODPOWER] = { 0 };
-    spin_lock_t *lockfirst = NULL;
-    spin_lock_t *locksecond = NULL;
+    static StripedMap<spinlock_t> StructLocks;
+    spinlock_t *srcLock = nil;
+    spinlock_t *dstLock = nil;
     if (atomic) {
-        lockfirst = &StructLocks[GOODHASH(src)];
-        locksecond = &StructLocks[GOODHASH(dest)];
-        // order the locks by address so that we don't deadlock
-        if (lockfirst > locksecond) {
-            lockfirst = locksecond;
-            locksecond = &StructLocks[GOODHASH(src)];
-        }
-        else if (lockfirst == locksecond) {
-            // lucky - we only need one lock
-            locksecond = NULL;
-        }
-        _spin_lock(lockfirst);
-        if (locksecond) _spin_lock(locksecond);
+        srcLock = &StructLocks[src];
+        dstLock = &StructLocks[dest];
+        spinlock_t::lockTwo(srcLock, dstLock);
     }
 #if SUPPORT_GC
     if (UseGC && hasStrong) {
@@ -204,29 +183,18 @@ void objc_copyStruct(void *dest, const void *src, ptrdiff_t size, BOOL atomic, B
         memmove(dest, src, size);
     }
     if (atomic) {
-        _spin_unlock(lockfirst);
-        if (locksecond) _spin_unlock(locksecond);
+        spinlock_t::unlockTwo(srcLock, dstLock);
     }
 }
 
 void objc_copyCppObjectAtomic(void *dest, const void *src, void (*copyHelper) (void *dest, const void *source)) {
-    static spin_lock_t CppObjectLocks[1 << GOODPOWER] = { 0 };
-    spin_lock_t *lockfirst = &CppObjectLocks[GOODHASH(src)], *locksecond = &CppObjectLocks[GOODHASH(dest)];
-    // order the locks by address so that we don't deadlock
-    if (lockfirst > locksecond) {
-        spin_lock_t *temp = lockfirst;
-        lockfirst = locksecond;
-        locksecond = temp;
-    } else if (lockfirst == locksecond) {
-        // lucky - we only need one lock
-        locksecond = NULL;
-    }
-    _spin_lock(lockfirst);
-    if (locksecond) _spin_lock(locksecond);
+    static StripedMap<spinlock_t> CppObjectLocks;
+    spinlock_t *srcLock = &CppObjectLocks[src];
+    spinlock_t *dstLock = &CppObjectLocks[dest];
+    spinlock_t::lockTwo(srcLock, dstLock);
 
-        // let C++ code perform the actual copy.
-        copyHelper(dest, src);
+    // let C++ code perform the actual copy.
+    copyHelper(dest, src);
     
-    _spin_unlock(lockfirst);
-    if (locksecond) _spin_unlock(locksecond);
+    spinlock_t::unlockTwo(srcLock, dstLock);
 }

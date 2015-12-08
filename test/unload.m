@@ -1,3 +1,5 @@
+// xpc leaks memory in dlopen(). Disable it.
+// TEST_ENV XPC_SERVICES_UNAVAILABLE=1
 /*
 TEST_BUILD
     $C{COMPILE}   $DIR/unload4.m -o unload4.dylib -dynamiclib
@@ -78,7 +80,15 @@ void cycle(void)
     testassert(o2);
     
     // give BigClass and BigClass->isa large method caches (4692641)
-    for (i = 0; i < 10000; i++) {
+    // Flush caches part way through to test large empty caches.
+    for (i = 0; i < 3000; i++) {
+        sprintf(buf, "method_%d", i);
+        SEL sel = sel_registerName(buf);
+        ((void(*)(id, SEL))objc_msgSend)(o2, sel);
+        ((void(*)(id, SEL))objc_msgSend)(object_getClass(o2), sel);
+    }
+    _objc_flush_caches(object_getClass(o2));
+    for (i = 0; i < 17000; i++) {
         sprintf(buf, "method_%d", i);
         SEL sel = sel_registerName(buf);
         ((void(*)(id, SEL))objc_msgSend)(o2, sel);
@@ -107,7 +117,13 @@ void cycle(void)
     // these selectors came from the bundle
     testassert(0 == strcmp("unload2_instance_method", sel_getName(sel_registerName("unload2_instance_method"))));
     testassert(0 == strcmp("unload2_category_method", sel_getName(sel_registerName("unload2_category_method"))));
+
+    // This protocol came from the bundle.
+    // It isn't unloaded cleanly (rdar://20664713), but neither 
+    // may it cause the protocol table to crash after unloading.
+    testassert(objc_getProtocol("SmallProtocol"));
 }
+
 
 int main()
 {

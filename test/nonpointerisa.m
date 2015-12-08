@@ -22,7 +22,7 @@ int main()
 
 #if SUPPORT_NONPOINTER_ISA
 # if __x86_64__
-#   define RC_ONE (1ULL<<50)
+#   define RC_ONE (1ULL<<56)
 # elif __arm64__
 #   define RC_ONE (1ULL<<45)
 # else

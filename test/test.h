@@ -6,6 +6,7 @@
 #define TEST_H
 
 #include <stdio.h>
+#include <dlfcn.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
@@ -25,9 +26,14 @@
 #include <objc/objc-internal.h>
 #include <TargetConditionals.h>
 
+#if TARGET_OS_EMBEDDED  ||  TARGET_IPHONE_SIMULATOR
+static OBJC_INLINE malloc_zone_t *objc_collectableZone(void) { return nil; }
+#endif
+
+
 // Configuration macros
 
-#if !__LP64__ || TARGET_OS_WIN32 || __OBJC_GC__ || TARGET_IPHONE_SIMULATOR || (TARGET_OS_MAC  &&  !TARGET_OS_IPHONE)
+#if !__LP64__ || TARGET_OS_WIN32 || __OBJC_GC__ || TARGET_IPHONE_SIMULATOR
 #   define SUPPORT_NONPOINTER_ISA 0
 #elif __x86_64__
 #   define SUPPORT_NONPOINTER_ISA 1
@@ -93,7 +99,11 @@ static inline void fail(const char *msg, ...)
 
 static inline void testprintf(const char *msg, ...)
 {
-    if (msg  &&  getenv("VERBOSE")) {
+    static int verbose = -1;
+    if (verbose < 0) verbose = atoi(getenv("VERBOSE") ?: "0");
+
+    // VERBOSE=1 prints test harness info only
+    if (msg  &&  verbose >= 2) {
         char *msg2;
         asprintf(&msg2, "VERBOSE: %s", msg);
         va_list v;
@@ -181,6 +191,16 @@ static inline void *_testthread(void *arg __unused)
 }
 static inline void testonthread(__unsafe_unretained testblock_t code) 
 {
+    // GC crashes without Foundation because the block object classes 
+    // are insufficiently initialized.
+    if (objc_collectingEnabled()) {
+        static bool foundationified = false;
+        if (!foundationified) {
+            dlopen("/System/Library/Frameworks/Foundation.framework/Foundation", RTLD_LAZY);
+            foundationified = true;
+        }
+    }
+
     pthread_t th;
     testcodehack = code;  // force GC not-thread-local, avoid ARC void* casts
     pthread_create(&th, NULL, _testthread, NULL);
@@ -436,5 +456,20 @@ static inline BOOL stret_equal(struct stret a, struct stret b)
 }
 
 static struct stret STRET_RESULT __attribute__((used)) = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+
+
+#if TARGET_IPHONE_SIMULATOR
+// Force cwd to executable's directory during launch.
+// sim used to do this but simctl does not.
+#include <crt_externs.h>
+ __attribute__((constructor)) 
+static void hack_cwd(void)
+{
+    if (!getenv("HACKED_CWD")) {
+        chdir(dirname((*_NSGetArgv())[0]));
+        setenv("HACKED_CWD", "1", 1);
+    }
+}
+#endif
 
 #endif

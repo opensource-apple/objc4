@@ -4,7 +4,8 @@
 #include <objc/NSObject.h>
 
 @interface Test : NSObject {
-    char bytes[16-sizeof(void*)];
+@public
+    char bytes[32-sizeof(void*)];
 }
 @end
 @implementation Test
@@ -13,9 +14,24 @@
 
 int main()
 {
-    id o1 = [Test new];
-    id o2 = object_copy(o1, 16);
-    testassert(malloc_size(o1) == 16);
+    Test *o0 = [Test new];
+    [o0 retain];
+    Test *o1 = class_createInstance([Test class], 32);
+    [o1 retain];
+    id o2 = object_copy(o0, 0);
+    id o3 = object_copy(o1, 0);
+    id o4 = object_copy(o1, 32);
+    testassert(malloc_size(o0) == 32);
+    testassert(malloc_size(o1) == 64);
     testassert(malloc_size(o2) == 32);
+    testassert(malloc_size(o3) == 32);
+    testassert(malloc_size(o4) == 64);
+    if (!objc_collecting_enabled()) {
+        testassert([o0 retainCount] == 2);
+        testassert([o1 retainCount] == 2);
+        testassert([o2 retainCount] == 1);
+        testassert([o3 retainCount] == 1);
+        testassert([o4 retainCount] == 1);
+    }
     succeed(__FILE__);
 }

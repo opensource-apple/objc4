@@ -15,6 +15,12 @@ OBJC_ROOT_CLASS
 @implementation UnusedClass @end
 
 
-@implementation SmallClass (Category) 
+@protocol SmallProtocol
+-(void)unload2_category_method;
+@end
+
+@interface SmallClass (Category) <SmallProtocol> @end
+
+@implementation SmallClass (Category)
 -(void)unload2_category_method { }
 @end

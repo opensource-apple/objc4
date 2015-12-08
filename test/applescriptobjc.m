@@ -1,4 +1,4 @@
-// TEST_CONFIG SDK=macos
+// TEST_CONFIG OS=macosx
 // TEST_CFLAGS -framework AppleScriptObjC -framework Foundation
 
 // Verify that trivial AppleScriptObjC apps run with GC off.

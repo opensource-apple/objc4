@@ -37,8 +37,8 @@ typedef uint16_t mask_t;
 #endif
 
 struct bucket_t {
-    void *sel;
-    void *imp;
+    uintptr_t sel;
+    uintptr_t imp;
 };
 
 struct cache_t {
@@ -62,13 +62,20 @@ int main()
     id obj = [cls new];
     [obj self];
 
-    // Test objc_msgSend.
     struct cache_t *cache = &((__bridge struct class_t *)cls)->cache;
-    cache->mask = 0;
-    cache->buckets[0].sel = (void*)~0;
-    cache->buckets[0].imp = (void*)~0;
-    cache->buckets[1].sel = (void*)(uintptr_t)1;
-    cache->buckets[1].imp = (void*)cache->buckets;
+
+#   define COUNT 4
+    struct bucket_t *buckets = calloc(sizeof(struct bucket_t), COUNT+1);
+    for (int i = 0; i < COUNT; i++) {
+        buckets[i].sel = ~0;
+        buckets[i].imp = ~0;
+    }
+    buckets[COUNT].sel = 1;
+    buckets[COUNT].imp = (uintptr_t)buckets;
+
+    cache->mask = COUNT-1;
+    cache->occupied = 0;
+    cache->buckets = buckets;
 
     fprintf(stderr, "crash now\n");
     [obj self];

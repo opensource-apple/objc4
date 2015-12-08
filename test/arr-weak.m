@@ -13,6 +13,8 @@ END
 
 static id weak;
 static id weak2;
+static id weak3;
+static id weak4;
 static bool did_dealloc;
 
 static int state;
@@ -25,6 +27,15 @@ static int state;
 @interface Test : NSObject @end
 @implementation Test 
 -(void)dealloc {
+    testprintf("Weak storeOrNil does not crash while deallocating\n");
+    weak4 = (id)0x100;  // old value must not be used
+    id result = objc_initWeakOrNil(&weak4, self);
+    testassert(result == nil);
+    testassert(weak4 == nil);
+    result = objc_storeWeakOrNil(&weak4, self);
+    testassert(result == nil);
+    testassert(weak4 == nil);
+
     // The value returned by objc_loadWeak() is now nil, 
     // but the storage is not yet cleared.
     testassert(weak == self);
@@ -73,6 +84,10 @@ static int state;
     testassert(objc_loadWeakRetained(&weak) == nil);
     testassert(objc_loadWeakRetained(&weak2) == nil);
 
+    testprintf("Weak storeOrNil does not crash while deallocating\n");
+    id result = objc_storeWeakOrNil(&weak, self);
+    testassert(result == nil);
+
     testprintf("Weak store crashes while deallocating\n");
     objc_storeWeak(&weak, self);
     fail("objc_storeWeak of deallocating value should have crashed");
@@ -81,11 +96,23 @@ static int state;
 @end
 
 
-void cycle(Class cls, Test *obj, Test *obj2)
+void cycle(Class cls, Test *obj, Test *obj2, bool storeOrNil)
 {
     testprintf("Cycling class %s\n", class_getName(cls));
 
     id result;
+
+    id (*storeWeak)(id *location, id obj);
+    id (*initWeak)(id *location, id obj);
+    if (storeOrNil) {
+        testprintf("Using objc_storeWeakOrNil\n");
+        storeWeak = objc_storeWeakOrNil;
+        initWeak = objc_initWeakOrNil;
+    } else {
+        testprintf("Using objc_storeWeak\n");
+        storeWeak = objc_storeWeak;
+        initWeak = objc_initWeak;
+    }
 
     // state counts calls to custom weak methods
     // Difference test classes have different expected values.
@@ -111,14 +138,14 @@ void cycle(Class cls, Test *obj, Test *obj2)
 
     testprintf("Weak assignment\n");
     state = 0;
-    result = objc_storeWeak(&weak, obj);
+    result = storeWeak(&weak, obj);
     testassert(state == storeTarget);
     testassert(result == obj);
     testassert(weak == obj);
 
     testprintf("Weak assignment to the same value\n");
     state = 0;
-    result = objc_storeWeak(&weak, obj);
+    result = storeWeak(&weak, obj);
     testassert(state == storeTarget);
     testassert(result == obj);
     testassert(weak == obj);
@@ -134,28 +161,28 @@ void cycle(Class cls, Test *obj, Test *obj2)
 
     testprintf("Weak assignment to different value\n");
     state = 0;
-    result = objc_storeWeak(&weak, obj2);
+    result = storeWeak(&weak, obj2);
     testassert(state == storeTarget);
     testassert(result == obj2);
     testassert(weak == obj2);
 
     testprintf("Weak assignment to NULL\n");
     state = 0;
-    result = objc_storeWeak(&weak, NULL);
+    result = storeWeak(&weak, NULL);
     testassert(state == 0);
     testassert(result == NULL);
     testassert(weak == NULL);
 
     testprintf("Weak re-assignment to NULL\n");
     state = 0;
-    result = objc_storeWeak(&weak, NULL);
+    result = storeWeak(&weak, NULL);
     testassert(state == 0);
     testassert(result == NULL);
     testassert(weak == NULL);
 
     testprintf("Weak move\n");
     state = 0;
-    result = objc_storeWeak(&weak, obj);
+    result = storeWeak(&weak, obj);
     testassert(state == storeTarget);
     testassert(result == obj);
     testassert(weak == obj);
@@ -163,11 +190,11 @@ void cycle(Class cls, Test *obj, Test *obj2)
     objc_moveWeak(&weak2, &weak);
     testassert(weak == nil);
     testassert(weak2 == obj);
-    objc_storeWeak(&weak2, NULL);
+    storeWeak(&weak2, NULL);
 
     testprintf("Weak copy\n");
     state = 0;
-    result = objc_storeWeak(&weak, obj);
+    result = storeWeak(&weak, obj);
     testassert(state == storeTarget);
     testassert(result == obj);
     testassert(weak == obj);
@@ -175,21 +202,21 @@ void cycle(Class cls, Test *obj, Test *obj2)
     objc_copyWeak(&weak2, &weak);
     testassert(weak == obj);
     testassert(weak2 == obj);
-    objc_storeWeak(&weak, NULL);
-    objc_storeWeak(&weak2, NULL);
+    storeWeak(&weak, NULL);
+    storeWeak(&weak2, NULL);
 
     testprintf("Weak clear\n");
 
     id obj3 = [cls new];
 
     state = 0;
-    result = objc_storeWeak(&weak, obj3);
+    result = storeWeak(&weak, obj3);
     testassert(state == storeTarget);
     testassert(result == obj3);
     testassert(weak == obj3);
 
     state = 0;
-    result = objc_storeWeak(&weak2, obj3);
+    result = storeWeak(&weak2, obj3);
     testassert(state == storeTarget);
     testassert(result == obj3);
     testassert(weak2 == obj3);
@@ -199,22 +226,73 @@ void cycle(Class cls, Test *obj, Test *obj2)
     testassert(did_dealloc);
     testassert(weak == NULL);
     testassert(weak2 == NULL);
+
+
+    testprintf("Weak init and destroy\n");
+
+    id obj4 = [cls new];
+    
+    state = 0;
+    weak = (id)0x100;  // old value must not be used
+    result = initWeak(&weak, obj4);
+    testassert(state == storeTarget);
+    testassert(result == obj4);
+    testassert(weak == obj4);
+    
+    state = 0;
+    weak2 = (id)0x100;  // old value must not be used
+    result = initWeak(&weak2, obj4);
+    testassert(state == storeTarget);
+    testassert(result == obj4);
+    testassert(weak2 == obj4);
+    
+    state = 0;
+    weak3 = (id)0x100;  // old value must not be used
+    result = initWeak(&weak3, obj4);
+    testassert(state == storeTarget);
+    testassert(result == obj4);
+    testassert(weak3 == obj4);
+
+    state = 0;
+    objc_destroyWeak(&weak3);
+    testassert(state == 0);
+    testassert(weak3 == obj4);  // storage is unchanged
+
+    did_dealloc = false;
+    [obj4 release];
+    testassert(did_dealloc);
+    testassert(weak == NULL);   // not destroyed earlier so cleared now
+    testassert(weak2 == NULL);  // not destroyed earlier so cleared now
+    testassert(weak3 == obj4);  // destroyed earlier so not cleared now
+
+    objc_destroyWeak(&weak);
+    objc_destroyWeak(&weak2);
 }
 
 
 void test_class(Class cls)
 {
+    // prime strong and weak side tables before leak checking
+    Test *prime[256] = {nil};
+    for (size_t i = 0; i < sizeof(prime)/sizeof(prime[0]); i++) {
+        objc_storeWeak(&prime[i], [cls new]);
+    }
+
     Test *obj = [cls new];
     Test *obj2 = [cls new];
 
     for (int i = 0; i < 100000; i++) {
-        if (i == 10) leak_mark();
-        cycle(cls, obj, obj2);
+        cycle(cls, obj, obj2, false);
+        cycle(cls, obj, obj2, true);
     }
-    // allow some slop for [Test new] inside cycle() 
-    // to land in different side table stripes
-    leak_check(8192);
-
+    leak_mark();
+    for (int i = 0; i < 100000; i++) {
+        cycle(cls, obj, obj2, false);
+        cycle(cls, obj, obj2, true);
+    }
+    // allow some slop for side table expansion
+    // 5120 is common with this configuration
+    leak_check(6000);
 
     // rdar://14105994
     id weaks[8];

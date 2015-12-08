@@ -6,7 +6,6 @@
 #ifndef OBJC_NO_GC
 #include <auto_zone.h>
 #else
-static void* objc_collectableZone(void) { return NULL; }
 static BOOL auto_zone_is_valid_pointer(void *a, void *b) { return a||b; }
 #endif
 #include "test.h"

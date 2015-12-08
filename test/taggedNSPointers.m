@@ -49,7 +49,7 @@ void testTaggedNumber()
     testassert([taggedNS isKindOfClass: [NSNumber class]]);
     testassert([taggedNS respondsToSelector: @selector(intValue)]);
     
-    [taggedNS description];
+    (void)[taggedNS description];
 }
 
 int main()

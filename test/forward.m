@@ -422,7 +422,8 @@ __END_DECLS
 #elif defined(__i386__)
     asm(".text \n _getSP: movl %esp, %eax \n ret \n");
 #elif defined(__arm__)
-    asm(".text \n _getSP: mov r0, sp \n bx lr \n");
+    asm(".text \n .thumb \n .thumb_func _getSP \n "
+        "_getSP: mov r0, sp \n bx lr \n");
 #elif defined(__arm64__)
     asm(".text \n _getSP: mov x0, sp \n ret \n");
 #else

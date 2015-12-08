@@ -121,15 +121,13 @@ int main()
     testassert(rc == 1);
     testassert([o retainCount] == rc);
     
-    objc_storeWeak(&w, nil);
-
-
     testprintf("dealloc\n");
 
     testassert(TestRootDealloc == 0);
+    testassert(w != nil);
     [o release];
     testassert(TestRootDealloc == 1);
-
+    testassert(w == nil);
 
     succeed(__FILE__);
 }

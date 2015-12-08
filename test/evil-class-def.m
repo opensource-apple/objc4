@@ -16,7 +16,8 @@
 #define str2(x) str(x)
 
 __BEGIN_DECLS
-id nop(id self) { return self; }
+// not id to avoid ARC operations because the class doesn't implement RR methods
+void* nop(void* self) { return self; }
 __END_DECLS
 
 asm(

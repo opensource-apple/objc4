@@ -1,4 +1,4 @@
-// TEST_CFLAGS -Wno-unused-parameter
+// TEST_CFLAGS -Wno-unused-parameter -Wundeclared-selector
 
 #include "test.h"
 #include "testroot.i"
@@ -17,6 +17,12 @@ int main()
 #include <objc/runtime.h>
 #include <objc/objc-internal.h>
 #include <objc/objc-abi.h>
+#include <simd/simd.h>
+
+// rdar://21694990 simd.h should have a vector_equal(a, b) function
+static bool vector_equal(vector_ulong2 lhs, vector_ulong2 rhs) {
+    return vector_all(lhs == rhs);
+}
 
 #if __arm64__
     // no stret dispatchers
@@ -52,12 +58,29 @@ long long (*llmsg0)(id, SEL) __attribute__((unused));
 // struct stret (*stretmsg0)(id, SEL) __attribute__((unused));
 double (*fpmsg0)(id, SEL) __attribute__((unused));
 long double (*lfpmsg0)(id, SEL) __attribute__((unused));
+vector_ulong2 (*vecmsg0)(id, SEL) __attribute__((unused));
 
+#define VEC1 ((vector_ulong2){1, 1})
+#define VEC2 ((vector_ulong2){2, 2})
+#define VEC3 ((vector_ulong2){3, 3})
+#define VEC4 ((vector_ulong2){4, 4})
+#define VEC5 ((vector_ulong2){5, 5})
+#define VEC6 ((vector_ulong2){6, 6})
+#define VEC7 ((vector_ulong2){7, 7})
+#define VEC8 ((vector_ulong2){8, 8})
 
 #define CHECK_ARGS(sel) \
 do { \
     testassert(self == SELF); \
-    testassert(_cmd == sel_registerName(#sel "::::::::::::::::::::::::::::"));\
+    testassert(_cmd == sel_registerName(#sel "::::::::::::::::::::::::::::::::::::"));\
+    testassert(vector_all(v1 == 1)); \
+    testassert(vector_all(v2 == 2)); \
+    testassert(vector_all(v3 == 3)); \
+    testassert(vector_all(v4 == 4)); \
+    testassert(vector_all(v5 == 5)); \
+    testassert(vector_all(v6 == 6)); \
+    testassert(vector_all(v7 == 7)); \
+    testassert(vector_all(v8 == 8)); \
     testassert(i1 == 1); \
     testassert(i2 == 2); \
     testassert(i3 == 3); \
@@ -99,6 +122,7 @@ id ID_RESULT;
 long long LL_RESULT = __LONG_LONG_MAX__ - 2LL*__INT_MAX__;
 double FP_RESULT = __DBL_MIN__ + __DBL_EPSILON__;
 long double LFP_RESULT = __LDBL_MIN__ + __LDBL_EPSILON__;
+vector_ulong2 VEC_RESULT = { 0x1234567890abcdefULL, 0xfedcba0987654321ULL };
 // STRET_RESULT in test.h
 
 static struct stret zero;
@@ -228,47 +252,225 @@ struct stret_d9 {
 };
 
 
+@interface Super (Prototypes)
+
+// Method prototypes to pacify -Wundeclared-selector.
+
+-(id)idret: 
+    (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15;
+
+-(long long)llret: 
+    (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15;
+
+-(struct stret)stret: 
+    (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15;
+
+-(double)fpret: 
+    (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15;
+
+-(long double)lfpret: 
+    (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15;
+
+-(vector_ulong2)vecret: 
+    (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15;
+
+@end
+
+
+// Zero all volatile registers.
+#if __cplusplus
+extern "C" 
+#endif
+void stomp(void);
+
+#if __x86_64__ 
+asm("\n .text"
+    "\n .globl _stomp"
+    "\n _stomp:"
+    "\n mov $0, %rax"
+    "\n mov $0, %rcx"
+    "\n mov $0, %rdx"
+    "\n mov $0, %rsi"
+    "\n mov $0, %rdi"
+    "\n mov $0, %r8"
+    "\n mov $0, %r9"
+    "\n mov $0, %r10"
+    "\n mov $0, %r11"
+    "\n xorps %xmm0, %xmm0"
+    "\n xorps %xmm1, %xmm1"
+    "\n xorps %xmm2, %xmm2"
+    "\n xorps %xmm3, %xmm3"
+    "\n xorps %xmm4, %xmm4"
+    "\n xorps %xmm5, %xmm5"
+    "\n xorps %xmm6, %xmm6"
+    "\n xorps %xmm7, %xmm7"
+    "\n xorps %xmm8, %xmm8"
+    "\n xorps %xmm9, %xmm9"
+    "\n xorps %xmm10, %xmm10"
+    "\n xorps %xmm11, %xmm11"
+    "\n xorps %xmm12, %xmm12"
+    "\n xorps %xmm13, %xmm13"
+    "\n xorps %xmm14, %xmm14"
+    "\n xorps %xmm15, %xmm15"
+    "\n ret");
+
+#elif __i386__
+asm("\n .text"
+    "\n .globl _stomp"
+    "\n _stomp:"
+    "\n mov $0, %eax"
+    "\n mov $0, %ecx"
+    "\n mov $0, %edx"
+    "\n xorps %xmm0, %xmm0"
+    "\n xorps %xmm1, %xmm1"
+    "\n xorps %xmm2, %xmm2"
+    "\n xorps %xmm3, %xmm3"
+    "\n xorps %xmm4, %xmm4"
+    "\n xorps %xmm5, %xmm5"
+    "\n xorps %xmm6, %xmm6"
+    "\n xorps %xmm7, %xmm7"
+    "\n ret");
+
+#elif __arm64__
+asm("\n .text"
+    "\n .globl _stomp"
+    "\n _stomp:"
+    "\n mov x0, #0"
+    "\n mov x1, #0"
+    "\n mov x2, #0"
+    "\n mov x3, #0"
+    "\n mov x4, #0"
+    "\n mov x5, #0"
+    "\n mov x6, #0"
+    "\n mov x7, #0"
+    "\n mov x8, #0"
+    "\n mov x9, #0"
+    "\n mov x10, #0"
+    "\n mov x11, #0"
+    "\n mov x12, #0"
+    "\n mov x13, #0"
+    "\n mov x14, #0"
+    "\n mov x15, #0"
+    "\n mov x16, #0"
+    "\n mov x17, #0"
+    "\n movi d0, #0"
+    "\n movi d1, #0"
+    "\n movi d2, #0"
+    "\n movi d3, #0"
+    "\n movi d4, #0"
+    "\n movi d5, #0"
+    "\n movi d6, #0"
+    "\n movi d7, #0"
+    "\n ret"
+    );
+
+#elif __arm__
+asm("\n .text"
+    "\n .globl _stomp"
+    "\n .thumb_func _stomp"
+    "\n _stomp:"
+    "\n mov r0, #0"
+    "\n mov r1, #0"
+    "\n mov r2, #0"
+    "\n mov r3, #0"
+    "\n mov r9, #0"
+    "\n mov r12, #0"
+    "\n vmov.i32 q0, #0"
+    "\n vmov.i32 q1, #0"
+    "\n vmov.i32 q2, #0"
+    "\n vmov.i32 q3, #0"
+    "\n vmov.i32 q4, #0"
+    "\n vmov.i32 q5, #0"
+    "\n vmov.i32 q6, #0"
+    "\n vmov.i32 q7, #0"
+    "\n vmov.i32 q8, #0"
+    "\n vmov.i32 q9, #0"
+    "\n vmov.i32 q10, #0"
+    "\n vmov.i32 q11, #0"
+    "\n vmov.i32 q12, #0"
+    "\n vmov.i32 q13, #0"
+    "\n vmov.i32 q14, #0"
+    "\n vmov.i32 q15, #0"
+    "\n bx lr"
+    );
+
+#else
+#   error unknown architecture
+#endif
+
+
 @implementation Super
 -(struct stret)stret { return STRET_RESULT; }
 
--(id)idret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+// The IMPL_ methods are not called directly. Instead the non IMPL_ name is 
+// called. The resolver function installs the real method. This allows 
+// the resolver function to stomp on registers to help test register 
+// preservation in the uncached path.
+
++(BOOL) resolveInstanceMethod:(SEL)sel
+{
+    const char *name = sel_getName(sel);
+    if (! strstr(name, "::::::::")) return false;
+
+    testprintf("resolving %s\n", name);
+
+    stomp();
+    char *realName;
+    asprintf(&realName, "IMPL_%s", name);
+    SEL realSel = sel_registerName(realName);
+    free(realName);
+
+    IMP imp = class_getMethodImplementation(self, realSel);
+    if (imp == &_objc_msgForward) return false;
+    return class_addMethod(self, sel, imp, "");
+}
+
+-(id)IMPL_idret: 
+(vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     CHECK_ARGS(idret);
     state = 1;
     return ID_RESULT;
 }
 
--(long long)llret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+-(long long)IMPL_llret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     CHECK_ARGS(llret);
     state = 2;
     return LL_RESULT;
 }
 
--(struct stret)stret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+-(struct stret)IMPL_stret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     CHECK_ARGS(stret);
     state = 3;
     return STRET_RESULT;
 }
 
--(double)fpret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+-(double)IMPL_fpret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     CHECK_ARGS(fpret);
     state = 4;
     return FP_RESULT;
 }
 
--(long double)lfpret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+-(long double)IMPL_lfpret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     CHECK_ARGS(lfpret);
     state = 5;
     return LFP_RESULT;
+}
+
+-(vector_ulong2)IMPL_vecret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+{
+    CHECK_ARGS(vecret);
+    state = 6;
+    return VEC_RESULT;
 }
 
 
@@ -307,6 +509,13 @@ struct stret_d9 {
     return LFP_RESULT;
 }
 
+-(vector_ulong2)vecret_noarg
+{
+    CHECK_ARGS_NOARG(vecret);
+    state = 16;
+    return VEC_RESULT;
+}
+
 
 -(void)voidret_nop
 {
@@ -341,6 +550,11 @@ struct stret_d9 {
 -(long double)lfpret_nop
 {
     return LFP_RESULT;
+}
+
+-(vector_ulong2)vecret_nop
+{
+    return VEC_RESULT;
 }
 
 #define STRET_IMP(n)                            \
@@ -379,35 +593,35 @@ STRET_IMP(d9)
 
 
 +(id)idret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     fail("+idret called instead of -idret");
     CHECK_ARGS(idret);
 }
 
 +(long long)llret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     fail("+llret called instead of -llret");
     CHECK_ARGS(llret);
 }
 
 +(struct stret)stret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     fail("+stret called instead of -stret");
     CHECK_ARGS(stret);
 }
 
 +(double)fpret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     fail("+fpret called instead of -fpret");
     CHECK_ARGS(fpret);
 }
 
 +(long double)lfpret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     fail("+lfpret called instead of -lfpret");
     CHECK_ARGS(lfpret);
@@ -443,73 +657,92 @@ STRET_IMP(d9)
     CHECK_ARGS_NOARG(lfpret);
 }
 
++(vector_ulong2)vecret_noarg
+{
+    fail("+vecret_noarg called instead of -vecret_noarg");
+    CHECK_ARGS_NOARG(vecret);
+}
+
 @end
 
 
 @implementation Sub
 
--(id)idret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+-(id)IMPL_idret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     id result;
     CHECK_ARGS(idret);
     state = 100;
-    result = [super idret:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
+    result = [super idret:v1:v2:v3:v4:v5:v6:v7:v8:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
     testassert(state == 1);
     testassert(result == ID_RESULT);
     state = 101;
     return result;
 }
 
--(long long)llret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+-(long long)IMPL_llret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     long long result;
     CHECK_ARGS(llret);
     state = 100;
-    result = [super llret:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
+    result = [super llret:v1:v2:v3:v4:v5:v6:v7:v8:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
     testassert(state == 2);
     testassert(result == LL_RESULT);
     state = 102;
     return result;
 }
 
--(struct stret)stret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+-(struct stret)IMPL_stret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     struct stret result;
     CHECK_ARGS(stret);
     state = 100;
-    result = [super stret:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
+    result = [super stret:v1:v2:v3:v4:v5:v6:v7:v8:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
     testassert(state == 3);
     testassert(stret_equal(result, STRET_RESULT));
     state = 103;
     return result;
 }
 
--(double)fpret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+-(double)IMPL_fpret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     double result;
     CHECK_ARGS(fpret);
     state = 100;
-    result = [super fpret:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
+    result = [super fpret:v1:v2:v3:v4:v5:v6:v7:v8:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
     testassert(state == 4);
     testassert(result == FP_RESULT);
     state = 104;
     return result;
 }
 
--(long double)lfpret: 
-   (int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+-(long double)IMPL_lfpret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
 {
     long double result;
     CHECK_ARGS(lfpret);
     state = 100;
-    result = [super lfpret:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
+    result = [super lfpret:v1:v2:v3:v4:v5:v6:v7:v8:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
     testassert(state == 5);
     testassert(result == LFP_RESULT);
     state = 105;
+    return result;
+}
+
+-(vector_ulong2)IMPL_vecret: 
+   (vector_ulong2)v1 :(vector_ulong2)v2 :(vector_ulong2)v3 :(vector_ulong2)v4 :(vector_ulong2)v5 :(vector_ulong2)v6 :(vector_ulong2)v7 :(vector_ulong2)v8  :(int)i1 :(int)i2 :(int)i3 :(int)i4 :(int)i5 :(int)i6 :(int)i7 :(int)i8 :(int)i9 :(int)i10 :(int)i11 :(int)i12 :(int)i13  :(double)f1 :(double)f2 :(double)f3 :(double)f4 :(double)f5 :(double)f6 :(double)f7 :(double)f8 :(double)f9 :(double)f10 :(double)f11 :(double)f12 :(double)f13 :(double)f14 :(double)f15
+{
+    vector_ulong2 result;
+    CHECK_ARGS(vecret);
+    state = 100;
+    result = [super vecret:v1:v2:v3:v4:v5:v6:v7:v8:i1:i2:i3:i4:i5:i6:i7:i8:i9:i10:i11:i12:i13:f1:f2:f3:f4:f5:f6:f7:f8:f9:f10:f11:f12:f13:f14:f15];
+    testassert(state == 6);
+    testassert(vector_equal(result, VEC_RESULT));
+    state = 106;
     return result;
 }
 
@@ -571,6 +804,18 @@ STRET_IMP(d9)
     testassert(state == 15);
     testassert(result == LFP_RESULT);
     state = 115;
+    return result;
+}
+
+-(vector_ulong2)vecret_noarg
+{
+    vector_ulong2 result;
+    CHECK_ARGS_NOARG(vecret);
+    state = 100;
+    result = [super vecret_noarg];
+    testassert(state == 16);
+    testassert(vector_equal(result, VEC_RESULT));
+    state = 116;
     return result;
 }
 
@@ -1198,7 +1443,6 @@ struct stret test_dw_forward_stret(void)
 void test_dw(const char *name, id sub, id tagged, bool stret, 
              int uncaughtAllowed)
 {
-    SEL sel = @selector(a);
 
     testprintf("DWARF FOR %s%s\n", name, stret ? " (stret)" : "");
 
@@ -1206,6 +1450,9 @@ void test_dw(const char *name, id sub, id tagged, bool stret,
     // sel_registerName() never returns those alignments because they 
     // differ from malloc's alignment. So we create lots of compiled-in 
     // SELs here and hope something fits.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wundeclared-selector"
+    SEL sel = @selector(a);
     SEL lotsOfSels[] = {
         @selector(a1), @selector(a2), @selector(a3), @selector(a4), 
         @selector(a5), @selector(a6), @selector(a7), @selector(a8), 
@@ -1232,6 +1479,20 @@ void test_dw(const char *name, id sub, id tagged, bool stret,
         @selector(CCCa), @selector(CCCb), @selector(CCCc), @selector(CCCd), 
         @selector(CCCe), @selector(CCCf), @selector(CCCg), @selector(CCCh), 
     };
+#pragma clang diagnostic pop
+    
+    {
+        IMP imp = stret ? (IMP)test_dw_forward_stret : (IMP)test_dw_forward;
+        Class cls = object_getClass(sub);
+        Class tagcls = object_getClass(tagged);
+        class_replaceMethod(cls, sel, imp, "");
+        class_replaceMethod(tagcls, sel, imp, "");
+        for (size_t i = 0; i < sizeof(lotsOfSels)/sizeof(lotsOfSels[0]); i++) {
+            class_replaceMethod(cls, lotsOfSels[i], imp, "");
+            class_replaceMethod(tagcls, lotsOfSels[i], imp, "");
+        }
+    }
+    
     #define ALIGNCOUNT 16
     SEL sels[ALIGNCOUNT][2] = {{0}};
     for (int align = 0; align < ALIGNCOUNT; align++) {
@@ -1332,7 +1593,7 @@ void test_dw(const char *name, id sub, id tagged, bool stret,
             // implementation's cache scan direction
 
             _objc_flush_caches(cache_cls);
-            for (int x2 = 0; x2 < 1; x2++) {
+            for (int x2 = 0; x2 < 8; x2++) {
                 for (int s = 0; s < 4; s++) {
                     int align = (a+s) % ALIGNCOUNT;
                     CALLIT(sub_arg, sels[align][0], sels[align][0], fn, stret);
@@ -1341,7 +1602,7 @@ void test_dw(const char *name, id sub, id tagged, bool stret,
             }
 
             _objc_flush_caches(cache_cls);
-            for (int x2 = 0; x2 < 1; x2++) {
+            for (int x2 = 0; x2 < 8; x2++) {
                 for (int s = 0; s < 4; s++) {
                     int align = abs(a-s) % ALIGNCOUNT;
                     CALLIT(sub_arg, sels[align][0], sels[align][0], fn, stret);
@@ -1390,6 +1651,7 @@ void test_basic(id receiver)
     struct stret stretval;
     double fpval;
     long double lfpval;
+    vector_ulong2 vecval;
 
     // message uncached 
     // message uncached long long
@@ -1409,33 +1671,39 @@ void test_basic(id receiver)
         testprintf("idret\n");
         state = 0;
         idval = nil;
-        idval = [receiver idret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+        idval = [receiver idret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
         testassert(state == 101);
         testassert(idval == ID_RESULT);
         
         testprintf("llret\n");
         llval = 0;
-        llval = [receiver llret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+        llval = [receiver llret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
         testassert(state == 102);
         testassert(llval == LL_RESULT);
         
         testprintf("stret\n");
         stretval = zero;
-        stretval = [receiver stret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+        stretval = [receiver stret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
         testassert(state == 103);
         testassert(stret_equal(stretval, STRET_RESULT));
         
         testprintf("fpret\n");
         fpval = 0;
-        fpval = [receiver fpret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+        fpval = [receiver fpret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
         testassert(state == 104);
         testassert(fpval == FP_RESULT);
         
         testprintf("lfpret\n");
         lfpval = 0;
-        lfpval = [receiver lfpret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+        lfpval = [receiver lfpret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
         testassert(state == 105);
         testassert(lfpval == LFP_RESULT);
+        
+        testprintf("vecret\n");
+        vecval = 0;
+        vecval = [receiver vecret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+        testassert(state == 106);
+        testassert(vector_equal(vecval, VEC_RESULT));
 
 #if __OBJC2__
         // explicitly call noarg messenger, even if compiler doesn't emit it
@@ -1446,8 +1714,8 @@ void test_basic(id receiver)
         testassert(state == 111);
         testassert(idval == ID_RESULT);
         
-        llval = 0;
         testprintf("llret noarg\n");
+        llval = 0;
         llval = ((typeof(llmsg0))objc_msgSend_noarg)(receiver, @selector(llret_noarg));
         testassert(state == 112);
         testassert(llval == LL_RESULT);
@@ -1455,7 +1723,7 @@ void test_basic(id receiver)
           no objc_msgSend_stret_noarg
         stretval = zero;
         stretval = ((typeof(stretmsg0))objc_msgSend_stret_noarg)(receiver, @selector(stret_noarg));
-        stretval = [receiver stret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+        stretval = [receiver stret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
         testassert(state == 113);
         testassert(stret_equal(stretval, STRET_RESULT));
         */
@@ -1465,6 +1733,12 @@ void test_basic(id receiver)
         fpval = ((typeof(fpmsg0))objc_msgSend_noarg)(receiver, @selector(fpret_noarg));
         testassert(state == 114);
         testassert(fpval == FP_RESULT);
+
+        testprintf("vecret noarg\n");
+        vecval = 0;
+        vecval = ((typeof(vecmsg0))objc_msgSend_noarg)(receiver, @selector(vecret_noarg));
+        testassert(state == 116);
+        testassert(vector_equal(vecval, VEC_RESULT));
 # endif
 # if !__i386__ && !__x86_64__
         testprintf("lfpret noarg\n");
@@ -1489,6 +1763,7 @@ int main()
     struct stret stretval;
     double fpval;
     long double lfpval;
+    vector_ulong2 vecval;
 
 #if __x86_64__
     struct stret *stretptr;
@@ -1503,20 +1778,23 @@ int main()
     Method stretmethod;
     Method fpmethod;
     Method lfpmethod;
+    Method vecmethod;
 
-    id (*idfn)(id, Method, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
-    long long (*llfn)(id, Method, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
-    struct stret (*stretfn)(id, Method, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
-    double (*fpfn)(id, Method, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
-    long double (*lfpfn)(id, Method, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
+    id (*idfn)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
+    long long (*llfn)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
+    struct stret (*stretfn)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
+    double (*fpfn)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
+    long double (*lfpfn)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
+    vector_ulong2 (*vecfn)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double);
 
-    id (*idmsg)(id, SEL, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
-    id (*idmsgsuper)(struct objc_super *, SEL, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
-    long long (*llmsg)(id, SEL, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
-    struct stret (*stretmsg)(id, SEL, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
-    struct stret (*stretmsgsuper)(struct objc_super *, SEL, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
-    double (*fpmsg)(id, SEL, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
-    long double (*lfpmsg)(id, SEL, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
+    id (*idmsg)(id, SEL, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
+    id (*idmsgsuper)(struct objc_super *, SEL, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
+    long long (*llmsg)(id, SEL, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
+    struct stret (*stretmsg)(id, SEL, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
+    struct stret (*stretmsgsuper)(struct objc_super *, SEL, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
+    double (*fpmsg)(id, SEL, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
+    long double (*lfpmsg)(id, SEL, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
+    vector_ulong2 (*vecmsg)(id, SEL, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double) __attribute__((unused));
 
     // get +initialize out of the way
     [Sub class];
@@ -1541,22 +1819,25 @@ int main()
     test_basic(tagged);
 #endif
 
-    idmethod = class_getInstanceMethod([Super class], @selector(idret::::::::::::::::::::::::::::));
+    idmethod = class_getInstanceMethod([Super class], @selector(idret::::::::::::::::::::::::::::::::::::));
     testassert(idmethod);
-    llmethod = class_getInstanceMethod([Super class], @selector(llret::::::::::::::::::::::::::::));
+    llmethod = class_getInstanceMethod([Super class], @selector(llret::::::::::::::::::::::::::::::::::::));
     testassert(llmethod);
-    stretmethod = class_getInstanceMethod([Super class], @selector(stret::::::::::::::::::::::::::::));
+    stretmethod = class_getInstanceMethod([Super class], @selector(stret::::::::::::::::::::::::::::::::::::));
     testassert(stretmethod);
-    fpmethod = class_getInstanceMethod([Super class], @selector(fpret::::::::::::::::::::::::::::));
+    fpmethod = class_getInstanceMethod([Super class], @selector(fpret::::::::::::::::::::::::::::::::::::));
     testassert(fpmethod);
-    lfpmethod = class_getInstanceMethod([Super class], @selector(lfpret::::::::::::::::::::::::::::));
+    lfpmethod = class_getInstanceMethod([Super class], @selector(lfpret::::::::::::::::::::::::::::::::::::));
     testassert(lfpmethod);
+    vecmethod = class_getInstanceMethod([Super class], @selector(vecret::::::::::::::::::::::::::::::::::::));
+    testassert(vecmethod);
 
-    idfn = (id (*)(id, Method, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke;
-    llfn = (long long (*)(id, Method, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke;
-    stretfn = (struct stret (*)(id, Method, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke_stret;
-    fpfn = (double (*)(id, Method, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke;
-    lfpfn = (long double (*)(id, Method, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke;
+    idfn = (id (*)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke;
+    llfn = (long long (*)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke;
+    stretfn = (struct stret (*)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke_stret;
+    fpfn = (double (*)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke;
+    lfpfn = (long double (*)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke;
+    vecfn = (vector_ulong2 (*)(id, Method, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, vector_ulong2, int, int, int, int, int, int, int, int, int, int, int, int, int, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double)) method_invoke;
 
     // cached message performance
     // catches failure to cache or (abi=2) failure to fixup (#5584187)
@@ -1572,18 +1853,21 @@ int main()
     [sub stret_nop];
     [sub fpret_nop];
     [sub lfpret_nop];
+    [sub vecret_nop];
     [sub voidret_nop];
     [sub voidret_nop2];
     [sub llret_nop];
     [sub stret_nop];
     [sub fpret_nop];
     [sub lfpret_nop];
+    [sub vecret_nop];
     [sub voidret_nop];
     [sub voidret_nop2];
     [sub llret_nop];
     [sub stret_nop];
     [sub fpret_nop];
     [sub lfpret_nop];
+    [sub vecret_nop];
 
     // Some of these times have high variance on some compilers. 
     // The errors we're trying to catch should be catastrophically slow, 
@@ -1629,7 +1913,7 @@ int main()
     }
     totalTime = mach_absolute_time() - startTime;
     timecheck("stret ", totalTime, targetTime * 0.7, targetTime * 5.0);
-        
+
     startTime = mach_absolute_time();
     ALIGN_();
     for (i = 0; i < COUNT; i++) {        
@@ -1637,7 +1921,7 @@ int main()
     }
     totalTime = mach_absolute_time() - startTime;
     timecheck("fpret ", totalTime, targetTime * 0.7, targetTime * 4.0);
-        
+
     startTime = mach_absolute_time();
     ALIGN_();
     for (i = 0; i < COUNT; i++) {
@@ -1645,6 +1929,14 @@ int main()
     }
     totalTime = mach_absolute_time() - startTime;
     timecheck("lfpret", totalTime, targetTime * 0.7, targetTime * 4.0);
+
+    startTime = mach_absolute_time();
+    ALIGN_();
+    for (i = 0; i < COUNT; i++) {
+        [sub vecret_nop];
+    }
+    totalTime = mach_absolute_time() - startTime;
+    timecheck("vecret", totalTime, targetTime * 0.7, targetTime * 4.0);
 
 #if __arm64__
     // Removing this testwarn(), or changing voidret_nop to nop;ret, 
@@ -1665,29 +1957,34 @@ int main()
 
     state = 0;
     idval = nil;
-    idval = (*idfn)(sup, idmethod, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    idval = (*idfn)(sup, idmethod, VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 1);
     testassert(idval == ID_RESULT);
-    
+
     llval = 0;
-    llval = (*llfn)(sup, llmethod, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    llval = (*llfn)(sup, llmethod, VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 2);
     testassert(llval == LL_RESULT);
-        
+
     stretval = zero;
-    stretval = (*stretfn)(sup, stretmethod, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    stretval = (*stretfn)(sup, stretmethod, VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 3);
     testassert(stret_equal(stretval, STRET_RESULT));
-        
+
     fpval = 0;
-    fpval = (*fpfn)(sup, fpmethod, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    fpval = (*fpfn)(sup, fpmethod, VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 4);
     testassert(fpval == FP_RESULT);
-        
+
     lfpval = 0;
-    lfpval = (*lfpfn)(sup, lfpmethod, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    lfpval = (*lfpfn)(sup, lfpmethod, VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 5);
     testassert(lfpval == LFP_RESULT);
+
+    vecval = 0;
+    vecval = (*vecfn)(sup, vecmethod, VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    testassert(state == 6);
+    testassert(vector_equal(vecval, VEC_RESULT));
 
 
     // message to nil
@@ -1700,19 +1997,19 @@ int main()
 
     state = 0;
     idval = ID_RESULT;
-    idval = [(id)NIL_RECEIVER idret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    idval = [(id)NIL_RECEIVER idret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
     testassert(state == 0);
     testassert(idval == nil);
     
     state = 0;
     llval = LL_RESULT;
-    llval = [(id)NIL_RECEIVER llret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    llval = [(id)NIL_RECEIVER llret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
     testassert(state == 0);
     testassert(llval == 0LL);
     
     state = 0;
     stretval = zero;
-    stretval = [(id)NIL_RECEIVER stret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    stretval = [(id)NIL_RECEIVER stret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
     testassert(state == 0);
 #if __clang__
     testassert(0 == memcmp(&stretval, &zero, sizeof(stretval)));
@@ -1742,15 +2039,21 @@ int main()
 
     state = 0;
     fpval = FP_RESULT;
-    fpval = [(id)NIL_RECEIVER fpret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    fpval = [(id)NIL_RECEIVER fpret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
     testassert(state == 0);
     testassert(fpval == 0.0);
     
     state = 0;
     lfpval = LFP_RESULT;
-    lfpval = [(id)NIL_RECEIVER lfpret :1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    lfpval = [(id)NIL_RECEIVER lfpret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
     testassert(state == 0);
     testassert(lfpval == 0.0);
+    
+    state = 0;
+    vecval = VEC_RESULT;
+    vecval = [(id)NIL_RECEIVER vecret :VEC1:VEC2:VEC3:VEC4:VEC5:VEC6:VEC7:VEC8:1:2:3:4:5:6:7:8:9:10:11:12:13:1.0:2.0:3.0:4.0:5.0:6.0:7.0:8.0:9.0:10.0:11.0:12.0:13.0:14.0:15.0];
+    testassert(state == 0);
+    testassert(vector_all(vecval == 0));
 
     // message to nil, different struct types
     // This verifies that ordinary objc_msgSend() erases enough registers 
@@ -1813,6 +2116,12 @@ int main()
     fpval = ((typeof(fpmsg0))objc_msgSend_noarg)(nil, @selector(fpret_noarg));
     testassert(state == 0);
     testassert(fpval == 0.0);
+
+    state = 0;
+    vecval = VEC_RESULT;
+    vecval = ((typeof(vecmsg0))objc_msgSend_noarg)(nil, @selector(vecret_noarg));
+    testassert(state == 0);
+    testassert(vector_all(vecval == 0));
 # endif
 # if !__i386__ && !__x86_64__
     state = 0;
@@ -1836,7 +2145,7 @@ int main()
 
     state = 100;
     idval = nil;
-    idval = ((id(*)(struct objc_super *, SEL, int,int,int,int,int,int,int,int,int,int,int,int,int, double,double,double,double,double,double,double,double,double,double,double,double,double,double,double))objc_msgSendSuper2) (&sup_st, @selector(idret::::::::::::::::::::::::::::), 1,2,3,4,5,6,7,8,9,10,11,12,13, 1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0);
+    idval = ((id(*)(struct objc_super *, SEL, vector_ulong2,vector_ulong2,vector_ulong2,vector_ulong2,vector_ulong2,vector_ulong2,vector_ulong2,vector_ulong2, int,int,int,int,int,int,int,int,int,int,int,int,int, double,double,double,double,double,double,double,double,double,double,double,double,double,double,double))objc_msgSendSuper2) (&sup_st, @selector(idret::::::::::::::::::::::::::::::::::::), VEC1,VEC2,VEC3,VEC4,VEC5,VEC6,VEC7,VEC8, 1,2,3,4,5,6,7,8,9,10,11,12,13, 1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0);
     testassert(state == 1);
     testassert(idval == ID_RESULT);
     testassert(sup_st.receiver == sub);
@@ -1844,7 +2153,7 @@ int main()
 
     state = 100;
     stretval = zero;
-    stretval = ((struct stret(*)(struct objc_super *, SEL, int,int,int,int,int,int,int,int,int,int,int,int,int, double,double,double,double,double,double,double,double,double,double,double,double,double,double,double))objc_msgSendSuper2_stret) (&sup_st, @selector(stret::::::::::::::::::::::::::::), 1,2,3,4,5,6,7,8,9,10,11,12,13, 1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0);
+    stretval = ((struct stret(*)(struct objc_super *, SEL, vector_ulong2,vector_ulong2,vector_ulong2,vector_ulong2,vector_ulong2,vector_ulong2,vector_ulong2,vector_ulong2, int,int,int,int,int,int,int,int,int,int,int,int,int, double,double,double,double,double,double,double,double,double,double,double,double,double,double,double))objc_msgSendSuper2_stret) (&sup_st, @selector(stret::::::::::::::::::::::::::::::::::::), VEC1,VEC2,VEC3,VEC4,VEC5,VEC6,VEC7,VEC8, 1,2,3,4,5,6,7,8,9,10,11,12,13, 1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0);
     testassert(state == 3);
     testassert(stret_equal(stretval, STRET_RESULT));
     testassert(sup_st.receiver == sub);
@@ -1858,21 +2167,21 @@ int main()
     state = 0;
     idmsg = (typeof(idmsg))objc_msgSend_debug;
     idval = nil;
-    idval = (*idmsg)(sub, @selector(idret::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    idval = (*idmsg)(sub, @selector(idret::::::::::::::::::::::::::::::::::::), VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 101);
     testassert(idval == ID_RESULT);
     
     state = 0;
     llmsg = (typeof(llmsg))objc_msgSend_debug;
     llval = 0;
-    llval = (*llmsg)(sub, @selector(llret::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    llval = (*llmsg)(sub, @selector(llret::::::::::::::::::::::::::::::::::::), VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 102);
     testassert(llval == LL_RESULT);
     
     state = 0;
     stretmsg = (typeof(stretmsg))objc_msgSend_stret_debug;
     stretval = zero;
-    stretval = (*stretmsg)(sub, @selector(stret::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    stretval = (*stretmsg)(sub, @selector(stret::::::::::::::::::::::::::::::::::::), VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 103);
     testassert(stret_equal(stretval, STRET_RESULT));
     
@@ -1881,7 +2190,7 @@ int main()
     sup_st.super_class = object_getClass(sub);
     idmsgsuper = (typeof(idmsgsuper))objc_msgSendSuper2_debug;
     idval = nil;
-    idval = (*idmsgsuper)(&sup_st, @selector(idret::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    idval = (*idmsgsuper)(&sup_st, @selector(idret::::::::::::::::::::::::::::::::::::), VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 1);
     testassert(idval == ID_RESULT);
     
@@ -1890,7 +2199,7 @@ int main()
     sup_st.super_class = object_getClass(sub);
     stretmsgsuper = (typeof(stretmsgsuper))objc_msgSendSuper2_stret_debug;
     stretval = zero;
-    stretval = (*stretmsgsuper)(&sup_st, @selector(stret::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    stretval = (*stretmsgsuper)(&sup_st, @selector(stret::::::::::::::::::::::::::::::::::::), VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 3);
     testassert(stret_equal(stretval, STRET_RESULT));
 
@@ -1898,7 +2207,7 @@ int main()
     state = 0;
     fpmsg = (typeof(fpmsg))objc_msgSend_fpret_debug;
     fpval = 0;
-    fpval = (*fpmsg)(sub, @selector(fpret::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    fpval = (*fpmsg)(sub, @selector(fpret::::::::::::::::::::::::::::::::::::), VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 104);
     testassert(fpval == FP_RESULT);
 #endif
@@ -1906,7 +2215,7 @@ int main()
     state = 0;
     lfpmsg = (typeof(lfpmsg))objc_msgSend_fpret_debug;
     lfpval = 0;
-    lfpval = (*lfpmsg)(sub, @selector(lfpret::::::::::::::::::::::::::::), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
+    lfpval = (*lfpmsg)(sub, @selector(lfpret::::::::::::::::::::::::::::::::::::), VEC1, VEC2, VEC3, VEC4, VEC5, VEC6, VEC7, VEC8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0);
     testassert(state == 105);
     testassert(lfpval == LFP_RESULT);
 
@@ -1935,26 +2244,26 @@ int main()
     objc_setForwardHandler((void*)test_dw_forward, (void*)test_dw_forward_stret);
 
 # if __x86_64__
-    test_dw("objc_msgSend",             dw, tagged, false, 2);
-    test_dw("objc_msgSend_stret",       dw, tagged, true,  4);
-    test_dw("objc_msgSend_fpret",       dw, tagged, false, 2);
-    test_dw("objc_msgSend_fp2ret",      dw, tagged, false, 2);
-    test_dw("objc_msgSendSuper",        dw, tagged, false, 2);
-    test_dw("objc_msgSendSuper2",       dw, tagged, false, 2);
-    test_dw("objc_msgSendSuper_stret",  dw, tagged, true,  4);
-    test_dw("objc_msgSendSuper2_stret", dw, tagged, true,  4);
+    test_dw("objc_msgSend",             dw, tagged, false, 0);
+    test_dw("objc_msgSend_stret",       dw, tagged, true,  0);
+    test_dw("objc_msgSend_fpret",       dw, tagged, false, 0);
+    test_dw("objc_msgSend_fp2ret",      dw, tagged, false, 0);
+    test_dw("objc_msgSendSuper",        dw, tagged, false, 0);
+    test_dw("objc_msgSendSuper2",       dw, tagged, false, 0);
+    test_dw("objc_msgSendSuper_stret",  dw, tagged, true,  0);
+    test_dw("objc_msgSendSuper2_stret", dw, tagged, true,  0);
 # elif __i386__
-    test_dw("objc_msgSend",             dw, dw, false, 10);
-    test_dw("objc_msgSend_stret",       dw, dw, true,  10);
-    test_dw("objc_msgSend_fpret",       dw, dw, false, 10);
-    test_dw("objc_msgSendSuper",        dw, dw, false, 10);
-    test_dw("objc_msgSendSuper2",       dw, dw, false, 10);
-    test_dw("objc_msgSendSuper_stret",  dw, dw, true,  10);
-    test_dw("objc_msgSendSuper2_stret", dw, dw, true,  10);
+    test_dw("objc_msgSend",             dw, dw, false, 0);
+    test_dw("objc_msgSend_stret",       dw, dw, true,  0);
+    test_dw("objc_msgSend_fpret",       dw, dw, false, 0);
+    test_dw("objc_msgSendSuper",        dw, dw, false, 0);
+    test_dw("objc_msgSendSuper2",       dw, dw, false, 0);
+    test_dw("objc_msgSendSuper_stret",  dw, dw, true,  0);
+    test_dw("objc_msgSendSuper2_stret", dw, dw, true,  0);
 # elif __arm64__
-    test_dw("objc_msgSend",             dw, tagged, false, 2);
-    test_dw("objc_msgSendSuper",        dw, tagged, false, 2);
-    test_dw("objc_msgSendSuper2",       dw, tagged, false, 2);
+    test_dw("objc_msgSend",             dw, tagged, false, 1);
+    test_dw("objc_msgSendSuper",        dw, tagged, false, 1);
+    test_dw("objc_msgSendSuper2",       dw, tagged, false, 1);
 # else
 #   error unknown architecture
 # endif

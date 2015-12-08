@@ -6,7 +6,7 @@
 
 int main()
 {
-    succeed(__FILE__)
+    succeed(__FILE__);
 }
 
 #else

@@ -25,7 +25,12 @@ int main()
         leak_mark();
         count = 10000000;
         testonthread(testblock);
+#if __OBJC_GC__
+        testwarn("rdar://19042235 possible leaks suppressed under GC");
+        leak_check(2000);
+#else
         leak_check(0);
+#endif
     }
 
     succeed(__FILE__);
