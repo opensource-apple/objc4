@@ -41,7 +41,7 @@
 // All methods of class Protocol are unavailable. 
 // Use the functions in objc/runtime.h instead.
 
-OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0)
+OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0, 2.0)
 @interface Protocol : NSObject
 @end
 
@@ -50,7 +50,7 @@ OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0)
 
 #include <objc/Object.h>
 
-OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0)
+OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0, 2.0)
 @interface Protocol : Object
 {
 @private
@@ -74,12 +74,14 @@ OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0)
     __OSX_DEPRECATED(10.0, 10.5, "use protocol_getMethodDescription instead") 
     __IOS_DEPRECATED(2.0, 2.0, "use protocol_getMethodDescription instead") 
     __TVOS_DEPRECATED(9.0, 9.0, "use protocol_getMethodDescription instead") 
-    __WATCHOS_DEPRECATED(1.0, 1.0, "use protocol_getMethodDescription instead");
+    __WATCHOS_DEPRECATED(1.0, 1.0, "use protocol_getMethodDescription instead")
+    __BRIDGEOS_DEPRECATED(2.0, 2.0, "use protocol_getMethodDescription instead");
 - (struct objc_method_description *) descriptionForClassMethod:(SEL)aSel 
     __OSX_DEPRECATED(10.0, 10.5, "use protocol_getMethodDescription instead") 
     __IOS_DEPRECATED(2.0, 2.0, "use protocol_getMethodDescription instead") 
     __TVOS_DEPRECATED(9.0, 9.0, "use protocol_getMethodDescription instead") 
-    __WATCHOS_DEPRECATED(1.0, 1.0, "use protocol_getMethodDescription instead");
+    __WATCHOS_DEPRECATED(1.0, 1.0, "use protocol_getMethodDescription instead")
+    __BRIDGEOS_DEPRECATED(2.0, 2.0, "use protocol_getMethodDescription instead");
 
 @end
 

@@ -39,7 +39,7 @@ typedef struct objc_class *Class;
 
 /// Represents an instance of a class.
 struct objc_object {
-    Class isa  OBJC_ISA_AVAILABILITY;
+    Class _Nonnull isa  OBJC_ISA_AVAILABILITY;
 };
 
 /// A pointer to an instance of a class.
@@ -53,7 +53,7 @@ typedef struct objc_selector *SEL;
 #if !OBJC_OLD_DISPATCH_PROTOTYPES
 typedef void (*IMP)(void /* id, SEL, ... */ ); 
 #else
-typedef id (*IMP)(id, SEL, ...); 
+typedef id _Nullable (*IMP)(id _Nonnull, SEL _Nonnull, ...); 
 #endif
 
 /// Type to represent a boolean value.
@@ -135,8 +135,8 @@ typedef id (*IMP)(id, SEL, ...);
  * 
  * @return A C string indicating the name of the selector.
  */
-OBJC_EXPORT const char *sel_getName(SEL sel)
-    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0);
+OBJC_EXPORT const char * _Nonnull sel_getName(SEL _Nonnull sel)
+    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0, 2.0);
 
 /** 
  * Registers a method with the Objective-C runtime system, maps the method 
@@ -150,8 +150,8 @@ OBJC_EXPORT const char *sel_getName(SEL sel)
  *  method’s selector before you can add the method to a class definition. If the method name
  *  has already been registered, this function simply returns the selector.
  */
-OBJC_EXPORT SEL sel_registerName(const char *str)
-    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0);
+OBJC_EXPORT SEL _Nonnull sel_registerName(const char * _Nonnull str)
+    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0, 2.0);
 
 /** 
  * Returns the class name of a given object.
@@ -160,8 +160,8 @@ OBJC_EXPORT SEL sel_registerName(const char *str)
  * 
  * @return The name of the class of which \e obj is an instance.
  */
-OBJC_EXPORT const char *object_getClassName(id obj)
-    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0);
+OBJC_EXPORT const char * _Nonnull object_getClassName(id _Nullable obj)
+    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0, 2.0);
 
 /** 
  * Returns a pointer to any extra bytes allocated with an instance given object.
@@ -179,8 +179,8 @@ OBJC_EXPORT const char *object_getClassName(id obj)
  *  guaranteed, even if the area following the object's last ivar is more aligned than that.
  * @note In a garbage-collected environment, the memory is scanned conservatively.
  */
-OBJC_EXPORT void *object_getIndexedIvars(id obj)
-    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0)
+OBJC_EXPORT void * _Nullable object_getIndexedIvars(id _Nullable obj)
+    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0, 2.0)
     OBJC_ARC_UNAVAILABLE;
 
 /** 
@@ -193,8 +193,8 @@ OBJC_EXPORT void *object_getIndexedIvars(id obj)
  * @warning On some platforms, an invalid reference (to invalid memory addresses) can cause
  *  a crash. 
  */
-OBJC_EXPORT BOOL sel_isMapped(SEL sel)
-    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0);
+OBJC_EXPORT BOOL sel_isMapped(SEL _Nonnull sel)
+    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0, 2.0);
 
 /** 
  * Registers a method name with the Objective-C runtime system.
@@ -208,19 +208,19 @@ OBJC_EXPORT BOOL sel_isMapped(SEL sel)
  *  and returned \c NULL if the selector was not found. This was changed for safety, because it was
  *  observed that many of the callers of this function did not check the return value for \c NULL.
  */
-OBJC_EXPORT SEL sel_getUid(const char *str)
-    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0);
+OBJC_EXPORT SEL _Nonnull sel_getUid(const char * _Nonnull str)
+    OBJC_AVAILABLE(10.0, 2.0, 9.0, 1.0, 2.0);
 
 typedef const void* objc_objectptr_t;
 
 
 // Obsolete ARC conversions.
 
-OBJC_EXPORT id objc_retainedObject(objc_objectptr_t obj)
+OBJC_EXPORT id _Nullable objc_retainedObject(objc_objectptr_t _Nullable obj)
     OBJC_UNAVAILABLE("use CFBridgingRelease() or a (__bridge_transfer id) cast instead");
-OBJC_EXPORT id objc_unretainedObject(objc_objectptr_t obj)
+OBJC_EXPORT id _Nullable objc_unretainedObject(objc_objectptr_t _Nullable obj)
     OBJC_UNAVAILABLE("use a (__bridge id) cast instead");
-OBJC_EXPORT objc_objectptr_t objc_unretainedPointer(id obj)
+OBJC_EXPORT objc_objectptr_t _Nullable objc_unretainedPointer(id _Nullable obj)
     OBJC_UNAVAILABLE("use a __bridge cast instead");
 
 

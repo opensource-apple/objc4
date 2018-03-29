@@ -690,50 +690,6 @@ static bool is_valid_direct_key(tls_key_t k) {
 }
 #endif
 
-#if __arm__
-
-// rdar://9162780  _pthread_get/setspecific_direct are inefficient
-// copied from libdispatch
-
-__attribute__((const))
-static ALWAYS_INLINE void**
-tls_base(void)
-{
-    uintptr_t p;
-#if defined(__arm__) && defined(_ARM_ARCH_6)
-    __asm__("mrc	p15, 0, %[p], c13, c0, 3" : [p] "=&r" (p));
-    return (void**)(p & ~0x3ul);
-#else
-#error tls_base not implemented
-#endif
-}
-
-
-static ALWAYS_INLINE void
-tls_set_direct(void **tsdb, tls_key_t k, void *v)
-{
-    assert(is_valid_direct_key(k));
-
-    tsdb[k] = v;
-}
-#define tls_set_direct(k, v)                    \
-        tls_set_direct(tls_base(), (k), (v))
-
-
-static ALWAYS_INLINE void *
-tls_get_direct(void **tsdb, tls_key_t k)
-{
-    assert(is_valid_direct_key(k));
-
-    return tsdb[k];
-}
-#define tls_get_direct(k)                       \
-        tls_get_direct(tls_base(), (k))
-
-// arm
-#else
-// not arm
-
 static inline void *tls_get_direct(tls_key_t k) 
 { 
     assert(is_valid_direct_key(k));
@@ -754,9 +710,6 @@ static inline void tls_set_direct(tls_key_t k, void *value)
         pthread_setspecific(k, value);
     }
 }
-
-// not arm
-#endif
 
 // SUPPORT_DIRECT_THREAD_KEYS
 #endif
@@ -789,11 +742,17 @@ template <bool Debug> class monitor_tt;
 template <bool Debug> class rwlock_tt;
 template <bool Debug> class recursive_mutex_tt;
 
-using spinlock_t = mutex_tt<DEBUG>;
-using mutex_t = mutex_tt<DEBUG>;
-using monitor_t = monitor_tt<DEBUG>;
-using rwlock_t = rwlock_tt<DEBUG>;
-using recursive_mutex_t = recursive_mutex_tt<DEBUG>;
+#if DEBUG
+#   define LOCKDEBUG 1
+#else
+#   define LOCKDEBUG 0
+#endif
+
+using spinlock_t = mutex_tt<LOCKDEBUG>;
+using mutex_t = mutex_tt<LOCKDEBUG>;
+using monitor_t = monitor_tt<LOCKDEBUG>;
+using rwlock_t = rwlock_tt<LOCKDEBUG>;
+using recursive_mutex_t = recursive_mutex_tt<LOCKDEBUG>;
 
 // Use fork_unsafe_lock to get a lock that isn't 
 // acquired and released around fork().
@@ -858,7 +817,18 @@ class mutex_tt : nocopy_t {
         lock1->unlock();
         if (lock2 != lock1) lock2->unlock();
     }
+
+    // Scoped lock and unlock
+    class locker : nocopy_t {
+        mutex_tt& lock;
+    public:
+        locker(mutex_tt& newLock) 
+            : lock(newLock) { lock.lock(); }
+        ~locker() { lock.unlock(); }
+    };
 };
+
+using mutex_locker_t = mutex_tt<LOCKDEBUG>::locker;
 
 
 template <bool Debug>
@@ -1237,27 +1207,35 @@ ustrdupMaybeNil(const uint8_t *str)
 // OS version checking:
 //
 // sdkVersion()
-// DYLD_OS_VERSION(mac, ios, tv, watch)
-// sdkIsOlderThan(mac, ios, tv, watch)
-// sdkIsAtLeast(mac, ios, tv, watch)
+// DYLD_OS_VERSION(mac, ios, tv, watch, bridge)
+// sdkIsOlderThan(mac, ios, tv, watch, bridge)
+// sdkIsAtLeast(mac, ios, tv, watch, bridge)
 // 
 // This version order matches OBJC_AVAILABLE.
 
 #if TARGET_OS_OSX
-#   define DYLD_OS_VERSION(x, i, t, w) DYLD_MACOSX_VERSION_##x
+#   define DYLD_OS_VERSION(x, i, t, w, b) DYLD_MACOSX_VERSION_##x
 #   define sdkVersion() dyld_get_program_sdk_version()
 
 #elif TARGET_OS_IOS
-#   define DYLD_OS_VERSION(x, i, t, w) DYLD_IOS_VERSION_##i
+#   define DYLD_OS_VERSION(x, i, t, w, b) DYLD_IOS_VERSION_##i
 #   define sdkVersion() dyld_get_program_sdk_version()
 
 #elif TARGET_OS_TV
     // dyld does not currently have distinct constants for tvOS
-#   define DYLD_OS_VERSION(x, i, t, w) DYLD_IOS_VERSION_##t
+#   define DYLD_OS_VERSION(x, i, t, w, b) DYLD_IOS_VERSION_##t
 #   define sdkVersion() dyld_get_program_sdk_version()
 
+#elif TARGET_OS_BRIDGE
+#   if TARGET_OS_WATCH
+#       error bridgeOS 1.0 not supported
+#   endif
+    // fixme don't need bridgeOS versioning yet
+#   define DYLD_OS_VERSION(x, i, t, w, b) DYLD_IOS_VERSION_##t
+#   define sdkVersion() dyld_get_program_sdk_bridge_os_version()
+
 #elif TARGET_OS_WATCH
-#   define DYLD_OS_VERSION(x, i, t, w) DYLD_WATCHOS_VERSION_##w
+#   define DYLD_OS_VERSION(x, i, t, w, b) DYLD_WATCHOS_VERSION_##w
     // watchOS has its own API for compatibility reasons
 #   define sdkVersion() dyld_get_program_sdk_watch_os_version()
 
@@ -1266,16 +1244,17 @@ ustrdupMaybeNil(const uint8_t *str)
 #endif
 
 
-#define sdkIsOlderThan(x, i, t, w) \
-            (sdkVersion() < DYLD_OS_VERSION(x, i, t, w))
-#define sdkIsAtLeast(x, i, t, w) \
-            (sdkVersion() >= DYLD_OS_VERSION(x, i, t, w))
+#define sdkIsOlderThan(x, i, t, w, b)                           \
+            (sdkVersion() < DYLD_OS_VERSION(x, i, t, w, b))
+#define sdkIsAtLeast(x, i, t, w, b)                             \
+            (sdkVersion() >= DYLD_OS_VERSION(x, i, t, w, b))
 
 // Allow bare 0 to be used in DYLD_OS_VERSION() and sdkIsOlderThan()
 #define DYLD_MACOSX_VERSION_0 0
 #define DYLD_IOS_VERSION_0 0
 #define DYLD_TVOS_VERSION_0 0
 #define DYLD_WATCHOS_VERSION_0 0
+#define DYLD_BRIDGEOS_VERSION_0 0
 
 // Pretty-print a DYLD_*_VERSION_* constant.
 #define SDK_FORMAT "%hu.%hhu.%hhu"
