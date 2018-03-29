@@ -614,7 +614,6 @@
 				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=*]" = "-lc++abi";
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"-lCrashReporterClient",
-					"-lauto",
 					"-lc++abi",
 					"-Xlinker",
 					"-sectalign",
@@ -668,7 +667,6 @@
 				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=*]" = "-lc++abi";
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"-lCrashReporterClient",
-					"-lauto",
 					"-lc++abi",
 					"-Xlinker",
 					"-sectalign",
