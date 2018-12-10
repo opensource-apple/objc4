@@ -76,8 +76,6 @@ void _objc_error(id rcv, const char *fmt, va_list args)
 
 #include <_simple.h>
 
-OBJC_EXPORT void	(*_error)(id, const char *, va_list);
-
 // Return true if c is a UTF8 continuation byte
 static bool isUTF8Continuation(char c)
 {

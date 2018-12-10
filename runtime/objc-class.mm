@@ -160,18 +160,6 @@
 #include "objc-abi.h"
 #include <objc/message.h>
 
-
-/* overriding the default object allocation and error handling routines */
-
-OBJC_EXPORT id	(*_alloc)(Class, size_t);
-OBJC_EXPORT id	(*_copy)(id, size_t);
-OBJC_EXPORT id	(*_realloc)(id, size_t);
-OBJC_EXPORT id	(*_dealloc)(id);
-OBJC_EXPORT id	(*_zoneAlloc)(Class, size_t, void *);
-OBJC_EXPORT id	(*_zoneRealloc)(id, size_t, void *);
-OBJC_EXPORT id	(*_zoneCopy)(id, size_t, void *);
-
-
 /***********************************************************************
 * Information about multi-thread support:
 *
