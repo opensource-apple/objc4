@@ -126,7 +126,14 @@ int main()
     count = objc_getClassList(list, count0-1);
     testassert(list[count0-1] == NULL);
     testassert(count == count0);
-    
+
+    // So that demangling works, fake what would have happened with Swift
+    // and force the "Swift" bit on the class
+    ((uintptr_t *)objc_getClass(SwiftV1MangledName))[4] |= 2;
+    ((uintptr_t *)objc_getClass(SwiftV1MangledName2))[4] |= 2;
+    ((uintptr_t *)objc_getClass(SwiftV1MangledName3))[4] |= 2;
+    ((uintptr_t *)objc_getClass(SwiftV1MangledName4))[4] |= 2;
+
     count = objc_getClassList(list, count0);
     testassert(count == count0);
 

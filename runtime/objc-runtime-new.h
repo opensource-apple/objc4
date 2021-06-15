@@ -24,6 +24,8 @@
 #ifndef _OBJC_RUNTIME_NEW_H
 #define _OBJC_RUNTIME_NEW_H
 
+#include "PointerUnion.h"
+
 // class_data_bits_t is the class_t->data field (class_rw_t pointer plus flags)
 // The extra bits are optimized for the retain/release and alloc/dealloc paths.
 
@@ -91,6 +93,10 @@
 #define RW_FORBIDS_ASSOCIATED_OBJECTS       (1<<20)
 // class has started realizing but not yet completed it
 #define RW_REALIZING          (1<<19)
+
+// class is a metaclass (copied from ro)
+#define RW_META               RO_META // (1<<0)
+
 
 // NOTE: MORE RW_ FLAGS DEFINED BELOW
 
@@ -769,12 +775,12 @@ class list_array_tt {
 
  protected:
     class iterator {
-        List **lists;
-        List **listsEnd;
+        List * const *lists;
+        List * const *listsEnd;
         typename List::iterator m, mEnd;
 
      public:
-        iterator(List **begin, List **end) 
+        iterator(List *const *begin, List *const *end)
             : lists(begin), listsEnd(end)
         {
             if (begin != end) {
@@ -822,7 +828,7 @@ class list_array_tt {
         return arrayAndFlag & 1;
     }
 
-    array_t *array() {
+    array_t *array() const {
         return (array_t *)(arrayAndFlag & ~1);
     }
 
@@ -831,8 +837,10 @@ class list_array_tt {
     }
 
  public:
+    list_array_tt() : list(nullptr) { }
+    list_array_tt(List *l) : list(l) { }
 
-    uint32_t count() {
+    uint32_t count() const {
         uint32_t result = 0;
         for (auto lists = beginLists(), end = endLists(); 
              lists != end;
@@ -843,12 +851,12 @@ class list_array_tt {
         return result;
     }
 
-    iterator begin() {
+    iterator begin() const {
         return iterator(beginLists(), endLists());
     }
 
-    iterator end() {
-        List **e = endLists();
+    iterator end() const {
+        List * const *e = endLists();
         return iterator(e, e);
     }
 
@@ -863,7 +871,7 @@ class list_array_tt {
         }
     }
 
-    List** beginLists() {
+    List* const * beginLists() const {
         if (hasArray()) {
             return array()->lists;
         } else {
@@ -871,7 +879,7 @@ class list_array_tt {
         }
     }
 
-    List** endLists() {
+    List* const * endLists() const {
         if (hasArray()) {
             return array()->lists + array()->count;
         } else if (list) {
@@ -951,11 +959,14 @@ class method_array_t :
     typedef list_array_tt<method_t, method_list_t> Super;
 
  public:
-    method_list_t **beginCategoryMethodLists() {
+    method_array_t() : Super() { }
+    method_array_t(method_list_t *l) : Super(l) { }
+
+    method_list_t * const *beginCategoryMethodLists() const {
         return beginLists();
     }
     
-    method_list_t **endCategoryMethodLists(Class cls);
+    method_list_t * const *endCategoryMethodLists(Class cls) const;
 
     method_array_t duplicate() {
         return Super::duplicate<method_array_t>();
@@ -969,6 +980,9 @@ class property_array_t :
     typedef list_array_tt<property_t, property_list_t> Super;
 
  public:
+    property_array_t() : Super() { }
+    property_array_t(property_list_t *l) : Super(l) { }
+
     property_array_t duplicate() {
         return Super::duplicate<property_array_t>();
     }
@@ -981,34 +995,58 @@ class protocol_array_t :
     typedef list_array_tt<protocol_ref_t, protocol_list_t> Super;
 
  public:
+    protocol_array_t() : Super() { }
+    protocol_array_t(protocol_list_t *l) : Super(l) { }
+
     protocol_array_t duplicate() {
         return Super::duplicate<protocol_array_t>();
     }
 };
 
+struct class_rw_ext_t {
+    const class_ro_t *ro;
+    method_array_t methods;
+    property_array_t properties;
+    protocol_array_t protocols;
+    char *demangledName;
+    uint32_t version;
+};
 
 struct class_rw_t {
     // Be warned that Symbolication knows the layout of this structure.
     uint32_t flags;
-    uint16_t version;
     uint16_t witness;
+#if SUPPORT_INDEXED_ISA
+    uint16_t index;
+#endif
 
-    const class_ro_t *ro;
-
-    method_array_t methods;
-    property_array_t properties;
-    protocol_array_t protocols;
+    explicit_atomic<uintptr_t> ro_or_rw_ext;
 
     Class firstSubclass;
     Class nextSiblingClass;
 
-    char *demangledName;
+private:
+    using ro_or_rw_ext_t = objc::PointerUnion<const class_ro_t *, class_rw_ext_t *>;
 
-#if SUPPORT_INDEXED_ISA
-    uint32_t index;
-#endif
+    const ro_or_rw_ext_t get_ro_or_rwe() const {
+        return ro_or_rw_ext_t{ro_or_rw_ext};
+    }
 
-    void setFlags(uint32_t set) 
+    void set_ro_or_rwe(const class_ro_t *ro) {
+        ro_or_rw_ext_t{ro}.storeAt(ro_or_rw_ext, memory_order_relaxed);
+    }
+
+    void set_ro_or_rwe(class_rw_ext_t *rwe, const class_ro_t *ro) {
+        // the release barrier is so that the class_rw_ext_t::ro initialization
+        // is visible to lockless readers
+        rwe->ro = ro;
+        ro_or_rw_ext_t{rwe}.storeAt(ro_or_rw_ext, memory_order_release);
+    }
+
+    class_rw_ext_t *extAlloc(const class_ro_t *ro, bool deep = false);
+
+public:
+    void setFlags(uint32_t set)
     {
         __c11_atomic_fetch_or((_Atomic(uint32_t) *)&flags, set, __ATOMIC_RELAXED);
     }
@@ -1028,6 +1066,67 @@ struct class_rw_t {
             oldf = flags;
             newf = (oldf | set) & ~clear;
         } while (!OSAtomicCompareAndSwap32Barrier(oldf, newf, (volatile int32_t *)&flags));
+    }
+
+    class_rw_ext_t *ext() const {
+        return get_ro_or_rwe().dyn_cast<class_rw_ext_t *>();
+    }
+
+    class_rw_ext_t *extAllocIfNeeded() {
+        auto v = get_ro_or_rwe();
+        if (fastpath(v.is<class_rw_ext_t *>())) {
+            return v.get<class_rw_ext_t *>();
+        } else {
+            return extAlloc(v.get<const class_ro_t *>());
+        }
+    }
+
+    class_rw_ext_t *deepCopy(const class_ro_t *ro) {
+        return extAlloc(ro, true);
+    }
+
+    const class_ro_t *ro() const {
+        auto v = get_ro_or_rwe();
+        if (slowpath(v.is<class_rw_ext_t *>())) {
+            return v.get<class_rw_ext_t *>()->ro;
+        }
+        return v.get<const class_ro_t *>();
+    }
+
+    void set_ro(const class_ro_t *ro) {
+        auto v = get_ro_or_rwe();
+        if (v.is<class_rw_ext_t *>()) {
+            v.get<class_rw_ext_t *>()->ro = ro;
+        } else {
+            set_ro_or_rwe(ro);
+        }
+    }
+
+    const method_array_t methods() const {
+        auto v = get_ro_or_rwe();
+        if (v.is<class_rw_ext_t *>()) {
+            return v.get<class_rw_ext_t *>()->methods;
+        } else {
+            return method_array_t{v.get<const class_ro_t *>()->baseMethods()};
+        }
+    }
+
+    const property_array_t properties() const {
+        auto v = get_ro_or_rwe();
+        if (v.is<class_rw_ext_t *>()) {
+            return v.get<class_rw_ext_t *>()->properties;
+        } else {
+            return property_array_t{v.get<const class_ro_t *>()->baseProperties};
+        }
+    }
+
+    const protocol_array_t protocols() const {
+        auto v = get_ro_or_rwe();
+        if (v.is<class_rw_ext_t *>()) {
+            return v.get<class_rw_ext_t *>()->protocols;
+        } else {
+            return protocol_array_t{v.get<const class_ro_t *>()->baseProtocols};
+        }
     }
 };
 
@@ -1087,7 +1186,7 @@ public:
         class_rw_t *maybe_rw = data();
         if (maybe_rw->flags & RW_REALIZED) {
             // maybe_rw is rw
-            return maybe_rw->ro;
+            return maybe_rw->ro();
         } else {
             // maybe_rw is actually ro
             return (class_ro_t *)maybe_rw;
@@ -1359,12 +1458,12 @@ struct objc_class : objc_object {
     // Return YES if the class's ivars are managed by ARC, 
     // or the class is MRC but has ARC-style weak ivars.
     bool hasAutomaticIvars() {
-        return data()->ro->flags & (RO_IS_ARC | RO_HAS_WEAK_WITHOUT_ARC);
+        return data()->ro()->flags & (RO_IS_ARC | RO_HAS_WEAK_WITHOUT_ARC);
     }
 
     // Return YES if the class's ivars are managed by ARC.
     bool isARC() {
-        return data()->ro->flags & RO_IS_ARC;
+        return data()->ro()->flags & RO_IS_ARC;
     }
 
 
@@ -1435,13 +1534,15 @@ struct objc_class : objc_object {
 #if FAST_CACHE_META
         return cache.getBit(FAST_CACHE_META);
 #else
-        return data()->ro->flags & RO_META;
+        return data()->flags & RW_META;
 #endif
     }
 
     // Like isMetaClass, but also valid on un-realized classes
     bool isMetaClassMaybeUnrealized() {
-        return bits.safe_ro()->flags & RO_META;
+        static_assert(offsetof(class_rw_t, flags) == offsetof(class_ro_t, flags), "flags alias");
+        static_assert(RO_META == RW_META, "flags alias");
+        return data()->flags & RW_META;
     }
 
     // NOT identical to this->ISA when this is a metaclass
@@ -1462,19 +1563,19 @@ struct objc_class : objc_object {
         ASSERT(this);
 
         if (isRealized()  ||  isFuture()) {
-            return data()->ro->name;
+            return data()->ro()->name;
         } else {
             return ((const class_ro_t *)data())->name;
         }
     }
     
-    const char *demangledName();
+    const char *demangledName(bool needsLock);
     const char *nameForLogging();
 
     // May be unaligned depending on class's ivars.
     uint32_t unalignedInstanceStart() const {
         ASSERT(isRealized());
-        return data()->ro->instanceStart;
+        return data()->ro()->instanceStart;
     }
 
     // Class's instance start rounded up to a pointer-size boundary.
@@ -1486,7 +1587,7 @@ struct objc_class : objc_object {
     // May be unaligned depending on class's ivars.
     uint32_t unalignedInstanceSize() const {
         ASSERT(isRealized());
-        return data()->ro->instanceSize;
+        return data()->ro()->instanceSize;
     }
 
     // Class's ivar size rounded up to a pointer-size boundary.
@@ -1508,9 +1609,10 @@ struct objc_class : objc_object {
     void setInstanceSize(uint32_t newSize) {
         ASSERT(isRealized());
         ASSERT(data()->flags & RW_REALIZING);
-        if (newSize != data()->ro->instanceSize) {
+        auto ro = data()->ro();
+        if (newSize != ro->instanceSize) {
             ASSERT(data()->flags & RW_COPIED_RO);
-            *const_cast<uint32_t *>(&data()->ro->instanceSize) = newSize;
+            *const_cast<uint32_t *>(&ro->instanceSize) = newSize;
         }
         cache.setFastInstanceSize(newSize);
     }

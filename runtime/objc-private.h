@@ -478,6 +478,11 @@ static inline bool sectnameStartsWith(const char *sectname, const char *prefix){
 }
 
 
+#if __OBJC2__
+extern bool didCallDyldNotifyRegister;
+#endif
+
+
 /* selectors */
 extern void sel_init(size_t selrefCount);
 extern SEL sel_registerNameNoLock(const char *str, bool copy);
