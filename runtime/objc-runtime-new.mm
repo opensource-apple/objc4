@@ -5604,7 +5604,9 @@ objc_class::demangledName(bool needsLock)
 
     // Return previously demangled name if available.
     if (isRealized()  ||  isFuture()) {
-        if (!isAnySwift()) {
+        // Swift metaclasses don't have the is-Swift bit.
+        // We can't take this shortcut for them.
+        if (!isMetaClass() && !isAnySwift()) {
             return data()->ro()->name;
         }
         auto rwe = data()->ext();

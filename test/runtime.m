@@ -212,6 +212,14 @@ int main()
     testassert(list2[count] == NULL);
     free(list2);
     free(objc_copyClassList(NULL));
+    
+    // Make sure metaclasses get demangled too.
+    testassert(strcmp(class_getName([TestRoot class]), class_getName(object_getClass([TestRoot class]))) == 0);
+    testassert(strcmp(class_getName([Sub class]), class_getName(object_getClass([Sub class]))) == 0);
+    testassert(strcmp(class_getName([SwiftV1Class class]), class_getName(object_getClass([SwiftV1Class class]))) == 0);
+    testassert(strcmp(class_getName([SwiftV1Class2 class]), class_getName(object_getClass([SwiftV1Class2 class]))) == 0);
+    testassert(strcmp(class_getName([SwiftV1Class3 class]), class_getName(object_getClass([SwiftV1Class3 class]))) == 0);
+    testassert(strcmp(class_getName([SwiftV1Class4 class]), class_getName(object_getClass([SwiftV1Class4 class]))) == 0);
 
     succeed(__FILE__);
 }
