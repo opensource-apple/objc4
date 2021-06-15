@@ -42,6 +42,8 @@ options:
     RUN=0|1        (run the tests?)
     VERBOSE=0|1|2  (0=quieter  1=print commands executed  2=full test output)
     BATS=0|1       (build for and/or run in BATS?)
+    BUILD_SHARED_CACHE=0|1  (build a dyld shared cache with the root and test against that)
+    DYLD=2|3       (test in dyld 2 or dyld 3 mode)
 
 examples:
 
@@ -230,7 +232,22 @@ sub make {
         next if $cmd =~ /^\s*$/;
         $cmd .= " 2>&1";
         print "$cmd\n" if $VERBOSE;
-        $output .= `$cmd`;
+        eval {
+            local $SIG{ALRM} = sub { die "alarm\n" };
+            # Timeout after 600 seconds so a deadlocked test doesn't wedge the
+            # entire test suite. Increase to an hour for B&I builds.
+            if (exists $ENV{"RC_XBS"}) {
+                alarm 3600;
+            } else {
+                alarm 600;
+            }
+            $output .= `$cmd`;
+            alarm 0;
+        };
+        if ($@) {
+            die unless $@ eq "alarm\n";
+            $output .= "\nTIMED OUT";
+        }
         last if $?;
     }
     print "$output\n" if $VERBOSE;
@@ -966,6 +983,16 @@ sub run_simple {
         $env .= " OBJC_DEBUG_DONT_CRASH=YES";
     }
 
+    if ($C{DYLD} eq "2") {
+        $env .= " DYLD_USE_CLOSURES=0";
+    }
+    elsif ($C{DYLD} eq "3") {
+        $env .= " DYLD_USE_CLOSURES=1";
+    }
+    else {
+        die "unknown DYLD setting $C{DYLD}";
+    }
+
     my $output;
 
     if ($C{ARCH} =~ /^arm/ && `uname -p` !~ /^arm/) {
@@ -1058,6 +1085,26 @@ sub dirContainsAllTestLibs {
     }
 
     return 1;
+}
+
+sub findIncludeDir {
+    my ($root, $includePath) = @_;
+
+    foreach my $candidate ("$root/../SDKContentRoot/$includePath", "$root/$includePath") {
+        my $found = -e $candidate;
+        my $foundstr = ($found ? "found" : "didn't find");
+        print "note:	$foundstr $includePath at $candidate\n" if $VERBOSE;
+        return $candidate if $found;
+    }
+
+    die "Unable to find $includePath in $root.\n";
+}
+
+sub buildSharedCache {
+    my $Cref = shift;
+    my %C = %$Cref;
+    
+    make("update_dyld_shared_cache -verbose -cache_dir $BUILDDIR -overlay $C{TESTLIBDIR}/../..");
 }
 
 sub make_one_config {
@@ -1315,9 +1362,8 @@ sub make_one_config {
 
         my $library_path = $C{TESTLIBDIR};
         $cflags .= " -L$library_path";
-        # fixme Root vs SDKContentRoot
-        $C{TESTINCLUDEDIR} = "$root/../SDKContentRoot/usr/include";
-        $C{TESTLOCALINCLUDEDIR} = "$root/../SDKContentRoot/usr/local/include";
+        $C{TESTINCLUDEDIR} = findIncludeDir($root, "usr/include");
+        $C{TESTLOCALINCLUDEDIR} = findIncludeDir($root, "usr/local/include");
         $cflags .= " -isystem '$C{TESTINCLUDEDIR}'";
         $cflags .= " -isystem '$C{TESTLOCALINCLUDEDIR}'";
     }
@@ -1633,6 +1679,10 @@ $args{OSVERSION} = getargs("OS", "macosx-default-default");
 
 $args{MEM} = getargs("MEM", "mrc,arc");
 $args{LANGUAGE} = [ map { lc($_) } @{getargs("LANGUAGE", "c,objective-c,c++,objective-c++")} ];
+
+$args{BUILD_SHARED_CACHE} = getargs("BUILD_SHARED_CACHE", 0);
+
+$args{DYLD} = getargs("DYLD", "2,3");
 
 $args{CC} = getargs("CC", "clang");
 

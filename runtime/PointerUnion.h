@@ -59,12 +59,12 @@ struct PointerUnionTypeSelectorReturn<
       typename PointerUnionTypeSelector<T1, T2, RET_EQ, RET_NE>::Return;
 };
 
-template <class PT1, class PT2>
+template <class T1, class T2, typename Auth1, typename Auth2>
 class PointerUnion {
     uintptr_t _value;
 
-    static_assert(alignof(PT1) >= 2, "alignment requirement");
-    static_assert(alignof(PT2) >= 2, "alignment requirement");
+    static_assert(alignof(T1) >= 2, "alignment requirement");
+    static_assert(alignof(T2) >= 2, "alignment requirement");
 
     struct IsPT1 {
       static const uintptr_t Num = 0;
@@ -85,8 +85,12 @@ public:
     explicit PointerUnion(const std::atomic<uintptr_t> &raw)
     : _value(raw.load(std::memory_order_relaxed))
     { }
-    PointerUnion(PT1 t) : _value((uintptr_t)t) { }
-    PointerUnion(PT2 t) : _value((uintptr_t)t | 1) { }
+    PointerUnion(T1 *t, const void *address) {
+        _value = (uintptr_t)Auth1::sign(t, address);
+    }
+    PointerUnion(T2 *t, const void *address) {
+        _value = (uintptr_t)Auth2::sign(t, address) | 1;
+    }
 
     void storeAt(std::atomic<uintptr_t> &raw, std::memory_order order) const {
         raw.store(_value, order);
@@ -94,20 +98,24 @@ public:
 
     template <typename T>
     bool is() const {
-        using Ty = typename PointerUnionTypeSelector<PT1, T, IsPT1,
-            PointerUnionTypeSelector<PT2, T, IsPT2,
+        using Ty = typename PointerUnionTypeSelector<T1 *, T, IsPT1,
+            PointerUnionTypeSelector<T2 *, T, IsPT2,
             UNION_DOESNT_CONTAIN_TYPE<T>>>::Return;
         return getTag() == Ty::Num;
     }
 
-    template <typename T> T get() const {
-      ASSERT(is<T>() && "Invalid accessor called");
-      return reinterpret_cast<T>(getPointer());
+    template <typename T> T get(const void *address) const {
+        ASSERT(is<T>() && "Invalid accessor called");
+        using AuthT = typename PointerUnionTypeSelector<T1 *, T, Auth1,
+            PointerUnionTypeSelector<T2 *, T, Auth2,
+            UNION_DOESNT_CONTAIN_TYPE<T>>>::Return;
+
+        return AuthT::auth((T)getPointer(), address);
     }
 
-    template <typename T> T dyn_cast() const {
+    template <typename T> T dyn_cast(const void *address) const {
       if (is<T>())
-        return get<T>();
+        return get<T>(address);
       return T();
     }
 };

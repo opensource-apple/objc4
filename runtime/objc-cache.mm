@@ -99,6 +99,18 @@ static void cache_collect_free(struct bucket_t *data, mask_t capacity);
 static int _collecting_in_critical(void);
 static void _garbage_make_room(void);
 
+#if DEBUG_TASK_THREADS
+static kern_return_t objc_task_threads
+(
+	task_t target_task,
+	thread_act_array_t *act_list,
+	mach_msg_type_number_t *act_listCnt
+);
+#endif
+
+#if DEBUG_TASK_THREADS
+#undef HAVE_TASK_RESTARTABLE_RANGES
+#endif
 
 /***********************************************************************
 * Cache statistics for OBJC_PRINT_CACHE_SETUP

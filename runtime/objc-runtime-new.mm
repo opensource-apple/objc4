@@ -46,7 +46,7 @@ static void free_class(Class cls);
 static IMP addMethod(Class cls, SEL name, IMP imp, const char *types, bool replace);
 static void adjustCustomFlagsForMethodChange(Class cls, method_t *meth);
 static method_t *search_method_list(const method_list_t *mlist, SEL sel);
-static bool method_lists_contains_any(method_list_t * const *mlists, method_list_t * const *end,
+template<typename T> static bool method_lists_contains_any(T *mlists, T *end,
         SEL sels[], size_t selcount);
 static void flushCaches(Class cls);
 static void initializeTaggedPointerObfuscator(void);
@@ -212,6 +212,59 @@ static bool didInitialAttachCategories = false;
 **********************************************************************/
 bool didCallDyldNotifyRegister = false;
 
+
+/***********************************************************************
+* smallMethodIMPMap
+* The map from small method pointers to replacement IMPs.
+*
+* Locking: runtimeLock must be held when accessing this map.
+**********************************************************************/
+namespace objc {
+    static objc::LazyInitDenseMap<const method_t *, IMP> smallMethodIMPMap;
+}
+
+static IMP method_t_remappedImp_nolock(const method_t *m) {
+    runtimeLock.assertLocked();
+    auto *map = objc::smallMethodIMPMap.get(false);
+    if (!map)
+        return nullptr;
+    auto iter = map->find(m);
+    if (iter == map->end())
+        return nullptr;
+    return iter->second;
+}
+
+IMP method_t::remappedImp(bool needsLock) const {
+    ASSERT(isSmall());
+    if (needsLock) {
+        mutex_locker_t guard(runtimeLock);
+        return method_t_remappedImp_nolock(this);
+    } else {
+        return method_t_remappedImp_nolock(this);
+    }
+}
+
+void method_t::remapImp(IMP imp) {
+    ASSERT(isSmall());
+    runtimeLock.assertLocked();
+    auto *map = objc::smallMethodIMPMap.get(true);
+    (*map)[this] = imp;
+}
+
+objc_method_description *method_t::getSmallDescription() const {
+    static objc::LazyInitDenseMap<const method_t *, objc_method_description *> map;
+
+    mutex_locker_t guard(runtimeLock);
+
+    auto &ptr = (*map.get(true))[this];
+    if (!ptr) {
+        ptr = (objc_method_description *)malloc(sizeof *ptr);
+        ptr->name = name();
+        ptr->types = (char *)types();
+    }
+    return ptr;
+}
+
 /*
   Low two bits of mlist->entsize is used as the fixed-up marker.
   PREOPTIMIZED VERSION:
@@ -258,7 +311,8 @@ bool method_list_t::isUniqued() const {
 }
 
 bool method_list_t::isFixedUp() const {
-    return flags() == fixed_up_method_list;
+    // Ignore any flags in the top bits, just look at the bottom two.
+    return (flags() & 0x3) == fixed_up_method_list;
 }
 
 void method_list_t::setFixedUp() {
@@ -288,11 +342,11 @@ void protocol_t::clearIsCanonical() {
 }
 
 
-method_list_t * const *method_array_t::endCategoryMethodLists(Class cls) const
+const method_list_t_authed_ptr<method_list_t> *method_array_t::endCategoryMethodLists(Class cls) const
 {
     auto mlists = beginLists();
     auto mlistsEnd = endLists();
-    
+
     if (mlists == mlistsEnd  ||  !cls->data()->ro()->baseMethods())
     {
         // No methods, or no base methods. 
@@ -536,7 +590,7 @@ printReplacements(Class cls, const locstamped_category_t *cats_list, uint32_t ca
         if (!mlist) continue;
 
         for (const auto& meth : *mlist) {
-            SEL s = sel_registerName(sel_cname(meth.name));
+            SEL s = sel_registerName(sel_cname(meth.name()));
 
             // Search for replaced methods in method lookup order.
             // Complain about the first duplicate only.
@@ -549,11 +603,11 @@ printReplacements(Class cls, const locstamped_category_t *cats_list, uint32_t ca
                 if (!mlist2) continue;
 
                 for (const auto& meth2 : *mlist2) {
-                    SEL s2 = sel_registerName(sel_cname(meth2.name));
+                    SEL s2 = sel_registerName(sel_cname(meth2.name()));
                     if (s == s2) {
                         logReplacedMethod(cls->nameForLogging(), s, 
                                           cls->isMetaClass(), cat->name, 
-                                          meth2.imp, meth.imp);
+                                          meth2.imp(false), meth.imp(false));
                         goto complained;
                     }
                 }
@@ -561,11 +615,11 @@ printReplacements(Class cls, const locstamped_category_t *cats_list, uint32_t ca
 
             // Look for method in cls
             for (const auto& meth2 : cls->data()->methods()) {
-                SEL s2 = sel_registerName(sel_cname(meth2.name));
+                SEL s2 = sel_registerName(sel_cname(meth2.name()));
                 if (s == s2) {
                     logReplacedMethod(cls->nameForLogging(), s, 
                                       cls->isMetaClass(), cat->name, 
-                                      meth2.imp, meth.imp);
+                                      meth2.imp(false), meth.imp(false));
                     goto complained;
                 }
             }
@@ -892,7 +946,7 @@ public:
     static void
     scanChangedMethod(Class cls, const method_t *meth)
     {
-        if (fastpath(!Traits::isInterestingSelector(meth->name))) {
+        if (fastpath(!Traits::isInterestingSelector(meth->name()))) {
             return;
         }
 
@@ -938,7 +992,8 @@ struct AWZScanner : scanner::Mixin<AWZScanner, AWZ, PrintCustomAWZ, scanner::Sco
     static bool isInterestingSelector(SEL sel) {
         return sel == @selector(alloc) || sel == @selector(allocWithZone:);
     }
-    static bool scanMethodLists(method_list_t * const *mlists, method_list_t * const *end) {
+    template<typename T>
+    static bool scanMethodLists(T *mlists, T *end) {
         SEL sels[2] = { @selector(alloc), @selector(allocWithZone:), };
         return method_lists_contains_any(mlists, end, sels, 2);
     }
@@ -972,7 +1027,8 @@ struct RRScanner : scanner::Mixin<RRScanner, RR, PrintCustomRR
                sel == @selector(allowsWeakReference) ||
                sel == @selector(retainWeakReference);
     }
-    static bool scanMethodLists(method_list_t * const *mlists, method_list_t * const *end) {
+    template <typename T>
+    static bool scanMethodLists(T *mlists, T *end) {
         SEL sels[8] = {
             @selector(retain),
             @selector(release),
@@ -1007,7 +1063,8 @@ struct CoreScanner : scanner::Mixin<CoreScanner, Core, PrintCustomCore> {
                sel == @selector(isKindOfClass:) ||
                sel == @selector(respondsToSelector:);
     }
-    static bool scanMethodLists(method_list_t * const *mlists, method_list_t * const *end) {
+    template <typename T>
+    static bool scanMethodLists(T *mlists, T *end) {
         SEL sels[5] = {
             @selector(new),
             @selector(self),
@@ -1193,19 +1250,25 @@ fixupMethodList(method_list_t *mlist, bool bundleCopy, bool sort)
     
         // Unique selectors in list.
         for (auto& meth : *mlist) {
-            const char *name = sel_cname(meth.name);
-            meth.name = sel_registerNameNoLock(name, bundleCopy);
+            const char *name = sel_cname(meth.name());
+            meth.name() = sel_registerNameNoLock(name, bundleCopy);
         }
     }
 
     // Sort by selector address.
-    if (sort) {
+    // Don't try to sort small lists, as they're immutable.
+    // Don't try to sort big lists of nonstandard size, as stable_sort
+    // won't copy the entries properly.
+    if (sort && !mlist->isSmallList() && mlist->entsize() == method_t::bigSize) {
         method_t::SortBySELAddress sorter;
-        std::stable_sort(mlist->begin(), mlist->end(), sorter);
+        std::stable_sort(&mlist->begin()->big(), &mlist->end()->big(), sorter);
     }
     
-    // Mark method list as uniqued and sorted
-    mlist->setFixedUp();
+    // Mark method list as uniqued and sorted.
+    // Can't mark small lists, since they're immutable.
+    if (!mlist->isSmallList()) {
+        mlist->setFixedUp();
+    }
 }
 
 
@@ -1391,6 +1454,9 @@ static void methodizeClass(Class cls, Class previously)
     // Install methods and properties that the class implements itself.
     method_list_t *list = ro->baseMethods();
     if (list) {
+        if (list->isSmallList() && !_dyld_is_memory_immutable(list, list->byteSize()))
+            _objc_fatal("CLASS: class '%s' %p small method list %p is not in immutable memory",
+                        cls->nameForLogging(), cls, list);
         prepareMethodLists(cls, &list, 1, YES, isBundleClass(cls));
         if (rwe) rwe->methods.attachLists(&list, 1);
     }
@@ -1433,9 +1499,9 @@ static void methodizeClass(Class cls, Class previously)
     for (const auto& meth : rw->methods()) {
         if (PrintConnecting) {
             _objc_inform("METHOD %c[%s %s]", isMeta ? '+' : '-', 
-                         cls->nameForLogging(), sel_getName(meth.name));
+                         cls->nameForLogging(), sel_getName(meth.name()));
         }
-        ASSERT(sel_registerName(sel_getName(meth.name)) == meth.name); 
+        ASSERT(sel_registerName(sel_getName(meth.name())) == meth.name());
     }
 #endif
 }
@@ -2270,16 +2336,8 @@ static NEVER_INLINE Protocol *getProtocol(const char *name)
         if (result) return result;
     }
 
-    // Try table from dyld shared cache
-    // Temporarily check that we are using the new table.  Eventually this check
-    // will always be true.
-    // FIXME: Remove this check when we can
-    if (sharedCacheSupportsProtocolRoots()) {
-        result = getPreoptimizedProtocol(name);
-        if (result) return result;
-    }
-
-    return nil;
+    // Try table from dyld3 closure and dyld shared cache
+    return getPreoptimizedProtocol(name);
 }
 
 
@@ -3053,8 +3111,8 @@ static void load_categories_nolock(header_info *hi) {
         }
     };
 
-    processCatlist(_getObjc2CategoryList(hi, &count));
-    processCatlist(_getObjc2CategoryList2(hi, &count));
+    processCatlist(hi->catlist(&count));
+    processCatlist(hi->catlist2(&count));
 }
 
 static void loadAllCategories() {
@@ -3554,7 +3612,6 @@ void _read_images(header_info **hList, uint32_t hCount, int totalClasses, int un
     ts.log("IMAGE TIMES: fix up objc_msgSend_fixup");
 #endif
 
-    bool cacheSupportsProtocolRoots = sharedCacheSupportsProtocolRoots();
 
     // Discover protocols. Fix up protocol refs.
     for (EACH_HEADER) {
@@ -3570,7 +3627,7 @@ void _read_images(header_info **hList, uint32_t hCount, int totalClasses, int un
         // in the shared cache is marked with isCanonical() and that may not
         // be true if some non-shared cache binary was chosen as the canonical
         // definition
-        if (launchTime && isPreoptimized && cacheSupportsProtocolRoots) {
+        if (launchTime && isPreoptimized) {
             if (PrintProtocols) {
                 _objc_inform("PROTOCOLS: Skipping reading protocols in image: %s",
                              hi->fname());
@@ -3597,7 +3654,7 @@ void _read_images(header_info **hList, uint32_t hCount, int totalClasses, int un
         // shared cache definition of a protocol.  We can skip the check on
         // launch, but have to visit @protocol refs for shared cache images
         // loaded later.
-        if (launchTime && cacheSupportsProtocolRoots && hi->isPreoptimized())
+        if (launchTime && hi->isPreoptimized())
             continue;
         protocol_t **protolist = _getObjc2ProtocolRefs(hi, &count);
         for (i = 0; i < count; i++) {
@@ -3627,8 +3684,7 @@ void _read_images(header_info **hList, uint32_t hCount, int totalClasses, int un
 
     // Realize non-lazy classes (for +load methods and static instances)
     for (EACH_HEADER) {
-        classref_t const *classlist = 
-            _getObjc2NonlazyClassList(hi, &count);
+        classref_t const *classlist = hi->nlclslist(&count);
         for (i = 0; i < count; i++) {
             Class cls = remapClass(classlist[i]);
             if (!cls) continue;
@@ -3808,7 +3864,7 @@ void _unload_image(header_info *hi)
 
     // Ignore __objc_catlist2. We don't support unloading Swift
     // and we never will.
-    category_t * const *catlist = _getObjc2CategoryList(hi, &count);
+    category_t * const *catlist = hi->catlist(&count);
     for (i = 0; i < count; i++) {
         category_t *cat = catlist[i];
         Class cls = remapClass(cat->cls);
@@ -3838,7 +3894,7 @@ void _unload_image(header_info *hi)
         if (cls) classes.insert(cls);
     }
 
-    classlist = _getObjc2NonlazyClassList(hi, &count);
+    classlist = hi->nlclslist(&count);
     for (i = 0; i < count; i++) {
         Class cls = remapClass(classlist[i]);
         if (cls) classes.insert(cls);
@@ -3873,14 +3929,19 @@ struct objc_method_description *
 method_getDescription(Method m)
 {
     if (!m) return nil;
-    return (struct objc_method_description *)m;
+    return m->getDescription();
 }
 
 
 IMP 
 method_getImplementation(Method m)
 {
-    return m ? m->imp : nil;
+    return m ? m->imp(true) : nil;
+}
+
+IMPAndSEL _method_getImplementationAndName(Method m)
+{
+    return { m->imp(true), m->name() };
 }
 
 
@@ -3896,8 +3957,8 @@ method_getName(Method m)
 {
     if (!m) return nil;
 
-    ASSERT(m->name == sel_registerName(sel_getName(m->name)));
-    return m->name;
+    ASSERT(m->name() == sel_registerName(sel_getName(m->name())));
+    return m->name();
 }
 
 
@@ -3911,7 +3972,7 @@ const char *
 method_getTypeEncoding(Method m)
 {
     if (!m) return nil;
-    return m->types;
+    return m->types();
 }
 
 
@@ -3928,8 +3989,8 @@ _method_setImplementation(Class cls, method_t *m, IMP imp)
     if (!m) return nil;
     if (!imp) return nil;
 
-    IMP old = m->imp;
-    m->imp = imp;
+    IMP old = m->imp(false);
+    m->setImp(imp);
 
     // Cache updates are slow if cls is nil (i.e. unknown)
     // RR/AWZ updates are slow if cls is nil (i.e. unknown)
@@ -3958,9 +4019,9 @@ void method_exchangeImplementations(Method m1, Method m2)
 
     mutex_locker_t lock(runtimeLock);
 
-    IMP m1_imp = m1->imp;
-    m1->imp = m2->imp;
-    m2->imp = m1_imp;
+    IMP m1_imp = m1->imp(false);
+    m1->setImp(m2->imp(false));
+    m2->setImp(m1_imp);
 
 
     // RR/AWZ updates are slow because class is unknown
@@ -4121,7 +4182,7 @@ fixupProtocolMethodList(protocol_t *proto, method_list_t *mlist,
     fixupMethodList(mlist, true/*always copy for simplicity*/,
                     !extTypes/*sort if no extended method types*/);
     
-    if (extTypes) {
+    if (extTypes && !mlist->isSmallList()) {
         // Sort method list and extended method types together.
         // fixupMethodList() can't do this.
         // fixme COW stomp
@@ -4132,8 +4193,8 @@ fixupProtocolMethodList(protocol_t *proto, method_list_t *mlist,
                                          required, instance, prefix, junk);
         for (uint32_t i = 0; i < count; i++) {
             for (uint32_t j = i+1; j < count; j++) {
-                method_t& mi = mlist->get(i);
-                method_t& mj = mlist->get(j);
+                auto& mi = mlist->get(i).big();
+                auto& mj = mlist->get(j).big();
                 if (mi.name > mj.name) {
                     std::swap(mi, mj);
                     std::swap(extTypes[prefix+i], extTypes[prefix+j]);
@@ -4372,7 +4433,9 @@ protocol_getMethodDescription(Protocol *p, SEL aSel,
     Method m = 
         protocol_getMethod(newprotocol(p), aSel, 
                            isRequiredMethod, isInstanceMethod, true);
-    if (m) return *method_getDescription(m);
+    // method_getDescription is inefficient for small methods. Don't bother
+    // trying to use it, just make our own.
+    if (m) return (struct objc_method_description){m->name(), (char *)m->types()};
     else return (struct objc_method_description){nil, nil};
 }
 
@@ -4477,8 +4540,8 @@ protocol_copyMethodDescriptionList(Protocol *p,
         result = (struct objc_method_description *)
             calloc(mlist->count + 1, sizeof(struct objc_method_description));
         for (const auto& meth : *mlist) {
-            result[count].name = meth.name;
-            result[count].types = (char *)meth.types;
+            result[count].name = meth.name();
+            result[count].types = (char *)meth.types();
             count++;
         }
     }
@@ -4763,15 +4826,15 @@ static void
 protocol_addMethod_nolock(method_list_t*& list, SEL name, const char *types)
 {
     if (!list) {
-        list = (method_list_t *)calloc(sizeof(method_list_t), 1);
-        list->entsizeAndFlags = sizeof(list->first);
+        list = (method_list_t *)calloc(method_list_t::byteSize(sizeof(struct method_t::big), 1), 1);
+        list->entsizeAndFlags = sizeof(struct method_t::big);
         list->setFixedUp();
     } else {
         size_t size = list->byteSize() + list->entsize();
         list = (method_list_t *)realloc(list, size);
     }
 
-    method_t& meth = list->get(list->count++);
+    auto &meth = list->get(list->count++).big();
     meth.name = name;
     meth.types = types ? strdupIfMutable(types) : "";
     meth.imp = nil;
@@ -4819,15 +4882,15 @@ protocol_addProperty_nolock(property_list_t *&plist, const char *name,
                             unsigned int count)
 {
     if (!plist) {
-        plist = (property_list_t *)calloc(sizeof(property_list_t), 1);
+        plist = (property_list_t *)calloc(property_list_t::byteSize(sizeof(property_t), 1), 1);
         plist->entsizeAndFlags = sizeof(property_t);
+        plist->count = 1;
     } else {
-        plist = (property_list_t *)
-            realloc(plist, sizeof(property_list_t) 
-                    + plist->count * plist->entsize());
+        plist->count++;
+        plist = (property_list_t *)realloc(plist, plist->byteSize());
     }
 
-    property_t& prop = plist->get(plist->count++);
+    property_t& prop = plist->get(plist->count - 1);
     prop.name = strdupIfMutable(name);
     prop.attributes = copyPropertyAttributeString(attrs, count);
 }
@@ -5038,7 +5101,7 @@ objc_copyProtocolList(unsigned int *outCount)
     // Find all the protocols from the pre-optimized images.  These protocols
     // won't be in the protocol map.
     objc::DenseMap<const char*, Protocol*> preoptimizedProtocols;
-    if (sharedCacheSupportsProtocolRoots()) {
+    {
         header_info *hi;
         for (hi = FirstHeader; hi; hi = hi->getNext()) {
             if (!hi->hasPreoptimizedProtocols())
@@ -5242,9 +5305,9 @@ objc_class::getLoadMethod()
     mlist = ISA()->data()->ro()->baseMethods();
     if (mlist) {
         for (const auto& meth : *mlist) {
-            const char *name = sel_cname(meth.name);
+            const char *name = sel_cname(meth.name());
             if (0 == strcmp(name, "load")) {
-                return meth.imp;
+                return meth.imp(false);
             }
         }
     }
@@ -5312,9 +5375,9 @@ _category_getLoadMethod(Category cat)
     mlist = cat->classMethods;
     if (mlist) {
         for (const auto& meth : *mlist) {
-            const char *name = sel_cname(meth.name);
+            const char *name = sel_cname(meth.name());
             if (0 == strcmp(name, "load")) {
-                return meth.imp;
+                return meth.imp(false);
             }
         }
     }
@@ -5740,25 +5803,26 @@ findMethodInSortedMethodList(SEL key, const method_list_t *list)
 {
     ASSERT(list);
 
-    const method_t * const first = &list->first;
-    const method_t *base = first;
-    const method_t *probe;
+    auto first = list->begin();
+    auto base = first;
+    decltype(first) probe;
+
     uintptr_t keyValue = (uintptr_t)key;
     uint32_t count;
     
     for (count = list->count; count != 0; count >>= 1) {
         probe = base + (count >> 1);
         
-        uintptr_t probeValue = (uintptr_t)probe->name;
+        uintptr_t probeValue = (uintptr_t)probe->name();
         
         if (keyValue == probeValue) {
             // `probe` is a match.
             // Rewind looking for the *first* occurrence of this value.
             // This is required for correct category overrides.
-            while (probe > first && keyValue == (uintptr_t)probe[-1].name) {
+            while (probe > first && keyValue == (uintptr_t)(probe - 1)->name()) {
                 probe--;
             }
-            return (method_t *)probe;
+            return &*probe;
         }
         
         if (keyValue > probeValue) {
@@ -5774,14 +5838,14 @@ ALWAYS_INLINE static method_t *
 search_method_list_inline(const method_list_t *mlist, SEL sel)
 {
     int methodListIsFixedUp = mlist->isFixedUp();
-    int methodListHasExpectedSize = mlist->entsize() == sizeof(method_t);
+    int methodListHasExpectedSize = mlist->isExpectedSize();
     
     if (fastpath(methodListIsFixedUp && methodListHasExpectedSize)) {
         return findMethodInSortedMethodList(sel, mlist);
     } else {
         // Linear search of unsorted method list
         for (auto& meth : *mlist) {
-            if (meth.name == sel) return &meth;
+            if (meth.name() == sel) return &meth;
         }
     }
 
@@ -5789,7 +5853,7 @@ search_method_list_inline(const method_list_t *mlist, SEL sel)
     // sanity-check negative results
     if (mlist->isFixedUp()) {
         for (auto& meth : *mlist) {
-            if (meth.name == sel) {
+            if (meth.name() == sel) {
                 _objc_fatal("linear search worked when binary search did not");
             }
         }
@@ -5808,14 +5872,15 @@ search_method_list(const method_list_t *mlist, SEL sel)
 /***********************************************************************
  * method_lists_contains_any
  **********************************************************************/
+template<typename T>
 static NEVER_INLINE bool
-method_lists_contains_any(method_list_t * const *mlists, method_list_t * const *end,
+method_lists_contains_any(T *mlists, T *end,
                           SEL sels[], size_t selcount)
 {
     while (mlists < end) {
         const method_list_t *mlist = *mlists++;
         int methodListIsFixedUp = mlist->isFixedUp();
-        int methodListHasExpectedSize = mlist->entsize() == sizeof(method_t);
+        int methodListHasExpectedSize = mlist->entsize() == sizeof(struct method_t::big);
 
         if (fastpath(methodListIsFixedUp && methodListHasExpectedSize)) {
             for (size_t i = 0; i < selcount; i++) {
@@ -5826,7 +5891,7 @@ method_lists_contains_any(method_list_t * const *mlists, method_list_t * const *
         } else {
             for (auto& meth : *mlist) {
                 for (size_t i = 0; i < selcount; i++) {
-                    if (meth.name == sels[i]) {
+                    if (meth.name() == sels[i]) {
                         return true;
                     }
                 }
@@ -6124,8 +6189,6 @@ IMP lookUpImpOrForward(id inst, SEL sel, Class cls, int behavior)
     // To make these harder we want to make sure this is a class that was
     // either built into the binary or legitimately registered through
     // objc_duplicateClass, objc_initializeClassPair or objc_allocateClassPair.
-    //
-    // TODO: this check is quite costly during process startup.
     checkIsKnownClass(cls);
 
     if (slowpath(!cls->isRealized())) {
@@ -6157,7 +6220,7 @@ IMP lookUpImpOrForward(id inst, SEL sel, Class cls, int behavior)
         // curClass method list.
         Method meth = getMethodNoSuper_nolock(curClass, sel);
         if (meth) {
-            imp = meth->imp;
+            imp = meth->imp(false);
             goto done;
         }
 
@@ -6230,8 +6293,8 @@ IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel)
 
     if (meth) {
         // Hit in method list. Cache it.
-        cache_fill(cls, sel, meth->imp, nil);
-        return meth->imp;
+        cache_fill(cls, sel, meth->imp(false), nil);
+        return meth->imp(false);
     } else {
         // Miss in method list. Cache objc_msgForward.
         cache_fill(cls, sel, _objc_msgForward_impcache, nil);
@@ -6603,7 +6666,7 @@ addMethod(Class cls, SEL name, IMP imp, const char *types, bool replace)
     if ((m = getMethodNoSuper_nolock(cls, name))) {
         // already exists
         if (!replace) {
-            result = m->imp;
+            result = m->imp(false);
         } else {
             result = _method_setImplementation(cls, m, imp);
         }
@@ -6612,13 +6675,14 @@ addMethod(Class cls, SEL name, IMP imp, const char *types, bool replace)
 
         // fixme optimize
         method_list_t *newlist;
-        newlist = (method_list_t *)calloc(sizeof(*newlist), 1);
+        newlist = (method_list_t *)calloc(method_list_t::byteSize(method_t::bigSize, 1), 1);
         newlist->entsizeAndFlags = 
-            (uint32_t)sizeof(method_t) | fixed_up_method_list;
+            (uint32_t)sizeof(struct method_t::big) | fixed_up_method_list;
         newlist->count = 1;
-        newlist->first.name = name;
-        newlist->first.types = strdupIfMutable(types);
-        newlist->first.imp = imp;
+        auto &first = newlist->begin()->big();
+        first.name = name;
+        first.types = strdupIfMutable(types);
+        first.imp = imp;
 
         prepareMethodLists(cls, &newlist, 1, NO, NO);
         rwe->methods.attachLists(&newlist, 1);
@@ -6650,13 +6714,11 @@ addMethods(Class cls, const SEL *names, const IMP *imps, const char **types,
     ASSERT(cls->isRealized());
     
     method_list_t *newlist;
-    size_t newlistSize = method_list_t::byteSize(sizeof(method_t), count);
+    size_t newlistSize = method_list_t::byteSize(sizeof(struct method_t::big), count);
     newlist = (method_list_t *)calloc(newlistSize, 1);
     newlist->entsizeAndFlags =
-        (uint32_t)sizeof(method_t) | fixed_up_method_list;
+        (uint32_t)sizeof(struct method_t::big) | fixed_up_method_list;
     newlist->count = 0;
-    
-    method_t *newlistMethods = &newlist->first;
     
     SEL *failedNames = nil;
     uint32_t failedCount = 0;
@@ -6673,16 +6735,16 @@ addMethods(Class cls, const SEL *names, const IMP *imps, const char **types,
                     failedNames = (SEL *)calloc(sizeof(*failedNames),
                                                 count + 1);
                 }
-                failedNames[failedCount] = m->name;
+                failedNames[failedCount] = m->name();
                 failedCount++;
             } else {
                 _method_setImplementation(cls, m, imps[i]);
             }
         } else {
-            method_t *newmethod = &newlistMethods[newlist->count];
-            newmethod->name = names[i];
-            newmethod->types = strdupIfMutable(types[i]);
-            newmethod->imp = imps[i];
+            auto &newmethod = newlist->end()->big();
+            newmethod.name = names[i];
+            newmethod.types = strdupIfMutable(types[i]);
+            newmethod.imp = imps[i];
             newlist->count++;
         }
     }
@@ -6694,7 +6756,7 @@ addMethods(Class cls, const SEL *names, const IMP *imps, const char **types,
         // Note that realloc() alone doesn't work due to ptrauth.
         
         method_t::SortBySELAddress sorter;
-        std::stable_sort(newlist->begin(), newlist->end(), sorter);
+        std::stable_sort(&newlist->begin()->big(), &newlist->end()->big(), sorter);
         
         prepareMethodLists(cls, &newlist, 1, NO, NO);
         rwe->methods.attachLists(&newlist, 1);
@@ -6803,7 +6865,7 @@ class_addIvar(Class cls, const char *name, size_t size,
         memcpy(newlist, oldlist, oldsize);
         free(oldlist);
     } else {
-        newlist = (ivar_list_t *)calloc(sizeof(ivar_list_t), 1);
+        newlist = (ivar_list_t *)calloc(ivar_list_t::byteSize(sizeof(ivar_t), 1), 1);
         newlist->entsizeAndFlags = (uint32_t)sizeof(ivar_t);
     }
 
@@ -6897,11 +6959,11 @@ _class_addProperty(Class cls, const char *name,
         ASSERT(cls->isRealized());
         
         property_list_t *proplist = (property_list_t *)
-            malloc(sizeof(*proplist));
+            malloc(property_list_t::byteSize(sizeof(property_t), 1));
         proplist->count = 1;
-        proplist->entsizeAndFlags = sizeof(proplist->first);
-        proplist->first.name = strdupIfMutable(name);
-        proplist->first.attributes = copyPropertyAttributeString(attrs, count);
+        proplist->entsizeAndFlags = sizeof(property_t);
+        proplist->begin()->name = strdupIfMutable(name);
+        proplist->begin()->attributes = copyPropertyAttributeString(attrs, count);
         
         rwe->properties.attachLists(&proplist, 1);
         
@@ -7053,7 +7115,7 @@ objc_duplicateClass(Class original, const char *name,
     if (orig_rwe) {
         auto rwe = rw->extAllocIfNeeded();
         rwe->version = orig_rwe->version;
-        rwe->methods = orig_rwe->methods.duplicate();
+        orig_rwe->methods.duplicateInto(rwe->methods);
 
         // fixme dies when categories are added to the base
         rwe->properties = orig_rwe->properties;
@@ -7390,7 +7452,7 @@ static void free_class(Class cls)
 
     if (rwe) {
         for (auto& meth : rwe->methods) {
-            try_free(meth.types);
+            try_free(meth.types());
         }
         rwe->methods.tryFree();
     }

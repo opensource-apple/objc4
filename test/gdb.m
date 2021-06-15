@@ -23,9 +23,31 @@ int main()
     [TestRoot class];
     // Now class should be realized
 
-    result = (__bridge Class)(NXMapGet(gdb_objc_realized_classes, "TestRoot"));
+    if (!testdyld3()) {
+        // In dyld3 mode, the class will be in the launch closure and not in our table.
+        result = (__bridge Class)(NXMapGet(gdb_objc_realized_classes, "TestRoot"));
+        testassert(result);
+        testassert(result == [TestRoot class]);
+    }
+
+    Class dynamic = objc_allocateClassPair([TestRoot class], "Dynamic", 0);
+    objc_registerClassPair(dynamic);
+    result = (__bridge Class)(NXMapGet(gdb_objc_realized_classes, "Dynamic"));
     testassert(result);
-    testassert(result == [TestRoot class]);
+    testassert(result == dynamic);
+
+    Class *realizedClasses = objc_copyRealizedClassList(NULL);
+    bool foundTestRoot = false;
+    bool foundDynamic = false;
+    for (Class *cursor = realizedClasses; *cursor; cursor++) {
+        if (*cursor == [TestRoot class])
+            foundTestRoot = true;
+        if (*cursor == dynamic)
+            foundDynamic = true;
+    }
+    free(realizedClasses);
+    testassert(foundTestRoot);
+    testassert(foundDynamic);
 
     result = (__bridge Class)(NXMapGet(gdb_objc_realized_classes, "DoesNotExist"));
     testassert(!result);
