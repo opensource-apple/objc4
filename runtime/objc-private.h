@@ -53,6 +53,16 @@
 #define ASSERT(x) assert(x)
 #endif
 
+// `this` is never NULL in C++ unless we encounter UB, but checking for what's impossible
+// is the point of these asserts, so disable the corresponding warning, and let's hope
+// we will reach the assert despite the UB
+#define ASSERT_THIS_NOT_NULL \
+_Pragma("clang diagnostic push") \
+_Pragma("clang diagnostic ignored \"-Wundefined-bool-conversion\"") \
+ASSERT(this) \
+_Pragma("clang diagnostic pop")
+
+
 struct objc_class;
 struct objc_object;
 struct category_t;
@@ -71,13 +81,32 @@ union isa_t {
     isa_t() { }
     isa_t(uintptr_t value) : bits(value) { }
 
-    Class cls;
     uintptr_t bits;
+
+private:
+    // Accessing the class requires custom ptrauth operations, so
+    // force clients to go through setClass/getClass by making this
+    // private.
+    Class cls;
+
+public:
 #if defined(ISA_BITFIELD)
     struct {
         ISA_BITFIELD;  // defined in isa.h
     };
+
+    bool isDeallocating() {
+        return extra_rc == 0 && has_sidetable_rc == 0;
+    }
+    void setDeallocating() {
+        extra_rc = 0;
+        has_sidetable_rc = 0;
+    }
 #endif
+
+    void setClass(Class cls, objc_object *obj);
+    Class getClass(bool authenticated);
+    Class getDecodedClass(bool authenticated);
 };
 
 
@@ -88,7 +117,7 @@ private:
 public:
 
     // ISA() assumes this is NOT a tagged pointer object
-    Class ISA();
+    Class ISA(bool authenticated = false);
 
     // rawISA() assumes this is NOT a tagged pointer object or a non pointer ISA
     Class rawISA();
@@ -115,6 +144,7 @@ public:
 
     bool hasNonpointerIsa();
     bool isTaggedPointer();
+    bool isTaggedPointerOrNil();
     bool isBasicTaggedPointer();
     bool isExtTaggedPointer();
     bool isClass();
@@ -156,22 +186,36 @@ private:
     uintptr_t overrelease_error();
 
 #if SUPPORT_NONPOINTER_ISA
+    // Controls what parts of root{Retain,Release} to emit/inline
+    // - Full means the full (slow) implementation
+    // - Fast means the fastpaths only
+    // - FastOrMsgSend means the fastpaths but checking whether we should call
+    //   -retain/-release or Swift, for the usage of objc_{retain,release}
+    enum class RRVariant {
+        Full,
+        Fast,
+        FastOrMsgSend,
+    };
+
     // Unified retain count manipulation for nonpointer isa
-    id rootRetain(bool tryRetain, bool handleOverflow);
-    bool rootRelease(bool performDealloc, bool handleUnderflow);
+    inline id rootRetain(bool tryRetain, RRVariant variant);
+    inline bool rootRelease(bool performDealloc, RRVariant variant);
     id rootRetain_overflow(bool tryRetain);
     uintptr_t rootRelease_underflow(bool performDealloc);
 
     void clearDeallocating_slow();
 
     // Side table retain count overflow for nonpointer isa
+    struct SidetableBorrow { size_t borrowed, remaining; };
+
     void sidetable_lock();
     void sidetable_unlock();
 
     void sidetable_moveExtraRC_nolock(size_t extra_rc, bool isDeallocating, bool weaklyReferenced);
     bool sidetable_addExtraRC_nolock(size_t delta_rc);
-    size_t sidetable_subExtraRC_nolock(size_t delta_rc);
+    SidetableBorrow sidetable_subExtraRC_nolock(size_t delta_rc);
     size_t sidetable_getExtraRC_nolock();
+    void sidetable_clearExtraRC_nolock();
 #endif
 
     // Side-table-only retain count
@@ -181,10 +225,10 @@ private:
     bool sidetable_isWeaklyReferenced();
     void sidetable_setWeaklyReferenced_nolock();
 
-    id sidetable_retain();
+    id sidetable_retain(bool locked = false);
     id sidetable_retain_slow(SideTable& table);
 
-    uintptr_t sidetable_release(bool performDealloc = true);
+    uintptr_t sidetable_release(bool locked = false, bool performDealloc = true);
     uintptr_t sidetable_release_slow(SideTable& table, bool performDealloc = true);
 
     bool sidetable_tryRetain();
@@ -278,22 +322,34 @@ private:
         }
     };
 
+    struct Range  shared_cache;
     struct Range *ranges;
     uint32_t count;
     uint32_t size : 31;
     uint32_t sorted : 1;
 
 public:
+    inline bool inSharedCache(uintptr_t ptr) const {
+        return shared_cache.contains(ptr);
+    }
     inline bool contains(uint16_t witness, uintptr_t ptr) const {
         return witness < count && ranges[witness].contains(ptr);
     }
 
+    inline void setSharedCacheRange(uintptr_t start, uintptr_t end) {
+        shared_cache = Range{start, end};
+        add(start, end);
+    }
     bool find(uintptr_t ptr, uint32_t &pos);
     void add(uintptr_t start, uintptr_t end);
     void remove(uintptr_t start, uintptr_t end);
 };
 
 extern struct SafeRanges dataSegmentsRanges;
+
+static inline bool inSharedCache(uintptr_t ptr) {
+    return dataSegmentsRanges.inSharedCache(ptr);
+}
 
 } // objc
 
@@ -546,16 +602,12 @@ extern Class _calloc_class(size_t size);
 enum {
     LOOKUP_INITIALIZE = 1,
     LOOKUP_RESOLVER = 2,
-    LOOKUP_CACHE = 4,
-    LOOKUP_NIL = 8,
+    LOOKUP_NIL = 4,
+    LOOKUP_NOCACHE = 8,
 };
 extern IMP lookUpImpOrForward(id obj, SEL, Class cls, int behavior);
-
-static inline IMP
-lookUpImpOrNil(id obj, SEL sel, Class cls, int behavior = 0)
-{
-    return lookUpImpOrForward(obj, sel, cls, behavior | LOOKUP_CACHE | LOOKUP_NIL);
-}
+extern IMP lookUpImpOrForwardTryCache(id obj, SEL, Class cls, int behavior = 0);
+extern IMP lookUpImpOrNilTryCache(id obj, SEL, Class cls, int behavior = 0);
 
 extern IMP lookupMethodInClassAndLoadCache(Class cls, SEL sel);
 
@@ -816,18 +868,18 @@ __attribute__((aligned(1))) typedef   int16_t unaligned_int16_t;
 
 // Global operator new and delete. We must not use any app overrides.
 // This ALSO REQUIRES each of these be in libobjc's unexported symbol list.
-#if __cplusplus
+#if __cplusplus && !defined(TEST_OVERRIDES_NEW)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winline-new-delete"
 #include <new>
-inline void* operator new(std::size_t size) throw (std::bad_alloc) { return malloc(size); }
-inline void* operator new[](std::size_t size) throw (std::bad_alloc) { return malloc(size); }
-inline void* operator new(std::size_t size, const std::nothrow_t&) throw() { return malloc(size); }
-inline void* operator new[](std::size_t size, const std::nothrow_t&) throw() { return malloc(size); }
-inline void operator delete(void* p) throw() { free(p); }
-inline void operator delete[](void* p) throw() { free(p); }
-inline void operator delete(void* p, const std::nothrow_t&) throw() { free(p); }
-inline void operator delete[](void* p, const std::nothrow_t&) throw() { free(p); }
+inline void* operator new(std::size_t size) { return malloc(size); }
+inline void* operator new[](std::size_t size) { return malloc(size); }
+inline void* operator new(std::size_t size, const std::nothrow_t&) noexcept(true) { return malloc(size); }
+inline void* operator new[](std::size_t size, const std::nothrow_t&) noexcept(true) { return malloc(size); }
+inline void operator delete(void* p) noexcept(true) { free(p); }
+inline void operator delete[](void* p) noexcept(true) { free(p); }
+inline void operator delete(void* p, const std::nothrow_t&) noexcept(true) { free(p); }
+inline void operator delete[](void* p, const std::nothrow_t&) noexcept(true) { free(p); }
 #pragma clang diagnostic pop
 #endif
 

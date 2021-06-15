@@ -68,6 +68,12 @@ GETSECT(_getObjc2ProtocolList,        protocol_t * const,    "__objc_protolist")
 GETSECT(_getObjc2ProtocolRefs,        protocol_t *,    "__objc_protorefs");
 GETSECT(getLibobjcInitializers,       UnsignedInitializer, "__objc_init_func");
 
+uint32_t *getLibobjcInitializerOffsets(const headerType *mhdr, size_t *outCount) {
+    unsigned long byteCount = 0;
+    uint32_t *offsets = (uint32_t *)getsectiondata(mhdr, "__TEXT", "__objc_init_offs", &byteCount);
+    if (outCount) *outCount = byteCount / sizeof(uint32_t);
+    return offsets;
+}
 
 objc_image_info *
 _getObjcImageInfo(const headerType *mhdr, size_t *outBytes)

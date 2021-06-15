@@ -322,9 +322,17 @@ lockdebug_assert_all_locks_locked()
 void
 lockdebug_assert_no_locks_locked()
 {
+    lockdebug_assert_no_locks_locked_except({});
+}
+
+void lockdebug_assert_no_locks_locked_except(std::initializer_list<void *> canBeLocked)
+{
     auto& owned = ownedLocks();
 
     for (const auto& l : AllLocks()) {
+        if (std::find(canBeLocked.begin(), canBeLocked.end(), l.first) != canBeLocked.end())
+            continue;
+
         if (hasLock(owned, l.first, l.second.k)) {
             _objc_fatal("lock %p:%d is incorrectly owned", l.first, l.second.k);
         }

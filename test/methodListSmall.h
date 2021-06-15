@@ -1,8 +1,8 @@
 #include "test.h"
 
 struct ObjCClass {
-    struct ObjCClass *isa;
-    struct ObjCClass *superclass;
+    struct ObjCClass * __ptrauth_objc_isa_pointer isa;
+    struct ObjCClass * __ptrauth_objc_super_pointer superclass;
     void *cachePtr;
     uintptr_t zero;
     struct ObjCClass_ro *data;
@@ -19,7 +19,7 @@ struct ObjCClass_ro {
     const uint8_t * ivarLayout;
     
     const char * name;
-    struct ObjCMethodList * baseMethodList;
+    struct ObjCMethodList * __ptrauth_objc_method_list_pointer baseMethodList;
     struct protocol_list_t * baseProtocols;
     const struct ivar_list_t * ivars;
 
@@ -142,6 +142,8 @@ _BoringMethodType:
     .asciz "v16@0:8"
 _MyMethodStretName:
     .asciz "myMethodStret"
+_MyMethodNullTypesName:
+    .asciz "myMethodNullTypes"
 _StretType:
     .asciz "{BigStruct=QQQQQQQ}16@0:8"
 )ASM");
@@ -157,6 +159,8 @@ _MyMethod3NameRef:
     .quad _MyMethod3Name
 _MyMethodStretNameRef:
     .quad _MyMethodStretName
+_MyMethodNullTypesNameRef:
+    .quad _MyMethodNullTypesName
 )ASM");
 #else
 asm(R"ASM(
@@ -169,6 +173,8 @@ _MyMethod3NameRef:
     .long _MyMethod3Name
 _MyMethodStretNameRef:
     .long _MyMethodStretName
+_MyMethodNullTypesNameRef:
+    .long _MyMethodNullTypesName
 )ASM");
 #endif
 
@@ -182,7 +188,7 @@ asm(R"ASM(
     .p2align 2
 _Foo_methodlistSmall:
     .long 12 | 0x80000000
-    .long 4
+    .long 5
     
     .long _MyMethod1NameRef - .
     .long _BoringMethodType - .
@@ -199,6 +205,10 @@ _Foo_methodlistSmall:
     .long _MyMethodStretNameRef - .
     .long _StretType - .
     .long _myMethodStret - .
+
+    .long _MyMethodNullTypesNameRef - .
+    .long 0
+    .long _myMethod1 - .
 )ASM");
 
 struct ObjCClass_ro Foo_ro = {

@@ -60,12 +60,8 @@ objc\[\d+\]: Attempt to use unknown class 0x[0-9a-f]+.
 objc\[\d+\]: HALTED
 Testing class_setIvarLayout
 objc\[\d+\]: \*\*\* Can't set ivar layout for already-registered class 'TestRoot'
-objc\[\d+\]: \*\*\* Can't set ivar layout for already-registered class 'TestRoot'
-objc\[\d+\]: \*\*\* Can't set ivar layout for already-registered class 'NSObject'
 objc\[\d+\]: \*\*\* Can't set ivar layout for already-registered class 'NSObject'
 objc\[\d+\]: \*\*\* Can't set ivar layout for already-registered class 'AllocatedTestClass2'
-objc\[\d+\]: \*\*\* Can't set ivar layout for already-registered class 'AllocatedTestClass2'
-objc\[\d+\]: \*\*\* Can't set ivar layout for already-registered class 'TestRoot'
 objc\[\d+\]: \*\*\* Can't set ivar layout for already-registered class 'DuplicateClass'
 Completed test on good classes.
 objc\[\d+\]: Attempt to use unknown class 0x[0-9a-f]+.
@@ -156,7 +152,7 @@ struct TestCase TestCases[] = {
     TESTCASE(class_addProtocol(cls, @protocol(P))),
     TESTCASE(class_addProperty(cls, "x", NULL, 0)),
     TESTCASE(class_replaceProperty(cls, "x", NULL, 0)),
-    TESTCASE(class_setIvarLayout(cls, NULL)),
+    TESTCASE_NOMETA(class_setIvarLayout(cls, NULL)),
     TESTCASE(class_setWeakIvarLayout(cls, NULL)),
     TESTCASE_NOMETA(objc_registerClassPair(cls)),
     TESTCASE_NOMETA(objc_duplicateClass(cls, dupeName(cls), 0)),

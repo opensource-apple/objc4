@@ -219,6 +219,10 @@ OBJC_EXPORT uintptr_t objc_debug_taggedpointer_mask
 OBJC_EXPORT uintptr_t objc_debug_taggedpointer_obfuscator
     OBJC_AVAILABLE(10.14, 12.0, 12.0, 5.0, 3.0);
 
+#if OBJC_SPLIT_TAGGED_POINTERS
+OBJC_EXPORT uint8_t objc_debug_tag60_permutations[8];
+#endif
+
 
 // tag_slot = (obj >> slot_shift) & slot_mask
 OBJC_EXPORT unsigned int objc_debug_taggedpointer_slot_shift
@@ -266,6 +270,9 @@ OBJC_EXPORT unsigned int objc_debug_taggedpointer_ext_payload_lshift
 OBJC_EXPORT unsigned int objc_debug_taggedpointer_ext_payload_rshift
     OBJC_AVAILABLE(10.12, 10.0, 10.0, 3.0, 2.0);
 
+OBJC_EXPORT uintptr_t objc_debug_constant_cfstring_tag_bits
+    OBJC_AVAILABLE(10.16, 14.0, 14.0, 7.0, 6.0);
+
 #endif
 
 
@@ -289,6 +296,9 @@ OBJC_EXTERN const uint32_t objc_debug_autoreleasepoolpage_parent_offset OBJC_AVA
 OBJC_EXTERN const uint32_t objc_debug_autoreleasepoolpage_child_offset  OBJC_AVAILABLE(10.15, 13.0, 13.0, 6.0, 5.0);
 OBJC_EXTERN const uint32_t objc_debug_autoreleasepoolpage_depth_offset  OBJC_AVAILABLE(10.15, 13.0, 13.0, 6.0, 5.0);
 OBJC_EXTERN const uint32_t objc_debug_autoreleasepoolpage_hiwat_offset  OBJC_AVAILABLE(10.15, 13.0, 13.0, 6.0, 5.0);
+#if __OBJC2__
+OBJC_EXTERN const uintptr_t objc_debug_autoreleasepoolpage_ptr_mask     OBJC_AVAILABLE(10.16, 14.0, 14.0, 7.0, 6.0);
+#endif
 
 __END_DECLS
 

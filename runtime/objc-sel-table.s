@@ -2,7 +2,12 @@
 #include <mach/vm_param.h>
 
 #if __LP64__
+#if __arm64e__
+// 0x6AE1
+# define PTR(x) .quad x@AUTH(da, 27361, addr)
+#else
 # define PTR(x) .quad x
+#endif
 #else
 # define PTR(x) .long x
 #endif

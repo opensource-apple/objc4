@@ -24,11 +24,13 @@
 #if LOCKDEBUG
 extern void lockdebug_assert_all_locks_locked();
 extern void lockdebug_assert_no_locks_locked();
+extern void lockdebug_assert_no_locks_locked_except(std::initializer_list<void *> canBeLocked);
 extern void lockdebug_setInForkPrepare(bool);
 extern void lockdebug_lock_precedes_lock(const void *oldlock, const void *newlock);
 #else
 static constexpr inline void lockdebug_assert_all_locks_locked() { }
 static constexpr inline void lockdebug_assert_no_locks_locked() { }
+static constexpr inline void lockdebug_assert_no_locks_locked_except(std::initializer_list<void *> canBeLocked) { };
 static constexpr inline void lockdebug_setInForkPrepare(bool) { }
 static constexpr inline void lockdebug_lock_precedes_lock(const void *, const void *) { }
 #endif
@@ -40,12 +42,12 @@ extern void lockdebug_mutex_unlock(mutex_tt<true> *lock);
 extern void lockdebug_mutex_assert_locked(mutex_tt<true> *lock);
 extern void lockdebug_mutex_assert_unlocked(mutex_tt<true> *lock);
 
-static constexpr inline void lockdebug_remember_mutex(mutex_tt<false> *lock) { }
-static constexpr inline void lockdebug_mutex_lock(mutex_tt<false> *lock) { }
-static constexpr inline void lockdebug_mutex_try_lock(mutex_tt<false> *lock) { }
-static constexpr inline void lockdebug_mutex_unlock(mutex_tt<false> *lock) { }
-static constexpr inline void lockdebug_mutex_assert_locked(mutex_tt<false> *lock) { }
-static constexpr inline void lockdebug_mutex_assert_unlocked(mutex_tt<false> *lock) { }
+static constexpr inline void lockdebug_remember_mutex(__unused mutex_tt<false> *lock) { }
+static constexpr inline void lockdebug_mutex_lock(__unused mutex_tt<false> *lock) { }
+static constexpr inline void lockdebug_mutex_try_lock(__unused mutex_tt<false> *lock) { }
+static constexpr inline void lockdebug_mutex_unlock(__unused mutex_tt<false> *lock) { }
+static constexpr inline void lockdebug_mutex_assert_locked(__unused mutex_tt<false> *lock) { }
+static constexpr inline void lockdebug_mutex_assert_unlocked(__unused mutex_tt<false> *lock) { }
 
 
 extern void lockdebug_remember_monitor(monitor_tt<true> *lock);
@@ -55,12 +57,12 @@ extern void lockdebug_monitor_wait(monitor_tt<true> *lock);
 extern void lockdebug_monitor_assert_locked(monitor_tt<true> *lock);
 extern void lockdebug_monitor_assert_unlocked(monitor_tt<true> *lock);
 
-static constexpr inline void lockdebug_remember_monitor(monitor_tt<false> *lock) { }
-static constexpr inline void lockdebug_monitor_enter(monitor_tt<false> *lock) { }
-static constexpr inline void lockdebug_monitor_leave(monitor_tt<false> *lock) { }
-static constexpr inline void lockdebug_monitor_wait(monitor_tt<false> *lock) { }
-static constexpr inline void lockdebug_monitor_assert_locked(monitor_tt<false> *lock) { }
-static constexpr inline void lockdebug_monitor_assert_unlocked(monitor_tt<false> *lock) {}
+static constexpr inline void lockdebug_remember_monitor(__unused monitor_tt<false> *lock) { }
+static constexpr inline void lockdebug_monitor_enter(__unused monitor_tt<false> *lock) { }
+static constexpr inline void lockdebug_monitor_leave(__unused monitor_tt<false> *lock) { }
+static constexpr inline void lockdebug_monitor_wait(__unused monitor_tt<false> *lock) { }
+static constexpr inline void lockdebug_monitor_assert_locked(__unused monitor_tt<false> *lock) { }
+static constexpr inline void lockdebug_monitor_assert_unlocked(__unused monitor_tt<false> *lock) {}
 
 
 extern void 
@@ -75,12 +77,12 @@ extern void
 lockdebug_recursive_mutex_assert_unlocked(recursive_mutex_tt<true> *lock);
 
 static constexpr inline void
-lockdebug_remember_recursive_mutex(recursive_mutex_tt<false> *lock) { }
+lockdebug_remember_recursive_mutex(__unused recursive_mutex_tt<false> *lock) { }
 static constexpr inline void
-lockdebug_recursive_mutex_lock(recursive_mutex_tt<false> *lock) { }
+lockdebug_recursive_mutex_lock(__unused recursive_mutex_tt<false> *lock) { }
 static constexpr inline void
-lockdebug_recursive_mutex_unlock(recursive_mutex_tt<false> *lock) { }
+lockdebug_recursive_mutex_unlock(__unused recursive_mutex_tt<false> *lock) { }
 static constexpr inline void
-lockdebug_recursive_mutex_assert_locked(recursive_mutex_tt<false> *lock) { }
+lockdebug_recursive_mutex_assert_locked(__unused recursive_mutex_tt<false> *lock) { }
 static constexpr inline void
-lockdebug_recursive_mutex_assert_unlocked(recursive_mutex_tt<false> *lock) { }
+lockdebug_recursive_mutex_assert_unlocked(__unused recursive_mutex_tt<false> *lock) { }

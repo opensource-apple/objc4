@@ -39,6 +39,12 @@
 #include <map>
 #include <execinfo.h>
 #include "NSObject-internal.h"
+#include <os/feature_private.h>
+
+extern "C" {
+#include <os/reason_private.h>
+#include <os/variant_private.h>
+}
 
 @interface NSInvocation
 - (SEL)selector;
@@ -51,7 +57,13 @@ OBJC_EXTERN const uint32_t objc_debug_autoreleasepoolpage_parent_offset = __buil
 OBJC_EXTERN const uint32_t objc_debug_autoreleasepoolpage_child_offset  = __builtin_offsetof(AutoreleasePoolPageData, child);
 OBJC_EXTERN const uint32_t objc_debug_autoreleasepoolpage_depth_offset  = __builtin_offsetof(AutoreleasePoolPageData, depth);
 OBJC_EXTERN const uint32_t objc_debug_autoreleasepoolpage_hiwat_offset  = __builtin_offsetof(AutoreleasePoolPageData, hiwat);
+OBJC_EXTERN const uint32_t objc_debug_autoreleasepoolpage_begin_offset  = sizeof(AutoreleasePoolPageData);
 #if __OBJC2__
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+OBJC_EXTERN const uintptr_t objc_debug_autoreleasepoolpage_ptr_mask = (AutoreleasePoolPageData::AutoreleasePoolEntry){ .ptr = ~(uintptr_t)0 }.ptr;
+#else
+OBJC_EXTERN const uintptr_t objc_debug_autoreleasepoolpage_ptr_mask = ~(uintptr_t)0;
+#endif
 OBJC_EXTERN const uint32_t objc_class_abi_version = OBJC_CLASS_ABI_VERSION_MAX;
 #endif
 
@@ -79,7 +91,41 @@ void _objc_setBadAllocHandler(id(*newHandler)(Class))
 }
 
 
+static id _initializeSwiftRefcountingThenCallRetain(id objc);
+static void _initializeSwiftRefcountingThenCallRelease(id objc);
+
+explicit_atomic<id(*)(id)> swiftRetain{&_initializeSwiftRefcountingThenCallRetain};
+explicit_atomic<void(*)(id)> swiftRelease{&_initializeSwiftRefcountingThenCallRelease};
+
+static void _initializeSwiftRefcounting() {
+    void *const token = dlopen("/usr/lib/swift/libswiftCore.dylib", RTLD_LAZY | RTLD_LOCAL);
+    ASSERT(token);
+    swiftRetain.store((id(*)(id))dlsym(token, "swift_retain"), memory_order_relaxed);
+    ASSERT(swiftRetain.load(memory_order_relaxed));
+    swiftRelease.store((void(*)(id))dlsym(token, "swift_release"), memory_order_relaxed);
+    ASSERT(swiftRelease.load(memory_order_relaxed));
+    dlclose(token);
+}
+
+static id _initializeSwiftRefcountingThenCallRetain(id objc) {
+  _initializeSwiftRefcounting();
+  return swiftRetain.load(memory_order_relaxed)(objc);
+}
+
+static void _initializeSwiftRefcountingThenCallRelease(id objc) {
+  _initializeSwiftRefcounting();
+  swiftRelease.load(memory_order_relaxed)(objc);
+}
+
+namespace objc {
+    extern int PageCountWarning;
+}
+
 namespace {
+
+#if TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
+uint32_t numFaults = 0;
+#endif
 
 // The order of these bits is important.
 #define SIDE_TABLE_WEAKLY_REFERENCED (1UL<<0)
@@ -221,6 +267,23 @@ void SideTableLocksSucceedLocks(StripedMap<spinlock_t>& oldlocks) {
     }
 }
 
+// Call out to the _setWeaklyReferenced method on obj, if implemented.
+static void callSetWeaklyReferenced(id obj) {
+    if (!obj)
+        return;
+
+    Class cls = obj->getIsa();
+
+    if (slowpath(cls->hasCustomRR() && !object_isClass(obj))) {
+        ASSERT(((objc_class *)cls)->isInitializing() || ((objc_class *)cls)->isInitialized());
+        void (*setWeaklyReferenced)(id, SEL) = (void(*)(id, SEL))
+        class_getMethodImplementation(cls, @selector(_setWeaklyReferenced));
+        if ((IMP)setWeaklyReferenced != _objc_msgForward) {
+          (*setWeaklyReferenced)(obj, @selector(_setWeaklyReferenced));
+        }
+    }
+}
+
 //
 // The -fobjc-arc flag causes the compiler to issue calls to objc_{retain/release/autorelease/retain_block}
 //
@@ -269,7 +332,7 @@ enum CrashIfDeallocating {
     DontCrashIfDeallocating = false, DoCrashIfDeallocating = true
 };
 template <HaveOld haveOld, HaveNew haveNew,
-          CrashIfDeallocating crashIfDeallocating>
+          enum CrashIfDeallocating crashIfDeallocating>
 static id 
 storeWeak(id *location, objc_object *newObj)
 {
@@ -336,11 +399,11 @@ storeWeak(id *location, objc_object *newObj)
     if (haveNew) {
         newObj = (objc_object *)
             weak_register_no_lock(&newTable->weak_table, (id)newObj, location, 
-                                  crashIfDeallocating);
+                                  crashIfDeallocating ? CrashIfDeallocating : ReturnNilIfDeallocating);
         // weak_register_no_lock returns nil if weak store should be rejected
 
         // Set is-weakly-referenced bit in refcount table.
-        if (newObj  &&  !newObj->isTaggedPointer()) {
+        if (!newObj->isTaggedPointerOrNil()) {
             newObj->setWeaklyReferenced_nolock();
         }
 
@@ -352,6 +415,12 @@ storeWeak(id *location, objc_object *newObj)
     }
     
     SideTable::unlockTwo<haveOld, haveNew>(oldTable, newTable);
+
+    // This must be called without the locks held, as it can invoke
+    // arbitrary code. In particular, even if _setWeaklyReferenced
+    // is not implemented, resolveInstanceMethod: may be, and may
+    // call back into the weak reference machinery.
+    callSetWeaklyReferenced((id)newObj);
 
     return (id)newObj;
 }
@@ -474,8 +543,7 @@ objc_loadWeakRetained(id *location)
  retry:
     // fixme std::atomic this load
     obj = *location;
-    if (!obj) return nil;
-    if (obj->isTaggedPointer()) return obj;
+    if (obj->isTaggedPointerOrNil()) return obj;
     
     table = &SideTables()[obj];
     
@@ -499,9 +567,12 @@ objc_loadWeakRetained(id *location)
     else {
         // Slow case. We must check for +initialize and call it outside
         // the lock if necessary in order to avoid deadlocks.
+        // Use lookUpImpOrForward so we can avoid the assert in
+        // class_getInstanceMethod, since we intentionally make this
+        // callout with the lock held.
         if (cls->isInitialized() || _thisThreadIsInitializingClass(cls)) {
             BOOL (*tryRetain)(id, SEL) = (BOOL(*)(id, SEL))
-                class_getMethodImplementation(cls, @selector(retainWeakReference));
+                lookUpImpOrForwardTryCache(obj, @selector(retainWeakReference), cls);
             if ((IMP)tryRetain == _objc_msgForward) {
                 result = nil;
             }
@@ -572,9 +643,28 @@ objc_copyWeak(id *dst, id *src)
 void
 objc_moveWeak(id *dst, id *src)
 {
-    objc_copyWeak(dst, src);
-    objc_destroyWeak(src);
+    id obj;
+    SideTable *table;
+
+retry:
+    obj = *src;
+    if (obj == nil) {
+        *dst = nil;
+        return;
+    }
+
+    table = &SideTables()[obj];
+    table->lock();
+    if (*src != obj) {
+        table->unlock();
+        goto retry;
+    }
+
+    weak_unregister_no_lock(&table->weak_table, obj, src);
+    weak_register_no_lock(&table->weak_table, obj, dst, DontCheckDeallocating);
+    *dst = obj;
     *src = nil;
+    table->unlock();
 }
 
 
@@ -611,6 +701,7 @@ private:
 	static pthread_key_t const key = AUTORELEASE_POOL_KEY;
 	static uint8_t const SCRIBBLE = 0xA3;  // 0xA3A3A3A3 after releasing
 	static size_t const COUNT = SIZE / sizeof(id);
+    static size_t const MAX_FAULTS = 2;
 
     // EMPTY_POOL_PLACEHOLDER is stored in TLS when exactly one pool is 
     // pushed and it has never contained any objects. This saves memory 
@@ -643,13 +734,33 @@ private:
 #endif
     }
 
+    void checkTooMuchAutorelease()
+    {
+#if TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
+        bool objcModeNoFaults = DisableFaults || getpid() == 1 ||
+            !os_variant_has_internal_diagnostics("com.apple.obj-c");
+        if (!objcModeNoFaults) {
+            if (depth+1 >= (uint32_t)objc::PageCountWarning && numFaults < MAX_FAULTS) {  //depth is 0 when first page is allocated
+                os_fault_with_payload(OS_REASON_LIBSYSTEM,
+                        OS_REASON_LIBSYSTEM_CODE_FAULT,
+                        NULL, 0, "Large Autorelease Pool", 0);
+                numFaults++;
+            }
+        }
+#endif
+    }
+
 	AutoreleasePoolPage(AutoreleasePoolPage *newParent) :
 		AutoreleasePoolPageData(begin(),
 								objc_thread_self(),
 								newParent,
 								newParent ? 1+newParent->depth : 0,
 								newParent ? newParent->hiwat : 0)
-    { 
+    {
+        if (objc::PageCountWarning != -1) {
+            checkTooMuchAutorelease();
+        }
+
         if (parent) {
             parent->check();
             ASSERT(!parent->child);
@@ -744,8 +855,49 @@ private:
     {
         ASSERT(!full());
         unprotect();
-        id *ret = next;  // faster than `return next-1` because of aliasing
+        id *ret;
+
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+        if (!DisableAutoreleaseCoalescing || !DisableAutoreleaseCoalescingLRU) {
+            if (!DisableAutoreleaseCoalescingLRU) {
+                if (!empty() && (obj != POOL_BOUNDARY)) {
+                    AutoreleasePoolEntry *topEntry = (AutoreleasePoolEntry *)next - 1;
+                    for (uintptr_t offset = 0; offset < 4; offset++) {
+                        AutoreleasePoolEntry *offsetEntry = topEntry - offset;
+                        if (offsetEntry <= (AutoreleasePoolEntry*)begin() || *(id *)offsetEntry == POOL_BOUNDARY) {
+                            break;
+                        }
+                        if (offsetEntry->ptr == (uintptr_t)obj && offsetEntry->count < AutoreleasePoolEntry::maxCount) {
+                            if (offset > 0) {
+                                AutoreleasePoolEntry found = *offsetEntry;
+                                memmove(offsetEntry, offsetEntry + 1, offset * sizeof(*offsetEntry));
+                                *topEntry = found;
+                            }
+                            topEntry->count++;
+                            ret = (id *)topEntry;  // need to reset ret
+                            goto done;
+                        }
+                    }
+                }
+            } else {
+                if (!empty() && (obj != POOL_BOUNDARY)) {
+                    AutoreleasePoolEntry *prevEntry = (AutoreleasePoolEntry *)next - 1;
+                    if (prevEntry->ptr == (uintptr_t)obj && prevEntry->count < AutoreleasePoolEntry::maxCount) {
+                        prevEntry->count++;
+                        ret = (id *)prevEntry;  // need to reset ret
+                        goto done;
+                    }
+                }
+            }
+        }
+#endif
+        ret = next;  // faster than `return next-1` because of aliasing
         *next++ = obj;
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+        // Make sure obj fits in the bits available for it
+        ASSERT(((AutoreleasePoolEntry *)ret)->ptr == (uintptr_t)obj);
+#endif
+     done:
         protect();
         return ret;
     }
@@ -772,12 +924,28 @@ private:
             }
 
             page->unprotect();
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+            AutoreleasePoolEntry* entry = (AutoreleasePoolEntry*) --page->next;
+
+            // create an obj with the zeroed out top byte and release that
+            id obj = (id)entry->ptr;
+            int count = (int)entry->count;  // grab these before memset
+#else
             id obj = *--page->next;
+#endif
             memset((void*)page->next, SCRIBBLE, sizeof(*page->next));
             page->protect();
 
             if (obj != POOL_BOUNDARY) {
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+                // release count+1 times since it is count of the additional
+                // autoreleases beyond the first one
+                for (int i = 0; i < count + 1; i++) {
+                    objc_release(obj);
+                }
+#else
                 objc_release(obj);
+#endif
             }
         }
 
@@ -984,10 +1152,13 @@ private:
 public:
     static inline id autorelease(id obj)
     {
-        ASSERT(obj);
-        ASSERT(!obj->isTaggedPointer());
+        ASSERT(!obj->isTaggedPointerOrNil());
         id *dest __unused = autoreleaseFast(obj);
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+        ASSERT(!dest  ||  dest == EMPTY_POOL_PLACEHOLDER  ||  (id)((AutoreleasePoolEntry *)dest)->ptr == obj);
+#else
         ASSERT(!dest  ||  dest == EMPTY_POOL_PLACEHOLDER  ||  *dest == obj);
+#endif
         return obj;
     }
 
@@ -1024,9 +1195,9 @@ public:
             _objc_inform_now_and_on_crash
                 ("Invalid or prematurely-freed autorelease pool %p. "
                  "Set a breakpoint on objc_autoreleasePoolInvalid to debug. "
-                 "Proceeding anyway because the app is old "
-                 "(SDK version " SDK_FORMAT "). Memory errors are likely.",
-                     token, FORMAT_SDK(sdkVersion()));
+                 "Proceeding anyway because the app is old. Memory errors "
+                 "are likely.",
+                     token);
         }
         objc_autoreleasePoolInvalid(token);
     }
@@ -1127,8 +1298,19 @@ public:
             if (*p == POOL_BOUNDARY) {
                 _objc_inform("[%p]  ################  POOL %p", p, p);
             } else {
-                _objc_inform("[%p]  %#16lx  %s", 
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+                AutoreleasePoolEntry *entry = (AutoreleasePoolEntry *)p;
+                if (entry->count > 0) {
+                    id obj = (id)entry->ptr;
+                    _objc_inform("[%p]  %#16lx  %s  autorelease count %u",
+                                 p, (unsigned long)obj, object_getClassName(obj),
+                                 entry->count + 1);
+                    goto done;
+                }
+#endif
+                _objc_inform("[%p]  %#16lx  %s",
                              p, (unsigned long)*p, object_getClassName(*p));
+             done:;
             }
         }
     }
@@ -1161,6 +1343,20 @@ public:
         _objc_inform("##############");
     }
 
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+    __attribute__((noinline, cold))
+    unsigned sumOfExtraReleases()
+    {
+        unsigned sumOfExtraReleases = 0;
+        for (id *p = begin(); p < next; p++) {
+            if (*p != POOL_BOUNDARY) {
+                sumOfExtraReleases += ((AutoreleasePoolEntry *)p)->count;
+            }
+        }
+        return sumOfExtraReleases;
+    }
+#endif
+
     __attribute__((noinline, cold))
     static void printHiwat()
     {
@@ -1168,16 +1364,29 @@ public:
         // Ignore high water marks under 256 to suppress noise.
         AutoreleasePoolPage *p = hotPage();
         uint32_t mark = p->depth*COUNT + (uint32_t)(p->next - p->begin());
-        if (mark > p->hiwat  &&  mark > 256) {
+        if (mark > p->hiwat + 256) {
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+            unsigned sumOfExtraReleases = 0;
+#endif
             for( ; p; p = p->parent) {
                 p->unprotect();
                 p->hiwat = mark;
                 p->protect();
+                
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+                sumOfExtraReleases += p->sumOfExtraReleases();
+#endif
             }
 
             _objc_inform("POOL HIGHWATER: new high water mark of %u "
                          "pending releases for thread %p:",
                          mark, objc_thread_self());
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+            if (sumOfExtraReleases > 0) {
+                _objc_inform("POOL HIGHWATER: extra sequential autoreleases of objects: %u",
+                             sumOfExtraReleases);
+            }
+#endif
 
             void *stack[128];
             int count = backtrace(stack, sizeof(stack)/sizeof(stack[0]));
@@ -1201,14 +1410,14 @@ public:
 NEVER_INLINE id 
 objc_object::rootRetain_overflow(bool tryRetain)
 {
-    return rootRetain(tryRetain, true);
+    return rootRetain(tryRetain, RRVariant::Full);
 }
 
 
 NEVER_INLINE uintptr_t
 objc_object::rootRelease_underflow(bool performDealloc)
 {
-    return rootRelease(performDealloc, true);
+    return rootRelease(performDealloc, RRVariant::Full);
 }
 
 
@@ -1317,7 +1526,7 @@ objc_object::sidetable_moveExtraRC_nolock(size_t extra_rc,
     ASSERT((oldRefcnt & SIDE_TABLE_WEAKLY_REFERENCED) == 0);  
 
     uintptr_t carry;
-    size_t refcnt = addc(oldRefcnt, extra_rc << SIDE_TABLE_RC_SHIFT, 0, &carry);
+    size_t refcnt = addc(oldRefcnt, (extra_rc - 1) << SIDE_TABLE_RC_SHIFT, 0, &carry);
     if (carry) refcnt = SIDE_TABLE_RC_PINNED;
     if (isDeallocating) refcnt |= SIDE_TABLE_DEALLOCATING;
     if (weaklyReferenced) refcnt |= SIDE_TABLE_WEAKLY_REFERENCED;
@@ -1359,7 +1568,7 @@ objc_object::sidetable_addExtraRC_nolock(size_t delta_rc)
 
 // Move some retain counts from the side table to the isa field.
 // Returns the actual count subtracted, which may be less than the request.
-size_t 
+objc_object::SidetableBorrow
 objc_object::sidetable_subExtraRC_nolock(size_t delta_rc)
 {
     ASSERT(isa.nonpointer);
@@ -1368,7 +1577,7 @@ objc_object::sidetable_subExtraRC_nolock(size_t delta_rc)
     RefcountMap::iterator it = table.refcnts.find(this);
     if (it == table.refcnts.end()  ||  it->second == 0) {
         // Side table retain count is zero. Can't borrow.
-        return 0;
+        return { 0, 0 };
     }
     size_t oldRefcnt = it->second;
 
@@ -1379,7 +1588,7 @@ objc_object::sidetable_subExtraRC_nolock(size_t delta_rc)
     size_t newRefcnt = oldRefcnt - (delta_rc << SIDE_TABLE_RC_SHIFT);
     ASSERT(oldRefcnt > newRefcnt);  // shouldn't underflow
     it->second = newRefcnt;
-    return delta_rc;
+    return { delta_rc, newRefcnt >> SIDE_TABLE_RC_SHIFT };
 }
 
 
@@ -1394,19 +1603,29 @@ objc_object::sidetable_getExtraRC_nolock()
 }
 
 
+void
+objc_object::sidetable_clearExtraRC_nolock()
+{
+    ASSERT(isa.nonpointer);
+    SideTable& table = SideTables()[this];
+    RefcountMap::iterator it = table.refcnts.find(this);
+    table.refcnts.erase(it);
+}
+
+
 // SUPPORT_NONPOINTER_ISA
 #endif
 
 
 id
-objc_object::sidetable_retain()
+objc_object::sidetable_retain(bool locked)
 {
 #if SUPPORT_NONPOINTER_ISA
     ASSERT(!isa.nonpointer);
 #endif
     SideTable& table = SideTables()[this];
     
-    table.lock();
+    if (!locked) table.lock();
     size_t& refcntStorage = table.refcnts[this];
     if (! (refcntStorage & SIDE_TABLE_RC_PINNED)) {
         refcntStorage += SIDE_TABLE_RC_ONE;
@@ -1505,6 +1724,14 @@ objc_object::sidetable_isWeaklyReferenced()
     return result;
 }
 
+#if OBJC_WEAK_FORMATION_CALLOUT_DEFINED
+//Clients can dlsym() for this symbol to see if an ObjC supporting
+//-_setWeaklyReferenced is present
+OBJC_EXPORT const uintptr_t _objc_has_weak_formation_callout = 0;
+static_assert(SUPPORT_NONPOINTER_ISA, "Weak formation callout must only be defined when nonpointer isa is supported.");
+#else
+static_assert(!SUPPORT_NONPOINTER_ISA, "If weak callout is not present then we must not support nonpointer isas.");
+#endif
 
 void 
 objc_object::sidetable_setWeaklyReferenced_nolock()
@@ -1512,9 +1739,9 @@ objc_object::sidetable_setWeaklyReferenced_nolock()
 #if SUPPORT_NONPOINTER_ISA
     ASSERT(!isa.nonpointer);
 #endif
-
+  
     SideTable& table = SideTables()[this];
-
+  
     table.refcnts[this] |= SIDE_TABLE_WEAKLY_REFERENCED;
 }
 
@@ -1523,7 +1750,7 @@ objc_object::sidetable_setWeaklyReferenced_nolock()
 // return uintptr_t instead of bool so that the various raw-isa 
 // -release paths all return zero in eax
 uintptr_t
-objc_object::sidetable_release(bool performDealloc)
+objc_object::sidetable_release(bool locked, bool performDealloc)
 {
 #if SUPPORT_NONPOINTER_ISA
     ASSERT(!isa.nonpointer);
@@ -1532,7 +1759,7 @@ objc_object::sidetable_release(bool performDealloc)
 
     bool do_dealloc = false;
 
-    table.lock();
+    if (!locked) table.lock();
     auto it = table.refcnts.try_emplace(this, SIDE_TABLE_DEALLOCATING);
     auto &refcnt = it.first->second;
     if (it.second) {
@@ -1583,8 +1810,7 @@ __attribute__((aligned(16), flatten, noinline))
 id 
 objc_retain(id obj)
 {
-    if (!obj) return obj;
-    if (obj->isTaggedPointer()) return obj;
+    if (obj->isTaggedPointerOrNil()) return obj;
     return obj->retain();
 }
 
@@ -1593,8 +1819,7 @@ __attribute__((aligned(16), flatten, noinline))
 void 
 objc_release(id obj)
 {
-    if (!obj) return;
-    if (obj->isTaggedPointer()) return;
+    if (obj->isTaggedPointerOrNil()) return;
     return obj->release();
 }
 
@@ -1603,8 +1828,7 @@ __attribute__((aligned(16), flatten, noinline))
 id
 objc_autorelease(id obj)
 {
-    if (!obj) return obj;
-    if (obj->isTaggedPointer()) return obj;
+    if (obj->isTaggedPointerOrNil()) return obj;
     return obj->autorelease();
 }
 
@@ -1694,8 +1918,7 @@ _objc_rootRelease(id obj)
     obj->rootRelease();
 }
 
-
-// Call [cls alloc] or [cls allocWithZone:nil], with appropriate 
+// Call [cls alloc] or [cls allocWithZone:nil], with appropriate
 // shortcutting optimizations.
 static ALWAYS_INLINE id
 callAlloc(Class cls, bool checkNil, bool allocWithZone=false)
@@ -1731,7 +1954,7 @@ objc_alloc(Class cls)
 }
 
 // Calls [cls allocWithZone:nil].
-id 
+id
 objc_allocWithZone(Class cls)
 {
     return callAlloc(cls, true/*checkNil*/, true/*allocWithZone*/);
@@ -1750,7 +1973,7 @@ objc_opt_new(Class cls)
 {
 #if __OBJC2__
     if (fastpath(cls && !cls->ISA()->hasCustomCore())) {
-        return [callAlloc(cls, false/*checkNil*/, true/*allocWithZone*/) init];
+        return [callAlloc(cls, false/*checkNil*/) init];
     }
 #endif
     return ((id(*)(id, SEL))objc_msgSend)(cls, @selector(new));
@@ -1761,7 +1984,7 @@ id
 objc_opt_self(id obj)
 {
 #if __OBJC2__
-    if (fastpath(!obj || obj->isTaggedPointer() || !obj->ISA()->hasCustomCore())) {
+    if (fastpath(obj->isTaggedPointerOrNil() || !obj->ISA()->hasCustomCore())) {
         return obj;
     }
 #endif
@@ -1790,7 +2013,7 @@ objc_opt_isKindOfClass(id obj, Class otherClass)
     if (slowpath(!obj)) return NO;
     Class cls = obj->getIsa();
     if (fastpath(!cls->hasCustomCore())) {
-        for (Class tcls = cls; tcls; tcls = tcls->superclass) {
+        for (Class tcls = cls; tcls; tcls = tcls->getSuperclass()) {
             if (tcls == otherClass) return YES;
         }
         return NO;
@@ -2019,11 +2242,11 @@ __attribute__((objc_nonlazy_class))
 }
 
 + (Class)superclass {
-    return self->superclass;
+    return self->getSuperclass();
 }
 
 - (Class)superclass {
-    return [self class]->superclass;
+    return [self class]->getSuperclass();
 }
 
 + (BOOL)isMemberOfClass:(Class)cls {
@@ -2035,28 +2258,28 @@ __attribute__((objc_nonlazy_class))
 }
 
 + (BOOL)isKindOfClass:(Class)cls {
-    for (Class tcls = self->ISA(); tcls; tcls = tcls->superclass) {
+    for (Class tcls = self->ISA(); tcls; tcls = tcls->getSuperclass()) {
         if (tcls == cls) return YES;
     }
     return NO;
 }
 
 - (BOOL)isKindOfClass:(Class)cls {
-    for (Class tcls = [self class]; tcls; tcls = tcls->superclass) {
+    for (Class tcls = [self class]; tcls; tcls = tcls->getSuperclass()) {
         if (tcls == cls) return YES;
     }
     return NO;
 }
 
 + (BOOL)isSubclassOfClass:(Class)cls {
-    for (Class tcls = self; tcls; tcls = tcls->superclass) {
+    for (Class tcls = self; tcls; tcls = tcls->getSuperclass()) {
         if (tcls == cls) return YES;
     }
     return NO;
 }
 
 + (BOOL)isAncestorOfObject:(NSObject *)obj {
-    for (Class tcls = [obj class]; tcls; tcls = tcls->superclass) {
+    for (Class tcls = [obj class]; tcls; tcls = tcls->getSuperclass()) {
         if (tcls == self) return YES;
     }
     return NO;
@@ -2076,7 +2299,7 @@ __attribute__((objc_nonlazy_class))
 
 + (BOOL)conformsToProtocol:(Protocol *)protocol {
     if (!protocol) return NO;
-    for (Class tcls = self; tcls; tcls = tcls->superclass) {
+    for (Class tcls = self; tcls; tcls = tcls->getSuperclass()) {
         if (class_conformsToProtocol(tcls, protocol)) return YES;
     }
     return NO;
@@ -2084,7 +2307,7 @@ __attribute__((objc_nonlazy_class))
 
 - (BOOL)conformsToProtocol:(Protocol *)protocol {
     if (!protocol) return NO;
-    for (Class tcls = [self class]; tcls; tcls = tcls->superclass) {
+    for (Class tcls = [self class]; tcls; tcls = tcls->getSuperclass()) {
         if (class_conformsToProtocol(tcls, protocol)) return YES;
     }
     return NO;

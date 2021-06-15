@@ -46,7 +46,7 @@
 /* Linker metadata symbols */
 
 // NSObject was in Foundation/CF on macOS < 10.8.
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX && (__x86_64__ || __i386__)
 #if __OBJC2__
 
 OBJC_EXPORT const char __objc_nsobject_class_10_5
@@ -171,6 +171,15 @@ HasClassProperties:
    Old ABI: Set by some compilers. Not used by the runtime.
 */
 
+// Description of an expected duplicate class name.
+// __DATA,__objc_dupclass stores one of these. Only the main image is
+// consulted for these purposes.
+typedef struct _objc_duplicate_class {
+    uint32_t version;
+    uint32_t flags;
+    const char name[64];
+} objc_duplicate_class;
+#define OBJC_HAS_DUPLICATE_CLASS 1
 
 /* Properties */
 
@@ -412,7 +421,7 @@ objc_retainBlock(id _Nullable)
 
 // Extract class pointer from an isa field.
     
-#if TARGET_OS_SIMULATOR && !TARGET_OS_IOSMAC
+#if TARGET_OS_SIMULATOR && !TARGET_OS_MACCATALYST && !__arm64__
     // No simulators use nonpointer isa yet.
     
 #elif __LP64__

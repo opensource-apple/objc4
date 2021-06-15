@@ -65,6 +65,9 @@ Class initSub(Class cls, void *arg)
     // Example: rdar://problem/50707074
     Class HeapSwiftSub = (Class)malloc(OBJC_MAX_CLASS_SIZE);
     memcpy(HeapSwiftSub, RawRealSwiftSub, OBJC_MAX_CLASS_SIZE);
+    // Re-sign the isa and super pointers in the new location.
+    ((Class __ptrauth_objc_isa_pointer *)(void *)HeapSwiftSub)[0] = ((Class __ptrauth_objc_isa_pointer *)(void *)RawRealSwiftSub)[0];
+    ((Class __ptrauth_objc_super_pointer *)(void *)HeapSwiftSub)[1] = ((Class __ptrauth_objc_super_pointer *)(void *)RawRealSwiftSub)[1];
 
     testprintf("initSub beginning _objc_realizeClassFromSwift\n");
     _objc_realizeClassFromSwift(HeapSwiftSub, cls);

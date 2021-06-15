@@ -60,6 +60,12 @@
 #define __ptrauth_swift_value_witness_function_pointer(__key)
 #endif
 
+// Workaround <rdar://problem/64531063> Definitions of ptrauth_sign_unauthenticated and friends generate unused variables warnings
+#if __has_feature(ptrauth_calls)
+#define UNUSED_WITHOUT_PTRAUTH
+#else
+#define UNUSED_WITHOUT_PTRAUTH __unused
+#endif
 
 #if __has_feature(ptrauth_calls)
 
@@ -124,12 +130,12 @@ public:
 // A "ptrauth" struct that just passes pointers through unchanged.
 struct PtrauthRaw {
     template <typename T>
-    static T *sign(T *ptr, const void *address) {
+    static T *sign(T *ptr, __unused const void *address) {
         return ptr;
     }
 
     template <typename T>
-    static T *auth(T *ptr, const void *address) {
+    static T *auth(T *ptr, __unused const void *address) {
         return ptr;
     }
 };
@@ -138,12 +144,12 @@ struct PtrauthRaw {
 // when reading.
 struct PtrauthStrip {
     template <typename T>
-    static T *sign(T *ptr, const void *address) {
+    static T *sign(T *ptr, __unused const void *address) {
         return ptr;
     }
 
     template <typename T>
-    static T *auth(T *ptr, const void *address) {
+    static T *auth(T *ptr, __unused const void *address) {
         return ptrauth_strip(ptr, ptrauth_key_process_dependent_data);
     }
 };
@@ -153,14 +159,14 @@ struct PtrauthStrip {
 template <unsigned discriminator>
 struct Ptrauth {
     template <typename T>
-    static T *sign(T *ptr, const void *address) {
+    static T *sign(T *ptr, UNUSED_WITHOUT_PTRAUTH const void *address) {
         if (!ptr)
             return nullptr;
         return ptrauth_sign_unauthenticated(ptr, ptrauth_key_process_dependent_data, ptrauth_blend_discriminator(address, discriminator));
     }
 
     template <typename T>
-    static T *auth(T *ptr, const void *address) {
+    static T *auth(T *ptr, UNUSED_WITHOUT_PTRAUTH const void *address) {
         if (!ptr)
             return nullptr;
         return ptrauth_auth_data(ptr, ptrauth_key_process_dependent_data, ptrauth_blend_discriminator(address, discriminator));
@@ -173,7 +179,11 @@ template <typename T> using RawPtr = WrappedPtr<T, PtrauthRaw>;
 
 #if __has_feature(ptrauth_calls)
 // Get a ptrauth type that uses a string discriminator.
+#if __BUILDING_OBJCDT__
+#define PTRAUTH_STR(name) PtrauthStrip
+#else
 #define PTRAUTH_STR(name) Ptrauth<ptrauth_string_discriminator(#name)>
+#endif
 
 // When ptrauth is available, declare a template that wraps a type
 // in a WrappedPtr that uses an authenticated pointer using the

@@ -33,6 +33,7 @@
 * Imports.
 **********************************************************************/
 
+#include <os/feature_private.h> // os_feature_enabled_simple()
 #include "objc-private.h"
 #include "objc-loadmethod.h"
 #include "objc-file.h"
@@ -87,6 +88,9 @@ const option_t Settings[] = {
 #undef OPTION
 };
 
+namespace objc {
+    int PageCountWarning = 50;  // Default value if the environment variable is not set
+}
 
 // objc's key for pthread_getspecific
 #if SUPPORT_DIRECT_THREAD_KEYS
@@ -338,6 +342,22 @@ void removeHeader(header_info *hi)
 #endif
 }
 
+/***********************************************************************
+* SetPageCountWarning
+* Convert environment variable value to integer value.
+* If the value is valid, set the global PageCountWarning value.
+**********************************************************************/
+void SetPageCountWarning(const char* envvar) {
+    if (envvar) {
+        long result = strtol(envvar, NULL, 10);
+        if (result <= INT_MAX && result >= -1) {
+            int32_t var = (int32_t)result;
+            if (var != 0) {  // 0 is not a valid value for the env var
+                objc::PageCountWarning = var;
+            }
+        }
+    }
+}
 
 /***********************************************************************
 * environ_init
@@ -351,6 +371,13 @@ void environ_init(void)
         // This includes OBJC_HELP and OBJC_PRINT_OPTIONS themselves.
         return;
     } 
+
+    // Turn off autorelease LRU coalescing by default for apps linked against
+    // older SDKs. LRU coalescing can reorder releases and certain older apps
+    // are accidentally relying on the ordering.
+    // rdar://problem/63886091
+    if (!dyld_program_sdk_at_least(dyld_fall_2020_os_versions))
+        DisableAutoreleaseCoalescingLRU = true;
 
     bool PrintHelp = false;
     bool PrintOptions = false;
@@ -376,6 +403,11 @@ void environ_init(void)
             continue;
         }
         
+        if (0 == strncmp(*p, "OBJC_DEBUG_POOL_DEPTH=", 22)) {
+            SetPageCountWarning(*p + 22);
+            continue;
+        }
+
         const char *value = strchr(*p, '=');
         if (!*value) continue;
         value++;
@@ -388,10 +420,10 @@ void environ_init(void)
                 *opt->var = (0 == strcmp(value, "YES"));
                 break;
             }
-        }            
+        }
     }
 
-    // Special case: enable some autorelease pool debugging 
+    // Special case: enable some autorelease pool debugging
     // when some malloc debugging is enabled 
     // and OBJC_DEBUG_POOL_ALLOCATION is not set to something other than NO.
     if (maybeMallocDebugging) {
@@ -407,6 +439,10 @@ void environ_init(void)
         {
             DebugPoolAllocation = true;
         }
+    }
+
+    if (!os_feature_enabled_simple(objc4, preoptimizedCaches, true)) {
+        DisablePreoptCaches = true;
     }
 
     // Print OBJC_HELP and OBJC_PRINT_OPTIONS output.
@@ -649,31 +685,25 @@ objc_getAssociatedObject(id object, const void *key)
     return _object_get_associative_reference(object, key);
 }
 
-static void
-_base_objc_setAssociatedObject(id object, const void *key, id value, objc_AssociationPolicy policy)
-{
-  _object_set_associative_reference(object, key, value, policy);
-}
-
-static ChainedHookFunction<objc_hook_setAssociatedObject> SetAssocHook{_base_objc_setAssociatedObject};
+typedef void (*objc_hook_setAssociatedObject)(id _Nonnull object, const void * _Nonnull key,
+                                              id _Nullable value, objc_AssociationPolicy policy);
 
 void
 objc_setHook_setAssociatedObject(objc_hook_setAssociatedObject _Nonnull newValue,
                                  objc_hook_setAssociatedObject _Nullable * _Nonnull outOldValue) {
-    SetAssocHook.set(newValue, outOldValue);
+  // See objc_object::setHasAssociatedObjects() for a replacement
 }
 
 void
 objc_setAssociatedObject(id object, const void *key, id value, objc_AssociationPolicy policy)
 {
-    SetAssocHook.get()(object, key, value, policy);
+    _object_set_associative_reference(object, key, value, policy);
 }
-
 
 void objc_removeAssociatedObjects(id object) 
 {
     if (object && object->hasAssociatedObjects()) {
-        _object_remove_assocations(object);
+        _object_remove_assocations(object, /*deallocating*/false);
     }
 }
 

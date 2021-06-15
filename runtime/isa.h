@@ -55,26 +55,46 @@
     // uintptr_t extraBytes : 1;  // allocated with extra bytes
 
 # if __arm64__
-#   define ISA_MASK        0x0000000ffffffff8ULL
-#   define ISA_MAGIC_MASK  0x000003f000000001ULL
-#   define ISA_MAGIC_VALUE 0x000001a000000001ULL
-#   define ISA_BITFIELD                                                      \
-      uintptr_t nonpointer        : 1;                                       \
-      uintptr_t has_assoc         : 1;                                       \
-      uintptr_t has_cxx_dtor      : 1;                                       \
-      uintptr_t shiftcls          : 33; /*MACH_VM_MAX_ADDRESS 0x1000000000*/ \
-      uintptr_t magic             : 6;                                       \
-      uintptr_t weakly_referenced : 1;                                       \
-      uintptr_t deallocating      : 1;                                       \
-      uintptr_t has_sidetable_rc  : 1;                                       \
-      uintptr_t extra_rc          : 19
-#   define RC_ONE   (1ULL<<45)
-#   define RC_HALF  (1ULL<<18)
+// ARM64 simulators have a larger address space, so use the ARM64e
+// scheme even when simulators build for ARM64-not-e.
+#   if __has_feature(ptrauth_calls) || TARGET_OS_SIMULATOR
+#     define ISA_MASK        0x007ffffffffffff8ULL
+#     define ISA_MAGIC_MASK  0x0000000000000001ULL
+#     define ISA_MAGIC_VALUE 0x0000000000000001ULL
+#     define ISA_HAS_CXX_DTOR_BIT 0
+#     define ISA_BITFIELD                                                      \
+        uintptr_t nonpointer        : 1;                                       \
+        uintptr_t has_assoc         : 1;                                       \
+        uintptr_t weakly_referenced : 1;                                       \
+        uintptr_t shiftcls_and_sig  : 52;                                      \
+        uintptr_t has_sidetable_rc  : 1;                                       \
+        uintptr_t extra_rc          : 8
+#     define RC_ONE   (1ULL<<56)
+#     define RC_HALF  (1ULL<<7)
+#   else
+#     define ISA_MASK        0x0000000ffffffff8ULL
+#     define ISA_MAGIC_MASK  0x000003f000000001ULL
+#     define ISA_MAGIC_VALUE 0x000001a000000001ULL
+#     define ISA_HAS_CXX_DTOR_BIT 1
+#     define ISA_BITFIELD                                                      \
+        uintptr_t nonpointer        : 1;                                       \
+        uintptr_t has_assoc         : 1;                                       \
+        uintptr_t has_cxx_dtor      : 1;                                       \
+        uintptr_t shiftcls          : 33; /*MACH_VM_MAX_ADDRESS 0x1000000000*/ \
+        uintptr_t magic             : 6;                                       \
+        uintptr_t weakly_referenced : 1;                                       \
+        uintptr_t unused            : 1;                                       \
+        uintptr_t has_sidetable_rc  : 1;                                       \
+        uintptr_t extra_rc          : 19
+#     define RC_ONE   (1ULL<<45)
+#     define RC_HALF  (1ULL<<18)
+#   endif
 
 # elif __x86_64__
 #   define ISA_MASK        0x00007ffffffffff8ULL
 #   define ISA_MAGIC_MASK  0x001f800000000001ULL
 #   define ISA_MAGIC_VALUE 0x001d800000000001ULL
+#   define ISA_HAS_CXX_DTOR_BIT 1
 #   define ISA_BITFIELD                                                        \
       uintptr_t nonpointer        : 1;                                         \
       uintptr_t has_assoc         : 1;                                         \
@@ -82,7 +102,7 @@
       uintptr_t shiftcls          : 44; /*MACH_VM_MAX_ADDRESS 0x7fffffe00000*/ \
       uintptr_t magic             : 6;                                         \
       uintptr_t weakly_referenced : 1;                                         \
-      uintptr_t deallocating      : 1;                                         \
+      uintptr_t unused            : 1;                                         \
       uintptr_t has_sidetable_rc  : 1;                                         \
       uintptr_t extra_rc          : 8
 #   define RC_ONE   (1ULL<<56)
@@ -109,6 +129,7 @@
 #   define ISA_INDEX_COUNT       (1 << ISA_INDEX_BITS)
 #   define ISA_INDEX_MAGIC_MASK  0x001E0001
 #   define ISA_INDEX_MAGIC_VALUE 0x001C0001
+#   define ISA_HAS_CXX_DTOR_BIT  1
 #   define ISA_BITFIELD                         \
       uintptr_t nonpointer        : 1;          \
       uintptr_t has_assoc         : 1;          \
@@ -116,7 +137,7 @@
       uintptr_t magic             : 4;          \
       uintptr_t has_cxx_dtor      : 1;          \
       uintptr_t weakly_referenced : 1;          \
-      uintptr_t deallocating      : 1;          \
+      uintptr_t unused            : 1;          \
       uintptr_t has_sidetable_rc  : 1;          \
       uintptr_t extra_rc          : 7
 #   define RC_ONE   (1ULL<<25)

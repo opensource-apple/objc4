@@ -123,6 +123,16 @@ struct magic_t {
 class AutoreleasePoolPage;
 struct AutoreleasePoolPageData
 {
+#if SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS
+    struct AutoreleasePoolEntry {
+        uintptr_t ptr: 48;
+        uintptr_t count: 16;
+
+        static const uintptr_t maxCount = 65535; // 2^16 - 1
+    };
+    static_assert((AutoreleasePoolEntry){ .ptr = MACH_VM_MAX_ADDRESS }.ptr == MACH_VM_MAX_ADDRESS, "MACH_VM_MAX_ADDRESS doesn't fit into AutoreleasePoolEntry::ptr!");
+#endif
+
 	magic_t const magic;
 	__unsafe_unretained id *next;
 	pthread_t const thread;

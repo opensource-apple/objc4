@@ -138,6 +138,9 @@ void cycle(void)
 
 int main()
 {
+    char *useClosures = getenv("DYLD_USE_CLOSURES");
+    int dyld3 = useClosures != NULL && useClosures[0] != '0';
+
     objc_setForwardHandler((void*)&forward_handler, (void*)&forward_handler);
 
 #if defined(__arm__)  ||  defined(__arm64__)
@@ -153,10 +156,11 @@ int main()
 #endif
 
     leak_mark();
-    while (count--) {
+    for (int i = 0; i < count; i++) {
         cycle();
     }
-    leak_check(0);
+    // dyld3 currently leaks 8 bytes for each dlopen/dlclose pair, so accommodate it. rdar://problem/53769254
+    leak_check(dyld3 ? (count * sizeof(void *)) : 0);
 
     // 5359412 Make sure dylibs with nothing other than image_info can close
     void *dylib = dlopen("unload3.dylib", RTLD_LAZY);
@@ -164,7 +168,9 @@ int main()
     int err = dlclose(dylib);
     testassert(err == 0);
     err = dlclose(dylib);
-    testassert(err == -1);  // already closed
+    // dyld3 doesn't error when dlclosing the dylib twice. This is probably expected. rdar://problem/53769374
+    if (!dyld3)
+        testassert(err == -1);  // already closed
 
     // Make sure dylibs with real objc content cannot close
     dylib = dlopen("unload4.dylib", RTLD_LAZY);
@@ -172,7 +178,9 @@ int main()
     err = dlclose(dylib);
     testassert(err == 0);
     err = dlclose(dylib);
-    testassert(err == -1);  // already closed
+    // dyld3 doesn't error when dlclosing the dylib twice. This is probably expected. rdar://problem/53769374
+    if (!dyld3)
+        testassert(err == -1);  // already closed
 
     succeed(__FILE__);
 }

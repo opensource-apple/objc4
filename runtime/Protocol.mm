@@ -100,7 +100,7 @@ __attribute__((objc_nonlazy_class))
     // check isKindOf:
     Class cls;
     Class protoClass = objc_getClass("Protocol");
-    for (cls = object_getClass(other); cls; cls = cls->superclass) {
+    for (cls = object_getClass(other); cls; cls = cls->getSuperclass()) {
         if (cls == protoClass) break;
     }
     if (!cls) return NO;

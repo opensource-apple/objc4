@@ -10,6 +10,8 @@ typedef IMP __ptrauth_objc_method_list_imp MethodListIMP;
 typedef IMP MethodListIMP;
 #endif
 
+EXTERN_C void _method_setImplementationRawUnsafe(Method m, IMP imp);
+
 static int Retains;
 static int Releases;
 static int Autoreleases;
@@ -64,7 +66,7 @@ int main(int argc __unused, char **argv)
 #if SWIZZLE_AWZ
     method_setImplementation(meth, (IMP)HackAllocWithZone);
 #else
-    ((MethodListIMP *)meth)[2] = (IMP)HackAllocWithZone;
+    _method_setImplementationRawUnsafe(meth, (IMP)HackAllocWithZone);
 #endif
 
     meth = class_getClassMethod(cls, @selector(new));
@@ -72,7 +74,7 @@ int main(int argc __unused, char **argv)
 #if SWIZZLE_CORE
     method_setImplementation(meth, (IMP)HackPlusNew);
 #else
-    ((MethodListIMP *)meth)[2] = (IMP)HackPlusNew;
+    _method_setImplementationRawUnsafe(meth, (IMP)HackPlusNew);
 #endif
 
     meth = class_getClassMethod(cls, @selector(self));
@@ -80,7 +82,7 @@ int main(int argc __unused, char **argv)
 #if SWIZZLE_CORE
     method_setImplementation(meth, (IMP)HackPlusSelf);
 #else
-    ((MethodListIMP *)meth)[2] = (IMP)HackPlusSelf;
+    _method_setImplementationRawUnsafe(meth, (IMP)HackPlusSelf);
 #endif
 
     meth = class_getInstanceMethod(cls, @selector(self));
@@ -88,7 +90,7 @@ int main(int argc __unused, char **argv)
 #if SWIZZLE_CORE
     method_setImplementation(meth, (IMP)HackSelf);
 #else
-    ((MethodListIMP *)meth)[2] = (IMP)HackSelf;
+    _method_setImplementationRawUnsafe(meth, (IMP)HackSelf);
 #endif
 
     meth = class_getInstanceMethod(cls, @selector(release));
@@ -96,25 +98,25 @@ int main(int argc __unused, char **argv)
 #if SWIZZLE_RELEASE
     method_setImplementation(meth, (IMP)HackRelease);
 #else
-    ((MethodListIMP *)meth)[2] = (IMP)HackRelease;
+    _method_setImplementationRawUnsafe(meth, (IMP)HackRelease);
 #endif
 
     // These other methods get hacked for counting purposes only
 
     meth = class_getInstanceMethod(cls, @selector(retain));
     RealRetain = (typeof(RealRetain))method_getImplementation(meth);
-    ((MethodListIMP *)meth)[2] = (IMP)HackRetain;
+    _method_setImplementationRawUnsafe(meth, (IMP)HackRetain);
 
     meth = class_getInstanceMethod(cls, @selector(autorelease));
     RealAutorelease = (typeof(RealAutorelease))method_getImplementation(meth);
-    ((MethodListIMP *)meth)[2] = (IMP)HackAutorelease;
+    _method_setImplementationRawUnsafe(meth, (IMP)HackAutorelease);
 
     meth = class_getClassMethod(cls, @selector(alloc));
     RealAlloc = (typeof(RealAlloc))method_getImplementation(meth);
-    ((MethodListIMP *)meth)[2] = (IMP)HackAlloc;
+    _method_setImplementationRawUnsafe(meth, (IMP)HackAlloc);
 
     meth = class_getInstanceMethod(cls, @selector(init));
-    ((MethodListIMP *)meth)[2] = (IMP)HackInit;
+    _method_setImplementationRawUnsafe(meth, (IMP)HackInit);
 
     // Verify that the swizzles occurred before +initialize by provoking it now
     testassert(PlusInitializes == 0);

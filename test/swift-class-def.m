@@ -15,9 +15,15 @@
 #if __has_feature(ptrauth_calls)
 #   define SIGNED_METHOD_LIST_IMP "@AUTH(ia,0,addr) "
 #   define SIGNED_STUB_INITIALIZER "@AUTH(ia,0xc671,addr) "
+#   define SIGNED_METHOD_LIST "@AUTH(da,0xC310,addr) "
+#   define SIGNED_ISA "@AUTH(da, 0x6AE1, addr) "
+#   define SIGNED_SUPER "@AUTH(da, 0xB5AB, addr) "
 #else
 #   define SIGNED_METHOD_LIST_IMP
 #   define SIGNED_STUB_INITIALIZER
+#   define SIGNED_METHOD_LIST
+#   define SIGNED_ISA
+#   define SIGNED_SUPER
 #endif
 
 #define str(x) #x
@@ -41,8 +47,8 @@ asm(                                               \
     ".section __DATA,__objc_data               \n" \
     ".align 3                                  \n" \
     "_OBJC_CLASS_$_" #name ":                  \n" \
-    PTR "_OBJC_METACLASS_$_" #name            "\n" \
-    PTR "_OBJC_CLASS_$_" #superclass          "\n" \
+    PTR "_OBJC_METACLASS_$_" #name SIGNED_ISA "\n" \
+    PTR "_OBJC_CLASS_$_" #superclass SIGNED_SUPER "\n" \
     PTR "__objc_empty_cache                    \n" \
     PTR "0 \n"                                     \
     PTR "L_" #name "_ro + 2 \n"                    \
@@ -82,8 +88,8 @@ asm(                                               \
     PTR "0 \n"                                     \
                                                    \
     "_OBJC_METACLASS_$_" #name ":              \n" \
-    PTR "_OBJC_METACLASS_$_" #superclass      "\n" \
-    PTR "_OBJC_METACLASS_$_" #superclass      "\n" \
+    PTR "_OBJC_METACLASS_$_" #superclass SIGNED_ISA "\n" \
+    PTR "_OBJC_METACLASS_$_" #superclass SIGNED_SUPER "\n" \
     PTR "__objc_empty_cache                    \n" \
     PTR "0 \n"                                     \
     PTR "L_" #name "_meta_ro \n"                   \
@@ -123,7 +129,7 @@ asm(                                               \
     ONLY_LP64(".long 0 \n")                        \
     PTR "0 \n"                                     \
     PTR "L_" #name "_name \n"                      \
-    PTR "L_" #name "_methods \n"                   \
+    PTR "L_" #name "_methods" SIGNED_METHOD_LIST "\n" \
     PTR "0 \n"                                     \
     PTR "L_" #name "_ivars \n"                     \
     PTR "0 \n"                                     \
@@ -137,7 +143,7 @@ asm(                                               \
     ONLY_LP64(".long 0 \n")                        \
     PTR "0 \n"                                     \
     PTR "L_" #name "_name \n"                      \
-    PTR "L_" #name "_meta_methods \n"              \
+    PTR "L_" #name "_meta_methods" SIGNED_METHOD_LIST "\n" \
     PTR "0 \n"                                     \
     PTR "0 \n"                                     \
     PTR "0 \n"                                     \

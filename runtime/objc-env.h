@@ -36,6 +36,7 @@ OPTION( DebugMissingPools,        OBJC_DEBUG_MISSING_POOLS,        "warn about a
 OPTION( DebugPoolAllocation,      OBJC_DEBUG_POOL_ALLOCATION,      "halt when autorelease pools are popped out of order, and allow heap debuggers to track autorelease pools")
 OPTION( DebugDuplicateClasses,    OBJC_DEBUG_DUPLICATE_CLASSES,    "halt when multiple classes with the same name are present")
 OPTION( DebugDontCrash,           OBJC_DEBUG_DONT_CRASH,           "halt the process by exiting instead of crashing")
+OPTION( DebugPoolDepth,           OBJC_DEBUG_POOL_DEPTH,           "log fault when at least a set number of autorelease pages has been allocated")
 
 OPTION( DisableVtables,           OBJC_DISABLE_VTABLES,            "disable vtable dispatch")
 OPTION( DisablePreopt,            OBJC_DISABLE_PREOPTIMIZATION,    "disable preoptimization courtesy of dyld shared cache")
@@ -43,3 +44,7 @@ OPTION( DisableTaggedPointers,    OBJC_DISABLE_TAGGED_POINTERS,    "disable tagg
 OPTION( DisableTaggedPointerObfuscation, OBJC_DISABLE_TAG_OBFUSCATION,    "disable obfuscation of tagged pointers")
 OPTION( DisableNonpointerIsa,     OBJC_DISABLE_NONPOINTER_ISA,     "disable non-pointer isa fields")
 OPTION( DisableInitializeForkSafety, OBJC_DISABLE_INITIALIZE_FORK_SAFETY, "disable safety checks for +initialize after fork")
+OPTION( DisableFaults,            OBJC_DISABLE_FAULTS,             "disable os faults")
+OPTION( DisablePreoptCaches,      OBJC_DISABLE_PREOPTIMIZED_CACHES, "disable preoptimized caches")
+OPTION( DisableAutoreleaseCoalescing, OBJC_DISABLE_AUTORELEASE_COALESCING, "disable coalescing of autorelease pool pointers")
+OPTION( DisableAutoreleaseCoalescingLRU, OBJC_DISABLE_AUTORELEASE_COALESCING_LRU, "disable coalescing of autorelease pool pointers using look back N strategy")

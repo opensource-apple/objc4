@@ -27,6 +27,8 @@
 #include <sysexits.h>
 #include <getopt.h>
 #include <pthread.h>
+#include <sys/sysctl.h>
+#include <string>
 
 int main(int argc, const char *argv[])
 {

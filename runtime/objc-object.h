@@ -73,7 +73,7 @@ objc_object::isClass()
 
 #if SUPPORT_TAGGED_POINTERS
 
-inline Class 
+inline Class
 objc_object::getIsa() 
 {
     if (fastpath(!isTaggedPointer())) return ISA();
@@ -103,6 +103,12 @@ objc_object::isTaggedPointer()
     return _objc_isTaggedPointer(this);
 }
 
+inline bool
+objc_object::isTaggedPointerOrNil()
+{
+    return _objc_isTaggedPointerOrNil(this);
+}
+
 inline bool 
 objc_object::isBasicTaggedPointer() 
 {
@@ -121,8 +127,7 @@ objc_object::isExtTaggedPointer()
 #else
 // not SUPPORT_TAGGED_POINTERS
 
-
-inline Class 
+inline Class
 objc_object::getIsa() 
 {
     return ISA();
@@ -139,6 +144,12 @@ inline bool
 objc_object::isTaggedPointer() 
 {
     return false;
+}
+
+inline bool
+objc_object::isTaggedPointerOrNil()
+{
+    return !this;
 }
 
 inline bool 
@@ -160,19 +171,116 @@ objc_object::isExtTaggedPointer()
 
 #if SUPPORT_NONPOINTER_ISA
 
-inline Class 
-objc_object::ISA() 
+// Set the class field in an isa. Takes both the class to set and
+// a pointer to the object where the isa will ultimately be used.
+// This is necessary to get the pointer signing right.
+//
+// Note: this method does not support setting an indexed isa. When
+// indexed isas are in use, it can only be used to set the class of a
+// raw isa.
+inline void
+isa_t::setClass(Class newCls, UNUSED_WITHOUT_PTRAUTH objc_object *obj)
 {
-    ASSERT(!isTaggedPointer()); 
-#if SUPPORT_INDEXED_ISA
-    if (isa.nonpointer) {
-        uintptr_t slot = isa.indexcls;
-        return classForIndex((unsigned)slot);
-    }
-    return (Class)isa.bits;
-#else
-    return (Class)(isa.bits & ISA_MASK);
+    // Match the conditional in isa.h.
+#if __has_feature(ptrauth_calls) || TARGET_OS_SIMULATOR
+#   if ISA_SIGNING_SIGN_MODE == ISA_SIGNING_SIGN_NONE
+    // No signing, just use the raw pointer.
+    uintptr_t signedCls = (uintptr_t)newCls;
+
+#   elif ISA_SIGNING_SIGN_MODE == ISA_SIGNING_SIGN_ONLY_SWIFT
+    // We're only signing Swift classes. Non-Swift classes just use
+    // the raw pointer
+    uintptr_t signedCls = (uintptr_t)newCls;
+    if (newCls->isSwiftStable())
+        signedCls = (uintptr_t)ptrauth_sign_unauthenticated((void *)newCls, ISA_SIGNING_KEY, ptrauth_blend_discriminator(obj, ISA_SIGNING_DISCRIMINATOR));
+
+#   elif ISA_SIGNING_SIGN_MODE == ISA_SIGNING_SIGN_ALL
+    // We're signing everything
+    uintptr_t signedCls = (uintptr_t)ptrauth_sign_unauthenticated((void *)newCls, ISA_SIGNING_KEY, ptrauth_blend_discriminator(obj, ISA_SIGNING_DISCRIMINATOR));
+
+#   else
+#       error Unknown isa signing mode.
+#   endif
+
+    shiftcls_and_sig = signedCls >> 3;
+
+#elif SUPPORT_INDEXED_ISA
+    // Indexed isa only uses this method to set a raw pointer class.
+    // Setting an indexed class is handled separately.
+    cls = newCls;
+
+#else // Nonpointer isa, no ptrauth
+    shiftcls = (uintptr_t)newCls >> 3;
 #endif
+}
+
+// Get the class pointer out of an isa. When ptrauth is supported,
+// this operation is optionally authenticated. Many code paths don't
+// need the authentication, so it can be skipped in those cases for
+// better performance.
+//
+// Note: this method does not support retrieving indexed isas. When
+// indexed isas are in use, it can only be used to retrieve the class
+// of a raw isa.
+#if SUPPORT_INDEXED_ISA || (ISA_SIGNING_AUTH_MODE != ISA_SIGNING_AUTH)
+#define MAYBE_UNUSED_AUTHENTICATED_PARAM __attribute__((unused))
+#else
+#define MAYBE_UNUSED_AUTHENTICATED_PARAM UNUSED_WITHOUT_PTRAUTH
+#endif
+
+inline Class
+isa_t::getClass(MAYBE_UNUSED_AUTHENTICATED_PARAM bool authenticated) {
+#if SUPPORT_INDEXED_ISA
+    return cls;
+#else
+
+    uintptr_t clsbits = bits;
+
+#   if __has_feature(ptrauth_calls)
+#       if ISA_SIGNING_AUTH_MODE == ISA_SIGNING_AUTH
+    // Most callers aren't security critical, so skip the
+    // authentication unless they ask for it. Message sending and
+    // cache filling are protected by the auth code in msgSend.
+    if (authenticated) {
+        // Mask off all bits besides the class pointer and signature.
+        clsbits &= ISA_MASK;
+        if (clsbits == 0)
+            return Nil;
+        clsbits = (uintptr_t)ptrauth_auth_data((void *)clsbits, ISA_SIGNING_KEY, ptrauth_blend_discriminator(this, ISA_SIGNING_DISCRIMINATOR));
+    } else {
+        // If not authenticating, strip using the precomputed class mask.
+        clsbits &= objc_debug_isa_class_mask;
+    }
+#       else
+    // If not authenticating, strip using the precomputed class mask.
+    clsbits &= objc_debug_isa_class_mask;
+#       endif
+
+#   else
+    clsbits &= ISA_MASK;
+#   endif
+
+    return (Class)clsbits;
+#endif
+}
+
+inline Class
+isa_t::getDecodedClass(bool authenticated) {
+#if SUPPORT_INDEXED_ISA
+    if (nonpointer) {
+        return classForIndex(indexcls);
+    }
+    return (Class)cls;
+#else
+    return getClass(authenticated);
+#endif
+}
+
+inline Class
+objc_object::ISA(bool authenticated)
+{
+    ASSERT(!isTaggedPointer());
+    return isa.getDecodedClass(authenticated);
 }
 
 inline Class
@@ -220,18 +328,25 @@ objc_object::initInstanceIsa(Class cls, bool hasCxxDtor)
     initIsa(cls, true, hasCxxDtor);
 }
 
+#if !SUPPORT_INDEXED_ISA && !ISA_HAS_CXX_DTOR_BIT
+#define UNUSED_WITHOUT_INDEXED_ISA_AND_DTOR_BIT __attribute__((unused))
+#else
+#define UNUSED_WITHOUT_INDEXED_ISA_AND_DTOR_BIT
+#endif
+
 inline void 
-objc_object::initIsa(Class cls, bool nonpointer, bool hasCxxDtor) 
+objc_object::initIsa(Class cls, bool nonpointer, UNUSED_WITHOUT_INDEXED_ISA_AND_DTOR_BIT bool hasCxxDtor)
 { 
     ASSERT(!isTaggedPointer()); 
     
+    isa_t newisa(0);
+
     if (!nonpointer) {
-        isa = isa_t((uintptr_t)cls);
+        newisa.setClass(cls, this);
     } else {
         ASSERT(!DisableNonpointerIsa);
         ASSERT(!cls->instancesRequireRawIsa());
 
-        isa_t newisa(0);
 
 #if SUPPORT_INDEXED_ISA
         ASSERT(cls->classArrayIndex() > 0);
@@ -244,18 +359,21 @@ objc_object::initIsa(Class cls, bool nonpointer, bool hasCxxDtor)
         newisa.bits = ISA_MAGIC_VALUE;
         // isa.magic is part of ISA_MAGIC_VALUE
         // isa.nonpointer is part of ISA_MAGIC_VALUE
+#   if ISA_HAS_CXX_DTOR_BIT
         newisa.has_cxx_dtor = hasCxxDtor;
-        newisa.shiftcls = (uintptr_t)cls >> 3;
+#   endif
+        newisa.setClass(cls, this);
 #endif
-
-        // This write must be performed in a single store in some cases
-        // (for example when realizing a class because other threads
-        // may simultaneously try to use the class).
-        // fixme use atomics here to guarantee single-store and to
-        // guarantee memory order w.r.t. the class index table
-        // ...but not too atomic because we don't want to hurt instantiation
-        isa = newisa;
+        newisa.extra_rc = 1;
     }
+
+    // This write must be performed in a single store in some cases
+    // (for example when realizing a class because other threads
+    // may simultaneously try to use the class).
+    // fixme use atomics here to guarantee single-store and to
+    // guarantee memory order w.r.t. the class index table
+    // ...but not too atomic because we don't want to hurt instantiation
+    isa = newisa;
 }
 
 
@@ -270,34 +388,46 @@ objc_object::changeIsa(Class newCls)
     ASSERT(!isTaggedPointer()); 
 
     isa_t oldisa;
-    isa_t newisa;
+    isa_t newisa(0);
 
     bool sideTableLocked = false;
     bool transcribeToSideTable = false;
 
+    oldisa = LoadExclusive(&isa.bits);
+
     do {
         transcribeToSideTable = false;
-        oldisa = LoadExclusive(&isa.bits);
         if ((oldisa.bits == 0  ||  oldisa.nonpointer)  &&
             !newCls->isFuture()  &&  newCls->canAllocNonpointer())
         {
             // 0 -> nonpointer
             // nonpointer -> nonpointer
 #if SUPPORT_INDEXED_ISA
-            if (oldisa.bits == 0) newisa.bits = ISA_INDEX_MAGIC_VALUE;
-            else newisa = oldisa;
+            if (oldisa.bits == 0) {
+                newisa.bits = ISA_INDEX_MAGIC_VALUE;
+                newisa.extra_rc = 1;
+            } else {
+                newisa = oldisa;
+            }
             // isa.magic is part of ISA_MAGIC_VALUE
             // isa.nonpointer is part of ISA_MAGIC_VALUE
             newisa.has_cxx_dtor = newCls->hasCxxDtor();
             ASSERT(newCls->classArrayIndex() > 0);
             newisa.indexcls = (uintptr_t)newCls->classArrayIndex();
 #else
-            if (oldisa.bits == 0) newisa.bits = ISA_MAGIC_VALUE;
-            else newisa = oldisa;
+            if (oldisa.bits == 0) {
+                newisa.bits = ISA_MAGIC_VALUE;
+                newisa.extra_rc = 1;
+            }
+            else {
+                newisa = oldisa;
+            }
             // isa.magic is part of ISA_MAGIC_VALUE
             // isa.nonpointer is part of ISA_MAGIC_VALUE
+#   if ISA_HAS_CXX_DTOR_BIT
             newisa.has_cxx_dtor = newCls->hasCxxDtor();
-            newisa.shiftcls = (uintptr_t)newCls >> 3;
+#   endif
+            newisa.setClass(newCls, this);
 #endif
         }
         else if (oldisa.nonpointer) {
@@ -308,37 +438,27 @@ objc_object::changeIsa(Class newCls)
             if (!sideTableLocked) sidetable_lock();
             sideTableLocked = true;
             transcribeToSideTable = true;
-            newisa.cls = newCls;
+            newisa.setClass(newCls, this);
         }
         else {
             // raw pointer -> raw pointer
-            newisa.cls = newCls;
+            newisa.setClass(newCls, this);
         }
-    } while (!StoreExclusive(&isa.bits, oldisa.bits, newisa.bits));
+    } while (slowpath(!StoreExclusive(&isa.bits, &oldisa.bits, newisa.bits)));
 
     if (transcribeToSideTable) {
         // Copy oldisa's retain count et al to side table.
         // oldisa.has_assoc: nothing to do
         // oldisa.has_cxx_dtor: nothing to do
         sidetable_moveExtraRC_nolock(oldisa.extra_rc, 
-                                     oldisa.deallocating, 
+                                     oldisa.isDeallocating(),
                                      oldisa.weakly_referenced);
     }
 
     if (sideTableLocked) sidetable_unlock();
 
-    if (oldisa.nonpointer) {
-#if SUPPORT_INDEXED_ISA
-        return classForIndex(oldisa.indexcls);
-#else
-        return (Class)((uintptr_t)oldisa.shiftcls << 3);
-#endif
-    }
-    else {
-        return oldisa.cls;
-    }
+    return oldisa.getDecodedClass(false);
 }
-
 
 inline bool
 objc_object::hasAssociatedObjects()
@@ -354,15 +474,22 @@ objc_object::setHasAssociatedObjects()
 {
     if (isTaggedPointer()) return;
 
- retry:
-    isa_t oldisa = LoadExclusive(&isa.bits);
-    isa_t newisa = oldisa;
-    if (!newisa.nonpointer  ||  newisa.has_assoc) {
-        ClearExclusive(&isa.bits);
-        return;
+    if (slowpath(!hasNonpointerIsa() && ISA()->hasCustomRR()) && !ISA()->isFuture() && !ISA()->isMetaClass()) {
+        void(*setAssoc)(id, SEL) = (void(*)(id, SEL)) object_getMethodImplementation((id)this, @selector(_noteAssociatedObjects));
+        if ((IMP)setAssoc != _objc_msgForward) {
+            (*setAssoc)((id)this, @selector(_noteAssociatedObjects));
+        }
     }
-    newisa.has_assoc = true;
-    if (!StoreExclusive(&isa.bits, oldisa.bits, newisa.bits)) goto retry;
+
+    isa_t newisa, oldisa = LoadExclusive(&isa.bits);
+    do {
+        newisa = oldisa;
+        if (!newisa.nonpointer  ||  newisa.has_assoc) {
+            ClearExclusive(&isa.bits);
+            return;
+        }
+        newisa.has_assoc = true;
+    } while (slowpath(!StoreExclusive(&isa.bits, &oldisa.bits, newisa.bits)));
 }
 
 
@@ -378,20 +505,20 @@ objc_object::isWeaklyReferenced()
 inline void
 objc_object::setWeaklyReferenced_nolock()
 {
- retry:
-    isa_t oldisa = LoadExclusive(&isa.bits);
-    isa_t newisa = oldisa;
-    if (slowpath(!newisa.nonpointer)) {
-        ClearExclusive(&isa.bits);
-        sidetable_setWeaklyReferenced_nolock();
-        return;
-    }
-    if (newisa.weakly_referenced) {
-        ClearExclusive(&isa.bits);
-        return;
-    }
-    newisa.weakly_referenced = true;
-    if (!StoreExclusive(&isa.bits, oldisa.bits, newisa.bits)) goto retry;
+    isa_t newisa, oldisa = LoadExclusive(&isa.bits);
+    do {
+        newisa = oldisa;
+        if (slowpath(!newisa.nonpointer)) {
+            ClearExclusive(&isa.bits);
+            sidetable_setWeaklyReferenced_nolock();
+            return;
+        }
+        if (newisa.weakly_referenced) {
+            ClearExclusive(&isa.bits);
+            return;
+        }
+        newisa.weakly_referenced = true;
+    } while (slowpath(!StoreExclusive(&isa.bits, &oldisa.bits, newisa.bits)));
 }
 
 
@@ -399,8 +526,12 @@ inline bool
 objc_object::hasCxxDtor()
 {
     ASSERT(!isTaggedPointer());
-    if (isa.nonpointer) return isa.has_cxx_dtor;
-    else return isa.cls->hasCxxDtor();
+#if ISA_HAS_CXX_DTOR_BIT
+    if (isa.nonpointer)
+        return isa.has_cxx_dtor;
+    else
+#endif
+        return ISA()->hasCxxDtor();
 }
 
 
@@ -409,7 +540,7 @@ inline bool
 objc_object::rootIsDeallocating()
 {
     if (isTaggedPointer()) return false;
-    if (isa.nonpointer) return isa.deallocating;
+    if (isa.nonpointer) return isa.isDeallocating();
     return sidetable_isDeallocating();
 }
 
@@ -435,10 +566,14 @@ objc_object::rootDealloc()
 {
     if (isTaggedPointer()) return;  // fixme necessary?
 
-    if (fastpath(isa.nonpointer  &&  
-                 !isa.weakly_referenced  &&  
-                 !isa.has_assoc  &&  
-                 !isa.has_cxx_dtor  &&  
+    if (fastpath(isa.nonpointer                     &&
+                 !isa.weakly_referenced             &&
+                 !isa.has_assoc                     &&
+#if ISA_HAS_CXX_DTOR_BIT
+                 !isa.has_cxx_dtor                  &&
+#else
+                 !isa.getClass(false)->hasCxxDtor() &&
+#endif
                  !isa.has_sidetable_rc))
     {
         assert(!sidetable_present());
@@ -449,6 +584,8 @@ objc_object::rootDealloc()
     }
 }
 
+extern explicit_atomic<id(*)(id)> swiftRetain;
+extern explicit_atomic<void(*)(id)> swiftRelease;
 
 // Equivalent to calling [this retain], with shortcuts if there is no override
 inline id 
@@ -456,13 +593,8 @@ objc_object::retain()
 {
     ASSERT(!isTaggedPointer());
 
-    if (fastpath(!ISA()->hasCustomRR())) {
-        return rootRetain();
-    }
-
-    return ((id(*)(objc_object *, SEL))objc_msgSend)(this, @selector(retain));
+    return rootRetain(false, RRVariant::FastOrMsgSend);
 }
-
 
 // Base retain implementation, ignoring overrides.
 // This does not check isa.fast_rr; if there is an RR override then 
@@ -476,19 +608,19 @@ objc_object::retain()
 ALWAYS_INLINE id 
 objc_object::rootRetain()
 {
-    return rootRetain(false, false);
+    return rootRetain(false, RRVariant::Fast);
 }
 
 ALWAYS_INLINE bool 
 objc_object::rootTryRetain()
 {
-    return rootRetain(true, false) ? true : false;
+    return rootRetain(true, RRVariant::Fast) ? true : false;
 }
 
-ALWAYS_INLINE id 
-objc_object::rootRetain(bool tryRetain, bool handleOverflow)
+ALWAYS_INLINE id
+objc_object::rootRetain(bool tryRetain, objc_object::RRVariant variant)
 {
-    if (isTaggedPointer()) return (id)this;
+    if (slowpath(isTaggedPointer())) return (id)this;
 
     bool sideTableLocked = false;
     bool transcribeToSideTable = false;
@@ -496,29 +628,56 @@ objc_object::rootRetain(bool tryRetain, bool handleOverflow)
     isa_t oldisa;
     isa_t newisa;
 
+    oldisa = LoadExclusive(&isa.bits);
+
+    if (variant == RRVariant::FastOrMsgSend) {
+        // These checks are only meaningful for objc_retain()
+        // They are here so that we avoid a re-load of the isa.
+        if (slowpath(oldisa.getDecodedClass(false)->hasCustomRR())) {
+            ClearExclusive(&isa.bits);
+            if (oldisa.getDecodedClass(false)->canCallSwiftRR()) {
+                return swiftRetain.load(memory_order_relaxed)((id)this);
+            }
+            return ((id(*)(objc_object *, SEL))objc_msgSend)(this, @selector(retain));
+        }
+    }
+
+    if (slowpath(!oldisa.nonpointer)) {
+        // a Class is a Class forever, so we can perform this check once
+        // outside of the CAS loop
+        if (oldisa.getDecodedClass(false)->isMetaClass()) {
+            ClearExclusive(&isa.bits);
+            return (id)this;
+        }
+    }
+
     do {
         transcribeToSideTable = false;
-        oldisa = LoadExclusive(&isa.bits);
         newisa = oldisa;
         if (slowpath(!newisa.nonpointer)) {
             ClearExclusive(&isa.bits);
-            if (rawISA()->isMetaClass()) return (id)this;
-            if (!tryRetain && sideTableLocked) sidetable_unlock();
             if (tryRetain) return sidetable_tryRetain() ? (id)this : nil;
-            else return sidetable_retain();
+            else return sidetable_retain(sideTableLocked);
         }
         // don't check newisa.fast_rr; we already called any RR overrides
-        if (slowpath(tryRetain && newisa.deallocating)) {
+        if (slowpath(newisa.isDeallocating())) {
             ClearExclusive(&isa.bits);
-            if (!tryRetain && sideTableLocked) sidetable_unlock();
-            return nil;
+            if (sideTableLocked) {
+                ASSERT(variant == RRVariant::Full);
+                sidetable_unlock();
+            }
+            if (slowpath(tryRetain)) {
+                return nil;
+            } else {
+                return (id)this;
+            }
         }
         uintptr_t carry;
         newisa.bits = addc(newisa.bits, RC_ONE, 0, &carry);  // extra_rc++
 
         if (slowpath(carry)) {
             // newisa.extra_rc++ overflowed
-            if (!handleOverflow) {
+            if (variant != RRVariant::Full) {
                 ClearExclusive(&isa.bits);
                 return rootRetain_overflow(tryRetain);
             }
@@ -530,14 +689,20 @@ objc_object::rootRetain(bool tryRetain, bool handleOverflow)
             newisa.extra_rc = RC_HALF;
             newisa.has_sidetable_rc = true;
         }
-    } while (slowpath(!StoreExclusive(&isa.bits, oldisa.bits, newisa.bits)));
+    } while (slowpath(!StoreExclusive(&isa.bits, &oldisa.bits, newisa.bits)));
 
-    if (slowpath(transcribeToSideTable)) {
-        // Copy the other half of the retain counts to the side table.
-        sidetable_addExtraRC_nolock(RC_HALF);
+    if (variant == RRVariant::Full) {
+        if (slowpath(transcribeToSideTable)) {
+            // Copy the other half of the retain counts to the side table.
+            sidetable_addExtraRC_nolock(RC_HALF);
+        }
+
+        if (slowpath(!tryRetain && sideTableLocked)) sidetable_unlock();
+    } else {
+        ASSERT(!transcribeToSideTable);
+        ASSERT(!sideTableLocked);
     }
 
-    if (slowpath(!tryRetain && sideTableLocked)) sidetable_unlock();
     return (id)this;
 }
 
@@ -548,12 +713,7 @@ objc_object::release()
 {
     ASSERT(!isTaggedPointer());
 
-    if (fastpath(!ISA()->hasCustomRR())) {
-        rootRelease();
-        return;
-    }
-
-    ((void(*)(objc_object *, SEL))objc_msgSend)(this, @selector(release));
+    rootRelease(true, RRVariant::FastOrMsgSend);
 }
 
 
@@ -570,35 +730,65 @@ objc_object::release()
 ALWAYS_INLINE bool 
 objc_object::rootRelease()
 {
-    return rootRelease(true, false);
+    return rootRelease(true, RRVariant::Fast);
 }
 
 ALWAYS_INLINE bool 
 objc_object::rootReleaseShouldDealloc()
 {
-    return rootRelease(false, false);
+    return rootRelease(false, RRVariant::Fast);
 }
 
-ALWAYS_INLINE bool 
-objc_object::rootRelease(bool performDealloc, bool handleUnderflow)
+ALWAYS_INLINE bool
+objc_object::rootRelease(bool performDealloc, objc_object::RRVariant variant)
 {
-    if (isTaggedPointer()) return false;
+    if (slowpath(isTaggedPointer())) return false;
 
     bool sideTableLocked = false;
 
-    isa_t oldisa;
-    isa_t newisa;
+    isa_t newisa, oldisa;
 
- retry:
+    oldisa = LoadExclusive(&isa.bits);
+
+    if (variant == RRVariant::FastOrMsgSend) {
+        // These checks are only meaningful for objc_release()
+        // They are here so that we avoid a re-load of the isa.
+        if (slowpath(oldisa.getDecodedClass(false)->hasCustomRR())) {
+            ClearExclusive(&isa.bits);
+            if (oldisa.getDecodedClass(false)->canCallSwiftRR()) {
+                swiftRelease.load(memory_order_relaxed)((id)this);
+                return true;
+            }
+            ((void(*)(objc_object *, SEL))objc_msgSend)(this, @selector(release));
+            return true;
+        }
+    }
+
+    if (slowpath(!oldisa.nonpointer)) {
+        // a Class is a Class forever, so we can perform this check once
+        // outside of the CAS loop
+        if (oldisa.getDecodedClass(false)->isMetaClass()) {
+            ClearExclusive(&isa.bits);
+            return false;
+        }
+    }
+
+retry:
     do {
-        oldisa = LoadExclusive(&isa.bits);
         newisa = oldisa;
         if (slowpath(!newisa.nonpointer)) {
             ClearExclusive(&isa.bits);
-            if (rawISA()->isMetaClass()) return false;
-            if (sideTableLocked) sidetable_unlock();
-            return sidetable_release(performDealloc);
+            return sidetable_release(sideTableLocked, performDealloc);
         }
+        if (slowpath(newisa.isDeallocating())) {
+            ClearExclusive(&isa.bits);
+            if (sideTableLocked) {
+                ASSERT(variant == RRVariant::Full);
+                sidetable_unlock();
+            }
+            return false;
+        }
+
         // don't check newisa.fast_rr; we already called any RR overrides
         uintptr_t carry;
         newisa.bits = subc(newisa.bits, RC_ONE, 0, &carry);  // extra_rc--
@@ -606,10 +796,16 @@ objc_object::rootRelease(bool performDealloc, bool handleUnderflow)
             // don't ClearExclusive()
             goto underflow;
         }
-    } while (slowpath(!StoreReleaseExclusive(&isa.bits, 
-                                             oldisa.bits, newisa.bits)));
+    } while (slowpath(!StoreReleaseExclusive(&isa.bits, &oldisa.bits, newisa.bits)));
 
-    if (slowpath(sideTableLocked)) sidetable_unlock();
+    if (slowpath(newisa.isDeallocating()))
+        goto deallocate;
+
+    if (variant == RRVariant::Full) {
+        if (slowpath(sideTableLocked)) sidetable_unlock();
+    } else {
+        ASSERT(!sideTableLocked);
+    }
     return false;
 
  underflow:
@@ -619,7 +815,7 @@ objc_object::rootRelease(bool performDealloc, bool handleUnderflow)
     newisa = oldisa;
 
     if (slowpath(newisa.has_sidetable_rc)) {
-        if (!handleUnderflow) {
+        if (variant != RRVariant::Full) {
             ClearExclusive(&isa.bits);
             return rootRelease_underflow(performDealloc);
         }
@@ -632,35 +828,37 @@ objc_object::rootRelease(bool performDealloc, bool handleUnderflow)
             sideTableLocked = true;
             // Need to start over to avoid a race against 
             // the nonpointer -> raw pointer transition.
+            oldisa = LoadExclusive(&isa.bits);
             goto retry;
         }
 
         // Try to remove some retain counts from the side table.        
-        size_t borrowed = sidetable_subExtraRC_nolock(RC_HALF);
+        auto borrow = sidetable_subExtraRC_nolock(RC_HALF);
 
-        // To avoid races, has_sidetable_rc must remain set 
-        // even if the side table count is now zero.
+        bool emptySideTable = borrow.remaining == 0; // we'll clear the side table if no refcounts remain there
 
-        if (borrowed > 0) {
+        if (borrow.borrowed > 0) {
             // Side table retain count decreased.
             // Try to add them to the inline count.
-            newisa.extra_rc = borrowed - 1;  // redo the original decrement too
-            bool stored = StoreReleaseExclusive(&isa.bits, 
-                                                oldisa.bits, newisa.bits);
-            if (!stored) {
+            bool didTransitionToDeallocating = false;
+            newisa.extra_rc = borrow.borrowed - 1;  // redo the original decrement too
+            newisa.has_sidetable_rc = !emptySideTable;
+
+            bool stored = StoreReleaseExclusive(&isa.bits, &oldisa.bits, newisa.bits);
+
+            if (!stored && oldisa.nonpointer) {
                 // Inline update failed. 
                 // Try it again right now. This prevents livelock on LL/SC 
                 // architectures where the side table access itself may have 
                 // dropped the reservation.
-                isa_t oldisa2 = LoadExclusive(&isa.bits);
-                isa_t newisa2 = oldisa2;
-                if (newisa2.nonpointer) {
-                    uintptr_t overflow;
-                    newisa2.bits = 
-                        addc(newisa2.bits, RC_ONE * (borrowed-1), 0, &overflow);
-                    if (!overflow) {
-                        stored = StoreReleaseExclusive(&isa.bits, oldisa2.bits, 
-                                                       newisa2.bits);
+                uintptr_t overflow;
+                newisa.bits =
+                    addc(oldisa.bits, RC_ONE * (borrow.borrowed-1), 0, &overflow);
+                newisa.has_sidetable_rc = !emptySideTable;
+                if (!overflow) {
+                    stored = StoreReleaseExclusive(&isa.bits, &oldisa.bits, newisa.bits);
+                    if (stored) {
+                        didTransitionToDeallocating = newisa.isDeallocating();
                     }
                 }
             }
@@ -668,32 +866,31 @@ objc_object::rootRelease(bool performDealloc, bool handleUnderflow)
             if (!stored) {
                 // Inline update failed.
                 // Put the retains back in the side table.
-                sidetable_addExtraRC_nolock(borrowed);
+                ClearExclusive(&isa.bits);
+                sidetable_addExtraRC_nolock(borrow.borrowed);
+                oldisa = LoadExclusive(&isa.bits);
                 goto retry;
             }
 
             // Decrement successful after borrowing from side table.
-            // This decrement cannot be the deallocating decrement - the side 
-            // table lock and has_sidetable_rc bit ensure that if everyone 
-            // else tried to -release while we worked, the last one would block.
-            sidetable_unlock();
-            return false;
+            if (emptySideTable)
+                sidetable_clearExtraRC_nolock();
+
+            if (!didTransitionToDeallocating) {
+                if (slowpath(sideTableLocked)) sidetable_unlock();
+                return false;
+            }
         }
         else {
             // Side table is empty after all. Fall-through to the dealloc path.
         }
     }
 
+deallocate:
     // Really deallocate.
 
-    if (slowpath(newisa.deallocating)) {
-        ClearExclusive(&isa.bits);
-        if (sideTableLocked) sidetable_unlock();
-        return overrelease_error();
-        // does not actually return
-    }
-    newisa.deallocating = true;
-    if (!StoreExclusive(&isa.bits, oldisa.bits, newisa.bits)) goto retry;
+    ASSERT(newisa.isDeallocating());
+    ASSERT(isa.isDeallocating());
 
     if (slowpath(sideTableLocked)) sidetable_unlock();
 
@@ -736,10 +933,9 @@ objc_object::rootRetainCount()
     if (isTaggedPointer()) return (uintptr_t)this;
 
     sidetable_lock();
-    isa_t bits = LoadExclusive(&isa.bits);
-    ClearExclusive(&isa.bits);
+    isa_t bits = __c11_atomic_load((_Atomic uintptr_t *)&isa.bits, __ATOMIC_RELAXED);
     if (bits.nonpointer) {
-        uintptr_t rc = 1 + bits.extra_rc;
+        uintptr_t rc = bits.extra_rc;
         if (bits.has_sidetable_rc) {
             rc += sidetable_getExtraRC_nolock();
         }
@@ -756,12 +952,29 @@ objc_object::rootRetainCount()
 #else
 // not SUPPORT_NONPOINTER_ISA
 
+inline void
+isa_t::setClass(Class cls, objc_object *obj)
+{
+    this->cls = cls;
+}
+
+inline Class
+isa_t::getClass(bool authenticated __unused)
+{
+    return cls;
+}
+
+inline Class
+isa_t::getDecodedClass(bool authenticated)
+{
+    return getClass(authenticated);
+}
 
 inline Class 
-objc_object::ISA() 
+objc_object::ISA(bool authenticated __unused)
 {
     ASSERT(!isTaggedPointer()); 
-    return isa.cls;
+    return isa.getClass(/*authenticated*/false);
 }
 
 inline Class
@@ -781,7 +994,7 @@ inline void
 objc_object::initIsa(Class cls)
 {
     ASSERT(!isTaggedPointer()); 
-    isa = (uintptr_t)cls; 
+    isa.setClass(cls, this);
 }
 
 
@@ -822,18 +1035,17 @@ objc_object::changeIsa(Class cls)
     //        cls->isInitializing()  ||  cls->isInitialized());
 
     ASSERT(!isTaggedPointer()); 
-    
-    isa_t oldisa, newisa;
-    newisa.cls = cls;
-    do {
-        oldisa = LoadExclusive(&isa.bits);
-    } while (!StoreExclusive(&isa.bits, oldisa.bits, newisa.bits));
-    
-    if (oldisa.cls  &&  oldisa.cls->instancesHaveAssociatedObjects()) {
+
+    isa_t newisa, oldisa;
+    newisa.setClass(cls, this);
+    oldisa.bits = __c11_atomic_exchange((_Atomic uintptr_t *)&isa.bits, newisa.bits, __ATOMIC_RELAXED);
+
+    Class oldcls = oldisa.getDecodedClass(/*authenticated*/false);
+    if (oldcls  &&  oldcls->instancesHaveAssociatedObjects()) {
         cls->setInstancesHaveAssociatedObjects();
     }
-    
-    return oldisa.cls;
+
+    return oldcls;
 }
 
 
@@ -873,7 +1085,7 @@ inline bool
 objc_object::hasCxxDtor()
 {
     ASSERT(!isTaggedPointer());
-    return isa.cls->hasCxxDtor();
+    return isa.getClass(/*authenticated*/false)->hasCxxDtor();
 }
 
 
@@ -949,14 +1161,14 @@ inline bool
 objc_object::rootRelease()
 {
     if (isTaggedPointer()) return false;
-    return sidetable_release(true);
+    return sidetable_release();
 }
 
 inline bool 
 objc_object::rootReleaseShouldDealloc()
 {
     if (isTaggedPointer()) return false;
-    return sidetable_release(false);
+    return sidetable_release(/*locked*/false, /*performDealloc*/false);
 }
 
 

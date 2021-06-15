@@ -1795,9 +1795,5 @@ void _class_printMethodCacheStatistics(void)
 
 #endif
 
-void cache_init()
-{
-}
-
 // !__OBJC2__
 #endif

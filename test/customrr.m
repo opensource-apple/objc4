@@ -191,38 +191,31 @@ int main(int argc __unused, char **argv)
     // Don't use runtime functions to do this - 
     // we want the runtime to think that these are NSObject's real code
     {
-#if __has_feature(ptrauth_calls)
-        typedef IMP __ptrauth_objc_method_list_imp MethodListIMP;
-#else
-        typedef IMP MethodListIMP;
-#endif
-
         Class cls = [NSObject class];
         IMP imp = class_getMethodImplementation(cls, @selector(retain));
-        MethodListIMP *m = (MethodListIMP *)
-            class_getInstanceMethod(cls, @selector(retain));
-        testassert(m[2] == imp);  // verify Method struct is as we expect
+        Method m = class_getInstanceMethod(cls, @selector(retain));
+        testassert(method_getImplementation(m) == imp);  // verify Method struct is as we expect
 
-        m = (MethodListIMP *)class_getInstanceMethod(cls, @selector(retain));
-        m[2] = (IMP)HackRetain;
-        m = (MethodListIMP *)class_getInstanceMethod(cls, @selector(release));
-        m[2] = (IMP)HackRelease;
-        m = (MethodListIMP *)class_getInstanceMethod(cls, @selector(autorelease));
-        m[2] = (IMP)HackAutorelease;
-        m = (MethodListIMP *)class_getInstanceMethod(cls, @selector(retainCount));
-        m[2] = (IMP)HackRetainCount;
-        m = (MethodListIMP *)class_getClassMethod(cls, @selector(retain));
-        m[2] = (IMP)HackPlusRetain;
-        m = (MethodListIMP *)class_getClassMethod(cls, @selector(release));
-        m[2] = (IMP)HackPlusRelease;
-        m = (MethodListIMP *)class_getClassMethod(cls, @selector(autorelease));
-        m[2] = (IMP)HackPlusAutorelease;
-        m = (MethodListIMP *)class_getClassMethod(cls, @selector(retainCount));
-        m[2] = (IMP)HackPlusRetainCount;
-        m = (MethodListIMP *)class_getClassMethod(cls, @selector(alloc));
-        m[2] = (IMP)HackAlloc;
-        m = (MethodListIMP *)class_getClassMethod(cls, @selector(allocWithZone:));
-        m[2] = (IMP)HackAllocWithZone;
+        m = class_getInstanceMethod(cls, @selector(retain));
+        _method_setImplementationRawUnsafe(m, (IMP)HackRetain);
+        m = class_getInstanceMethod(cls, @selector(release));
+        _method_setImplementationRawUnsafe(m, (IMP)HackRelease);
+        m = class_getInstanceMethod(cls, @selector(autorelease));
+        _method_setImplementationRawUnsafe(m, (IMP)HackAutorelease);
+        m = class_getInstanceMethod(cls, @selector(retainCount));
+        _method_setImplementationRawUnsafe(m, (IMP)HackRetainCount);
+        m = class_getClassMethod(cls, @selector(retain));
+        _method_setImplementationRawUnsafe(m, (IMP)HackPlusRetain);
+        m = class_getClassMethod(cls, @selector(release));
+        _method_setImplementationRawUnsafe(m, (IMP)HackPlusRelease);
+        m = class_getClassMethod(cls, @selector(autorelease));
+        _method_setImplementationRawUnsafe(m, (IMP)HackPlusAutorelease);
+        m = class_getClassMethod(cls, @selector(retainCount));
+        _method_setImplementationRawUnsafe(m, (IMP)HackPlusRetainCount);
+        m = class_getClassMethod(cls, @selector(alloc));
+        _method_setImplementationRawUnsafe(m, (IMP)HackAlloc);
+        m = class_getClassMethod(cls, @selector(allocWithZone:));
+        _method_setImplementationRawUnsafe(m, (IMP)HackAllocWithZone);
 
         _objc_flush_caches(cls);
 

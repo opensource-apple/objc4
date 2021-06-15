@@ -26,15 +26,6 @@
 
 #include <TargetConditionals.h>
 
-// Define __OBJC2__ for the benefit of our asm files.
-#ifndef __OBJC2__
-#   if TARGET_OS_OSX  &&  !TARGET_OS_IOSMAC  &&  __i386__
-        // old ABI
-#   else
-#       define __OBJC2__ 1
-#   endif
-#endif
-
 // Avoid the !NDEBUG double negative.
 #if !NDEBUG
 #   define DEBUG 1
@@ -51,7 +42,7 @@
 #endif
 
 // Define SUPPORT_ZONES=1 to enable malloc zone support in NXHashTable.
-#if !(TARGET_OS_OSX || TARGET_OS_IOSMAC)
+#if !(TARGET_OS_OSX || TARGET_OS_MACCATALYST)
 #   define SUPPORT_ZONES 0
 #else
 #   define SUPPORT_ZONES 1
@@ -73,7 +64,7 @@
 
 // Define SUPPORT_TAGGED_POINTERS=1 to enable tagged pointer objects
 // Be sure to edit tagged pointer SPI in objc-internal.h as well.
-#if !(__OBJC2__  &&  __LP64__)
+#if !__LP64__
 #   define SUPPORT_TAGGED_POINTERS 0
 #else
 #   define SUPPORT_TAGGED_POINTERS 1
@@ -82,7 +73,7 @@
 // Define SUPPORT_MSB_TAGGED_POINTERS to use the MSB 
 // as the tagged pointer marker instead of the LSB.
 // Be sure to edit tagged pointer SPI in objc-internal.h as well.
-#if !SUPPORT_TAGGED_POINTERS  ||  (TARGET_OS_OSX || TARGET_OS_IOSMAC)
+#if !SUPPORT_TAGGED_POINTERS  ||  ((TARGET_OS_OSX || TARGET_OS_MACCATALYST) && __x86_64__)
 #   define SUPPORT_MSB_TAGGED_POINTERS 0
 #else
 #   define SUPPORT_MSB_TAGGED_POINTERS 1
@@ -101,7 +92,7 @@
 // Define SUPPORT_PACKED_ISA=1 on platforms that store the class in the isa 
 // field as a maskable pointer with other data around it.
 #if (!__LP64__  ||  TARGET_OS_WIN32  ||  \
-     (TARGET_OS_SIMULATOR && !TARGET_OS_IOSMAC))
+     (TARGET_OS_SIMULATOR && !TARGET_OS_MACCATALYST && !__arm64__))
 #   define SUPPORT_PACKED_ISA 0
 #else
 #   define SUPPORT_PACKED_ISA 1
@@ -126,7 +117,7 @@
 
 // Define SUPPORT_ZEROCOST_EXCEPTIONS to use "zero-cost" exceptions for OBJC2.
 // Be sure to edit objc-exception.h as well (objc_add/removeExceptionHandler)
-#if !__OBJC2__  ||  (defined(__arm__)  &&  __USING_SJLJ_EXCEPTIONS__)
+#if defined(__arm__)  &&  __USING_SJLJ_EXCEPTIONS__
 #   define SUPPORT_ZEROCOST_EXCEPTIONS 0
 #else
 #   define SUPPORT_ZEROCOST_EXCEPTIONS 1
@@ -162,6 +153,13 @@
 #   define SUPPORT_MESSAGE_LOGGING 1
 #endif
 
+// Define SUPPORT_AUTORELEASEPOOL_DEDDUP_PTRS to combine consecutive pointers to the same object in autorelease pools
+#if !__LP64__
+#   define SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS 0
+#else
+#   define SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS 1
+#endif
+
 // Define HAVE_TASK_RESTARTABLE_RANGES to enable usage of
 // task_restartable_ranges_synchronize()
 #if TARGET_OS_SIMULATOR || defined(__i386__) || defined(__arm__) || !TARGET_OS_MAC
@@ -178,16 +176,12 @@
 // because objc-class.h is public and objc-config.h is not.
 //#define OBJC_INSTRUMENTED
 
-// In __OBJC2__, the runtimeLock is a mutex always held
-// hence the cache lock is redundant and can be elided.
+// The runtimeLock is a mutex always held hence the cache lock is
+// redundant and can be elided.
 //
 // If the runtime lock ever becomes a rwlock again,
 // the cache lock would need to be used again
-#if __OBJC2__
 #define CONFIG_USE_CACHE_LOCK 0
-#else
-#define CONFIG_USE_CACHE_LOCK 1
-#endif
 
 // Determine how the method cache stores IMPs.
 #define CACHE_IMP_ENCODING_NONE 1 // Method cache contains raw IMP.
@@ -208,13 +202,75 @@
 #define CACHE_MASK_STORAGE_OUTLINED 1
 #define CACHE_MASK_STORAGE_HIGH_16 2
 #define CACHE_MASK_STORAGE_LOW_4 3
+#define CACHE_MASK_STORAGE_HIGH_16_BIG_ADDRS 4
 
 #if defined(__arm64__) && __LP64__
+#if TARGET_OS_OSX || TARGET_OS_SIMULATOR
+#define CACHE_MASK_STORAGE CACHE_MASK_STORAGE_HIGH_16_BIG_ADDRS
+#else
 #define CACHE_MASK_STORAGE CACHE_MASK_STORAGE_HIGH_16
+#endif
 #elif defined(__arm64__) && !__LP64__
 #define CACHE_MASK_STORAGE CACHE_MASK_STORAGE_LOW_4
 #else
 #define CACHE_MASK_STORAGE CACHE_MASK_STORAGE_OUTLINED
 #endif
+
+// Constants used for signing/authing isas. This doesn't quite belong
+// here, but the asm files can't import other headers.
+#define ISA_SIGNING_DISCRIMINATOR 0x6AE1
+#define ISA_SIGNING_DISCRIMINATOR_CLASS_SUPERCLASS 0xB5AB
+
+#define ISA_SIGNING_KEY ptrauth_key_process_independent_data
+
+// ISA signing authentication modes. Set ISA_SIGNING_AUTH_MODE to one
+// of these to choose how ISAs are authenticated.
+#define ISA_SIGNING_STRIP 1 // Strip the signature whenever reading an ISA.
+#define ISA_SIGNING_AUTH  2 // Authenticate the signature on all ISAs.
+
+
+// ISA signing modes. Set ISA_SIGNING_SIGN_MODE to one of these to
+// choose how ISAs are signed.
+#define ISA_SIGNING_SIGN_NONE       1 // Sign no ISAs.
+#define ISA_SIGNING_SIGN_ONLY_SWIFT 2 // Only sign ISAs of Swift objects.
+#define ISA_SIGNING_SIGN_ALL        3 // Sign all ISAs.
+
+#if __has_feature(ptrauth_objc_isa_strips) || __has_feature(ptrauth_objc_isa_signs) || __has_feature(ptrauth_objc_isa_authenticates)
+#   if __has_feature(ptrauth_objc_isa_authenticates)
+#       define ISA_SIGNING_AUTH_MODE ISA_SIGNING_AUTH
+#   else
+#       define ISA_SIGNING_AUTH_MODE ISA_SIGNING_STRIP
+#   endif
+#   if __has_feature(ptrauth_objc_isa_signs)
+#       define ISA_SIGNING_SIGN_MODE ISA_SIGNING_SIGN_ALL
+#   else
+#       define ISA_SIGNING_SIGN_MODE ISA_SIGNING_SIGN_NONE
+#   endif
+#else
+#   if __has_feature(ptrauth_objc_isa)
+#       define ISA_SIGNING_AUTH_MODE ISA_SIGNING_AUTH
+#       define ISA_SIGNING_SIGN_MODE ISA_SIGNING_SIGN_ALL
+#   else
+#       define ISA_SIGNING_AUTH_MODE ISA_SIGNING_STRIP
+#       define ISA_SIGNING_SIGN_MODE ISA_SIGNING_SIGN_NONE
+#   endif
+#endif
+
+// When set, an unsigned superclass pointer is treated as Nil, which
+// will treat the class as if its superclass was weakly linked and
+// not loaded, and cause uses of the class to resolve to Nil.
+#define SUPERCLASS_SIGNING_TREAT_UNSIGNED_AS_NIL 0
+
+#if defined(__arm64__) && TARGET_OS_IOS && !TARGET_OS_SIMULATOR && !TARGET_OS_MACCATALYST
+#define CONFIG_USE_PREOPT_CACHES 1
+#else
+#define CONFIG_USE_PREOPT_CACHES 0
+#endif
+
+// When set to 1, small methods in the shared cache have a direct
+// offset to a selector. When set to 0, small methods in the shared
+// cache have the same format as other small methods, with an offset
+// to a selref.
+#define CONFIG_SHARED_CACHE_RELATIVE_DIRECT_SELECTORS 1
 
 #endif

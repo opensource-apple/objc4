@@ -61,5 +61,10 @@ int main()
         exit(1);
     }
     wait4(pid, NULL, 0, NULL);
-    printf("objs=%p\n", objs);
+
+    // Clean up. Otherwise leaks can end up seeing this as a leak, oddly enough.
+    for (int i = 0; i < classCount; i++) {
+       [objs[i] release];
+    }
+    free(objs);
 }

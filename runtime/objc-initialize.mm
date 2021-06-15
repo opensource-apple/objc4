@@ -396,10 +396,10 @@ static bool classHasTrivialInitialize(Class cls)
 {
     if (cls->isRootClass() || cls->isRootMetaclass()) return true;
 
-    Class rootCls = cls->ISA()->ISA()->superclass;
+    Class rootCls = cls->ISA()->ISA()->getSuperclass();
     
-    IMP rootImp = lookUpImpOrNil(rootCls, @selector(initialize), rootCls->ISA());
-    IMP imp = lookUpImpOrNil(cls, @selector(initialize), cls->ISA());
+    IMP rootImp = lookUpImpOrNilTryCache(rootCls, @selector(initialize), rootCls->ISA());
+    IMP imp = lookUpImpOrNilTryCache(cls, @selector(initialize), cls->ISA());
     return (imp == nil  ||  imp == (IMP)&objc_noop_imp  ||  imp == rootImp);
 }
 
@@ -500,7 +500,7 @@ void initializeNonMetaClass(Class cls)
 
     // Make sure super is done initializing BEFORE beginning to initialize cls.
     // See note about deadlock above.
-    supercls = cls->superclass;
+    supercls = cls->getSuperclass();
     if (supercls  &&  !supercls->isInitialized()) {
         initializeNonMetaClass(supercls);
     }

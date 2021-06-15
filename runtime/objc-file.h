@@ -54,6 +54,10 @@ struct UnsignedInitializer {
 private:
     uintptr_t storage;
 public:
+    UnsignedInitializer(uint32_t offset) {
+        storage = (uintptr_t)&_mh_dylib_header + offset;
+    }
+
     void operator () () const {
         using Initializer = void(*)();
         Initializer init =
@@ -70,6 +74,7 @@ extern category_t * const *_getObjc2CategoryList(const headerType *mhdr, size_t 
 extern category_t * const *_getObjc2CategoryList2(const headerType *mhdr, size_t *count);
 extern category_t * const *_getObjc2NonlazyCategoryList(const headerType *mhdr, size_t *count);
 extern UnsignedInitializer *getLibobjcInitializers(const headerType *mhdr, size_t *count);
+extern uint32_t *getLibobjcInitializerOffsets(const headerType *hi, size_t *count);
 
 static inline void
 foreach_data_segment(const headerType *mhdr,
@@ -89,11 +94,12 @@ foreach_data_segment(const headerType *mhdr,
         seg = (const segmentType *)((char *)seg + seg->cmdsize);
     }
 
-    // enumerate __DATA* segments
+    // enumerate __DATA* and __AUTH* segments
     seg = (const segmentType *) (mhdr + 1);
     for (unsigned long i = 0; i < mhdr->ncmds; i++) {
         if (seg->cmd == SEGMENT_CMD  &&
-            segnameStartsWith(seg->segname, "__DATA"))
+            (segnameStartsWith(seg->segname, "__DATA") ||
+             segnameStartsWith(seg->segname, "__AUTH")))
         {
             code(seg, slide);
         }

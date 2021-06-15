@@ -389,38 +389,43 @@ weak_unregister_no_lock(weak_table_t *weak_table, id referent_id,
  */
 id 
 weak_register_no_lock(weak_table_t *weak_table, id referent_id, 
-                      id *referrer_id, bool crashIfDeallocating)
+                      id *referrer_id, WeakRegisterDeallocatingOptions deallocatingOptions)
 {
     objc_object *referent = (objc_object *)referent_id;
     objc_object **referrer = (objc_object **)referrer_id;
 
-    if (!referent  ||  referent->isTaggedPointer()) return referent_id;
+    if (referent->isTaggedPointerOrNil()) return referent_id;
 
     // ensure that the referenced object is viable
-    bool deallocating;
-    if (!referent->ISA()->hasCustomRR()) {
-        deallocating = referent->rootIsDeallocating();
-    }
-    else {
-        BOOL (*allowsWeakReference)(objc_object *, SEL) = 
-            (BOOL(*)(objc_object *, SEL))
-            object_getMethodImplementation((id)referent, 
-                                           @selector(allowsWeakReference));
-        if ((IMP)allowsWeakReference == _objc_msgForward) {
-            return nil;
+    if (deallocatingOptions == ReturnNilIfDeallocating ||
+        deallocatingOptions == CrashIfDeallocating) {
+        bool deallocating;
+        if (!referent->ISA()->hasCustomRR()) {
+            deallocating = referent->rootIsDeallocating();
         }
-        deallocating =
+        else {
+            // Use lookUpImpOrForward so we can avoid the assert in
+            // class_getInstanceMethod, since we intentionally make this
+            // callout with the lock held.
+            auto allowsWeakReference = (BOOL(*)(objc_object *, SEL))
+            lookUpImpOrForwardTryCache((id)referent, @selector(allowsWeakReference),
+                                       referent->getIsa());
+            if ((IMP)allowsWeakReference == _objc_msgForward) {
+                return nil;
+            }
+            deallocating =
             ! (*allowsWeakReference)(referent, @selector(allowsWeakReference));
-    }
+        }
 
-    if (deallocating) {
-        if (crashIfDeallocating) {
-            _objc_fatal("Cannot form weak reference to instance (%p) of "
-                        "class %s. It is possible that this object was "
-                        "over-released, or is in the process of deallocation.",
-                        (void*)referent, object_getClassName((id)referent));
-        } else {
-            return nil;
+        if (deallocating) {
+            if (deallocatingOptions == CrashIfDeallocating) {
+                _objc_fatal("Cannot form weak reference to instance (%p) of "
+                            "class %s. It is possible that this object was "
+                            "over-released, or is in the process of deallocation.",
+                            (void*)referent, object_getClassName((id)referent));
+            } else {
+                return nil;
+            }
         }
     }
 

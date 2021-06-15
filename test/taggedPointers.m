@@ -295,6 +295,22 @@ void testGenericTaggedPointer(objc_tag_index_t tag, Class cls)
     RELEASE_VAR(w);
 }
 
+#if OBJC_SPLIT_TAGGED_POINTERS
+void testConstantTaggedPointerRoundTrip(void *ptr)
+{
+    uintptr_t tagged = (uintptr_t)ptr | objc_debug_constant_cfstring_tag_bits;
+    void *untagged = _objc_getTaggedPointerRawPointerValue((void *)tagged);
+    testassert(ptr == untagged);
+}
+
+void testConstantTaggedPointers(void)
+{
+    testConstantTaggedPointerRoundTrip(0);
+    testConstantTaggedPointerRoundTrip((void *)sizeof(void *));
+    testConstantTaggedPointerRoundTrip((void *)(MACH_VM_MAX_ADDRESS - sizeof(void *)));
+}
+#endif
+
 int main()
 {
     testassert(objc_debug_taggedpointer_mask != 0);
@@ -336,6 +352,10 @@ int main()
                                          objc_getClass("TaggedNSObjectSubclass"));
         testGenericTaggedPointer(OBJC_TAG_NSManagedObjectID, 
                                  objc_getClass("TaggedNSObjectSubclass"));
+
+#if OBJC_SPLIT_TAGGED_POINTERS
+        testConstantTaggedPointers();
+#endif
     } POP_POOL;
 
     succeed(__FILE__);

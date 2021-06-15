@@ -15,7 +15,8 @@
 #include <pthread.h>
 #if __cplusplus
 #include <atomic>
-using namespace std;
+using std::atomic_int;
+using std::memory_order_relaxed;
 #else
 #include <stdatomic.h>
 #endif
@@ -82,6 +83,40 @@ static inline void fail(const char *msg, ...)
     ((void) (((cond) != 0) ? (void)0 : __testassert(#cond, __FILE__, __LINE__)))
 #define __testassert(cond, file, line) \
     (fail("failed assertion '%s' at %s:%u", cond, __FILE__, __LINE__))
+
+static inline char *hexstring(uint8_t *data, size_t size)
+{
+    char *str;
+    switch (size) {
+    case sizeof(unsigned long long):
+        asprintf(&str, "%016llx", *(unsigned long long *)data);
+        break;
+    case sizeof(unsigned int):
+        asprintf(&str, "%08x", *(unsigned int*)data);
+        break;
+    case sizeof(uint16_t):
+        asprintf(&str, "%04x", *(uint16_t *)data);
+        break;
+    default:
+        str = (char *)malloc(size * 2 + 1);
+        for (size_t i = 0; i < size; i++) {
+            sprintf(str + i, "%02x", data[i]);
+        }
+    }
+    return str;
+}
+
+static inline void failnotequal(uint8_t *lhs, size_t lhsSize, uint8_t *rhs, size_t rhsSize, const char *lhsStr, const char *rhsStr, const char *file, unsigned line)
+{
+    fprintf(stderr, "BAD: failed assertion '%s != %s' (0x%s != 0x%s) at %s:%u\n", lhsStr, rhsStr, hexstring(lhs, lhsSize), hexstring(rhs, rhsSize), file, line);
+    exit(1);
+}
+
+#define testassertequal(lhs, rhs) do {\
+    __typeof__(lhs) __lhs = lhs; \
+    __typeof__(rhs) __rhs = rhs; \
+    if ((lhs) != (rhs)) failnotequal((uint8_t *)&__lhs, sizeof(__lhs), (uint8_t *)&__rhs, sizeof(__rhs), #lhs, #rhs, __FILE__, __LINE__); \
+} while(0)
 
 /* time-sensitive assertion, disabled under valgrind */
 #define timecheck(name, time, fast, slow)                                    \
@@ -208,17 +243,20 @@ static inline void testonthread(__unsafe_unretained testblock_t code)
    `#define TEST_CALLS_OPERATOR_NEW` before including test.h.
  */
 #if __cplusplus  &&  !defined(TEST_CALLS_OPERATOR_NEW)
+#if !defined(TEST_OVERRIDES_NEW)
+#define TEST_OVERRIDES_NEW 1
+#endif
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winline-new-delete"
 #import <new>
-inline void* operator new(std::size_t) throw (std::bad_alloc) { fail("called global operator new"); }
-inline void* operator new[](std::size_t) throw (std::bad_alloc) { fail("called global operator new[]"); }
-inline void* operator new(std::size_t, const std::nothrow_t&) throw() { fail("called global operator new(nothrow)"); }
-inline void* operator new[](std::size_t, const std::nothrow_t&) throw() { fail("called global operator new[](nothrow)"); }
-inline void operator delete(void*) throw() { fail("called global operator delete"); }
-inline void operator delete[](void*) throw() { fail("called global operator delete[]"); }
-inline void operator delete(void*, const std::nothrow_t&) throw() { fail("called global operator delete(nothrow)"); }
-inline void operator delete[](void*, const std::nothrow_t&) throw() { fail("called global operator delete[](nothrow)"); }
+inline void* operator new(std::size_t) { fail("called global operator new"); }
+inline void* operator new[](std::size_t) { fail("called global operator new[]"); }
+inline void* operator new(std::size_t, const std::nothrow_t&) noexcept(true) { fail("called global operator new(nothrow)"); }
+inline void* operator new[](std::size_t, const std::nothrow_t&) noexcept(true) { fail("called global operator new[](nothrow)"); }
+inline void operator delete(void*) noexcept(true) { fail("called global operator delete"); }
+inline void operator delete[](void*) noexcept(true) { fail("called global operator delete[]"); }
+inline void operator delete(void*, const std::nothrow_t&) noexcept(true) { fail("called global operator delete(nothrow)"); }
+inline void operator delete[](void*, const std::nothrow_t&) noexcept(true) { fail("called global operator delete[](nothrow)"); }
 #pragma clang diagnostic pop
 #endif
 
@@ -301,7 +339,7 @@ static inline void leak_mark(void)
             leak_dump_heap("HEAP AT leak_check");                       \
         }                                                               \
         inuse = leak_inuse();                                           \
-        if (inuse > _leak_start + n) {                                  \
+        if (inuse > _leak_start + (n)) {                                  \
             fprintf(stderr, "BAD: %zu bytes leaked at %s:%u "           \
                     "(try LEAK_HEAP and HANG_ON_LEAK to debug)\n",      \
                  inuse - _leak_start, __FILE__, __LINE__);              \

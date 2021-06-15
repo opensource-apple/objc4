@@ -44,6 +44,11 @@
 #include <mach-o/loader.h>
 #include <dispatch/dispatch.h>
 
+// Include NSObject.h only if we're ObjC. Module imports get unhappy
+// otherwise.
+#if __OBJC__
+#include <objc/NSObject.h>
+#endif
 
 // Termination reasons in the OS_REASON_OBJC namespace.
 #define OBJC_EXIT_REASON_UNSPECIFIED 1
@@ -54,6 +59,18 @@
 // The runtime's class structure will never grow beyond this.
 #define OBJC_MAX_CLASS_SIZE (32*sizeof(void*))
 
+// Private objc_setAssociatedObject policy modifier. When an object is
+// destroyed, associated objects attached to that object that are marked with
+// this will be released after all associated objects not so marked.
+//
+// In addition, such associations are not removed when calling
+// objc_removeAssociatedObjects.
+//
+// NOTE: This should be used sparingly. Performance will be poor when a single
+// object has more than a few (deliberately vague) associated objects marked
+// with this flag. If you're not sure if you should use this, you should not use
+// this!
+#define _OBJC_ASSOCIATION_SYSTEM_OBJECT (1 << 16)
 
 __BEGIN_DECLS
 
@@ -160,7 +177,13 @@ OBJC_EXPORT
 objc_imp_cache_entry *_Nullable
 class_copyImpCache(Class _Nonnull cls, int * _Nullable outCount)
 	OBJC_AVAILABLE(10.15, 13.0, 13.0, 6.0, 5.0);
+
+OBJC_EXPORT
+unsigned long
+sel_hash(SEL _Nullable sel)
+    OBJC_AVAILABLE(10.16, 14.0, 14.0, 7.0, 6.0);
 #endif
+
 
 // Plainly-implemented GC barriers. Rosetta used to use these.
 OBJC_EXPORT id _Nullable
@@ -199,7 +222,7 @@ OBJC_EXPORT void
 _objc_setClassLoader(BOOL (* _Nonnull newClassLoader)(const char * _Nonnull))
     OBJC2_UNAVAILABLE;
 
-#if !(TARGET_OS_OSX && !TARGET_OS_IOSMAC && __i386__)
+#if !(TARGET_OS_OSX && !TARGET_OS_MACCATALYST && __i386__)
 // Add a class copy fixup handler. The name is a misnomer, as
 // multiple calls will install multiple handlers. Older versions
 // of the Swift runtime call it by name, and it's only used by Swift
@@ -239,6 +262,21 @@ OBJC_EXPORT const char * _Nonnull * _Nullable
 objc_copyClassNamesForImageHeader(const struct mach_header * _Nonnull mh,
                                   unsigned int * _Nullable outCount)
     OBJC_AVAILABLE(10.14, 12.0, 12.0, 5.0, 3.0);
+
+/**
+ * Returns the all the classes within a library.
+ *
+ * @param image The mach header for library or framework you are inquiring about.
+ * @param outCount The number of class names returned.
+ *
+ * @return An array of Class objects
+ */
+
+OBJC_EXPORT Class _Nonnull * _Nullable
+objc_copyClassesForImage(const char * _Nonnull image,
+                         unsigned int * _Nullable outCount)
+    OBJC_AVAILABLE(10.16, 14.0, 14.0, 7.0, 4.0);
+
 
 // Tagged pointer objects.
 
@@ -290,10 +328,20 @@ enum
     OBJC_TAG_NSMethodSignature = 20,
     OBJC_TAG_UTTypeRecord      = 21,
 
+    // When using the split tagged pointer representation
+    // (OBJC_SPLIT_TAGGED_POINTERS), this is the first tag where
+    // the tag and payload are unobfuscated. All tags from here to
+    // OBJC_TAG_Last52BitPayload are unobfuscated. The shared cache
+    // builder is able to construct these as long as the low bit is
+    // not set (i.e. even-numbered tags).
+    OBJC_TAG_FirstUnobfuscatedSplitTag = 136, // 128 + 8, first ext tag with high bit set
+
+    OBJC_TAG_Constant_CFString = 136,
+
     OBJC_TAG_First60BitPayload = 0, 
     OBJC_TAG_Last60BitPayload  = 6, 
     OBJC_TAG_First52BitPayload = 8, 
-    OBJC_TAG_Last52BitPayload  = 263, 
+    OBJC_TAG_Last52BitPayload  = 263,
 
     OBJC_TAG_RESERVED_264      = 264
 };
@@ -352,7 +400,16 @@ _objc_getTaggedPointerSignedValue(const void * _Nullable ptr);
 
 // Don't use the values below. Use the declarations above.
 
-#if (TARGET_OS_OSX || TARGET_OS_IOSMAC) && __x86_64__
+#if __arm64__
+// ARM64 uses a new tagged pointer scheme where normal tags are in
+// the low bits, extended tags are in the high bits, and half of the
+// extended tag space is reserved for unobfuscated payloads.
+#   define OBJC_SPLIT_TAGGED_POINTERS 1
+#else
+#   define OBJC_SPLIT_TAGGED_POINTERS 0
+#endif
+
+#if (TARGET_OS_OSX || TARGET_OS_MACCATALYST) && __x86_64__
     // 64-bit Mac - tag bit is LSB
 #   define OBJC_MSB_TAGGED_POINTERS 0
 #else
@@ -360,17 +417,37 @@ _objc_getTaggedPointerSignedValue(const void * _Nullable ptr);
 #   define OBJC_MSB_TAGGED_POINTERS 1
 #endif
 
-#define _OBJC_TAG_INDEX_MASK 0x7
+#define _OBJC_TAG_INDEX_MASK 0x7UL
+
+#if OBJC_SPLIT_TAGGED_POINTERS
+#define _OBJC_TAG_SLOT_COUNT 8
+#define _OBJC_TAG_SLOT_MASK 0x7UL
+#else
 // array slot includes the tag bit itself
 #define _OBJC_TAG_SLOT_COUNT 16
-#define _OBJC_TAG_SLOT_MASK 0xf
+#define _OBJC_TAG_SLOT_MASK 0xfUL
+#endif
 
 #define _OBJC_TAG_EXT_INDEX_MASK 0xff
 // array slot has no extra bits
 #define _OBJC_TAG_EXT_SLOT_COUNT 256
 #define _OBJC_TAG_EXT_SLOT_MASK 0xff
 
-#if OBJC_MSB_TAGGED_POINTERS
+#if OBJC_SPLIT_TAGGED_POINTERS
+#   define _OBJC_TAG_MASK (1UL<<63)
+#   define _OBJC_TAG_INDEX_SHIFT 0
+#   define _OBJC_TAG_SLOT_SHIFT 0
+#   define _OBJC_TAG_PAYLOAD_LSHIFT 1
+#   define _OBJC_TAG_PAYLOAD_RSHIFT 4
+#   define _OBJC_TAG_EXT_MASK (_OBJC_TAG_MASK | 0x7UL)
+#   define _OBJC_TAG_NO_OBFUSCATION_MASK ((1UL<<62) | _OBJC_TAG_EXT_MASK)
+#   define _OBJC_TAG_CONSTANT_POINTER_MASK \
+        ~(_OBJC_TAG_EXT_MASK | ((uintptr_t)_OBJC_TAG_EXT_SLOT_MASK << _OBJC_TAG_EXT_SLOT_SHIFT))
+#   define _OBJC_TAG_EXT_INDEX_SHIFT 55
+#   define _OBJC_TAG_EXT_SLOT_SHIFT 55
+#   define _OBJC_TAG_EXT_PAYLOAD_LSHIFT 9
+#   define _OBJC_TAG_EXT_PAYLOAD_RSHIFT 12
+#elif OBJC_MSB_TAGGED_POINTERS
 #   define _OBJC_TAG_MASK (1UL<<63)
 #   define _OBJC_TAG_INDEX_SHIFT 60
 #   define _OBJC_TAG_SLOT_SHIFT 60
@@ -394,21 +471,64 @@ _objc_getTaggedPointerSignedValue(const void * _Nullable ptr);
 #   define _OBJC_TAG_EXT_PAYLOAD_RSHIFT 12
 #endif
 
+// Map of tags to obfuscated tags.
 extern uintptr_t objc_debug_taggedpointer_obfuscator;
+
+#if OBJC_SPLIT_TAGGED_POINTERS
+extern uint8_t objc_debug_tag60_permutations[8];
+
+static inline uintptr_t _objc_basicTagToObfuscatedTag(uintptr_t tag) {
+    return objc_debug_tag60_permutations[tag];
+}
+
+static inline uintptr_t _objc_obfuscatedTagToBasicTag(uintptr_t tag) {
+    for (unsigned i = 0; i < 7; i++)
+        if (objc_debug_tag60_permutations[i] == tag)
+            return i;
+    return 7;
+}
+#endif
 
 static inline void * _Nonnull
 _objc_encodeTaggedPointer(uintptr_t ptr)
 {
-    return (void *)(objc_debug_taggedpointer_obfuscator ^ ptr);
+    uintptr_t value = (objc_debug_taggedpointer_obfuscator ^ ptr);
+#if OBJC_SPLIT_TAGGED_POINTERS
+    if ((value & _OBJC_TAG_NO_OBFUSCATION_MASK) == _OBJC_TAG_NO_OBFUSCATION_MASK)
+        return (void *)ptr;
+    uintptr_t basicTag = (value >> _OBJC_TAG_INDEX_SHIFT) & _OBJC_TAG_INDEX_MASK;
+    uintptr_t permutedTag = _objc_basicTagToObfuscatedTag(basicTag);
+    value &= ~(_OBJC_TAG_INDEX_MASK << _OBJC_TAG_INDEX_SHIFT);
+    value |= permutedTag << _OBJC_TAG_INDEX_SHIFT;
+#endif
+    return (void *)value;
+}
+
+static inline uintptr_t
+_objc_decodeTaggedPointer_noPermute(const void * _Nullable ptr)
+{
+    uintptr_t value = (uintptr_t)ptr;
+#if OBJC_SPLIT_TAGGED_POINTERS
+    if ((value & _OBJC_TAG_NO_OBFUSCATION_MASK) == _OBJC_TAG_NO_OBFUSCATION_MASK)
+        return value;
+#endif
+    return value ^ objc_debug_taggedpointer_obfuscator;
 }
 
 static inline uintptr_t
 _objc_decodeTaggedPointer(const void * _Nullable ptr)
 {
-    return (uintptr_t)ptr ^ objc_debug_taggedpointer_obfuscator;
+    uintptr_t value = _objc_decodeTaggedPointer_noPermute(ptr);
+#if OBJC_SPLIT_TAGGED_POINTERS
+    uintptr_t basicTag = (value >> _OBJC_TAG_INDEX_SHIFT) & _OBJC_TAG_INDEX_MASK;
+
+    value &= ~(_OBJC_TAG_INDEX_MASK << _OBJC_TAG_INDEX_SHIFT);
+    value |= _objc_obfuscatedTagToBasicTag(basicTag) << _OBJC_TAG_INDEX_SHIFT;
+#endif
+    return value;
 }
 
-static inline bool 
+static inline bool
 _objc_taggedPointersEnabled(void)
 {
     extern uintptr_t objc_debug_taggedpointer_mask;
@@ -447,6 +567,15 @@ _objc_isTaggedPointer(const void * _Nullable ptr)
     return ((uintptr_t)ptr & _OBJC_TAG_MASK) == _OBJC_TAG_MASK;
 }
 
+static inline bool
+_objc_isTaggedPointerOrNil(const void * _Nullable ptr)
+{
+    // this function is here so that clang can turn this into
+    // a comparison with NULL when this is appropriate
+    // it turns out it's not able to in many cases without this
+    return !ptr || ((uintptr_t)ptr & _OBJC_TAG_MASK) == _OBJC_TAG_MASK;
+}
+
 static inline objc_tag_index_t 
 _objc_getTaggedPointerTag(const void * _Nullable ptr) 
 {
@@ -465,7 +594,7 @@ static inline uintptr_t
 _objc_getTaggedPointerValue(const void * _Nullable ptr) 
 {
     // ASSERT(_objc_isTaggedPointer(ptr));
-    uintptr_t value = _objc_decodeTaggedPointer(ptr);
+    uintptr_t value = _objc_decodeTaggedPointer_noPermute(ptr);
     uintptr_t basicTag = (value >> _OBJC_TAG_INDEX_SHIFT) & _OBJC_TAG_INDEX_MASK;
     if (basicTag == _OBJC_TAG_INDEX_MASK) {
         return (value << _OBJC_TAG_EXT_PAYLOAD_LSHIFT) >> _OBJC_TAG_EXT_PAYLOAD_RSHIFT;
@@ -478,7 +607,7 @@ static inline intptr_t
 _objc_getTaggedPointerSignedValue(const void * _Nullable ptr) 
 {
     // ASSERT(_objc_isTaggedPointer(ptr));
-    uintptr_t value = _objc_decodeTaggedPointer(ptr);
+    uintptr_t value = _objc_decodeTaggedPointer_noPermute(ptr);
     uintptr_t basicTag = (value >> _OBJC_TAG_INDEX_SHIFT) & _OBJC_TAG_INDEX_MASK;
     if (basicTag == _OBJC_TAG_INDEX_MASK) {
         return ((intptr_t)value << _OBJC_TAG_EXT_PAYLOAD_LSHIFT) >> _OBJC_TAG_EXT_PAYLOAD_RSHIFT;
@@ -486,6 +615,13 @@ _objc_getTaggedPointerSignedValue(const void * _Nullable ptr)
         return ((intptr_t)value << _OBJC_TAG_PAYLOAD_LSHIFT) >> _OBJC_TAG_PAYLOAD_RSHIFT;
     }
 }
+
+#   if OBJC_SPLIT_TAGGED_POINTERS
+static inline void * _Nullable
+_objc_getTaggedPointerRawPointerValue(const void * _Nullable ptr) {
+    return (void *)((uintptr_t)ptr & _OBJC_TAG_CONSTANT_POINTER_MASK);
+}
+#   endif
 
 // OBJC_HAVE_TAGGED_POINTERS
 #endif
@@ -597,6 +733,11 @@ _class_getIvarMemoryManagement(Class _Nullable cls, Ivar _Nonnull ivar)
 OBJC_EXPORT BOOL _class_isFutureClass(Class _Nullable cls)
     OBJC_AVAILABLE(10.9, 7.0, 9.0, 1.0, 2.0);
 
+/// Returns true if the class is an ABI stable Swift class. (Despite
+/// the name, this does NOT return true for Swift classes built with
+/// Swift versions prior to 5.0.)
+OBJC_EXPORT BOOL _class_isSwift(Class _Nullable cls)
+    OBJC_AVAILABLE(10.16, 14.0, 14.0, 7.0, 5.0);
 
 // API to only be called by root classes like NSObject or NSProxy
 
@@ -878,11 +1019,46 @@ typedef void (*_objc_func_willInitializeClass)(void * _Nullable context, Class _
 OBJC_EXPORT void _objc_addWillInitializeClassFunc(_objc_func_willInitializeClass _Nonnull func, void * _Nullable context)
     OBJC_AVAILABLE(10.15, 13.0, 13.0, 6.0, 4.0);
 
+// Replicate the conditionals in objc-config.h for packed isa, indexed isa, and preopt caches
+#if __ARM_ARCH_7K__ >= 2  ||  (__arm64__ && !__LP64__) || \
+    !(!__LP64__  ||  TARGET_OS_WIN32  ||  \
+     (TARGET_OS_SIMULATOR && !TARGET_OS_MACCATALYST && !__arm64__))
+OBJC_EXPORT const uintptr_t _objc_has_weak_formation_callout;
+#define OBJC_WEAK_FORMATION_CALLOUT_DEFINED 1
+#else
+#define OBJC_WEAK_FORMATION_CALLOUT_DEFINED 0
+#endif
+
+#if defined(__arm64__) && TARGET_OS_IOS && !TARGET_OS_SIMULATOR && !TARGET_OS_MACCATALYST
+#define CONFIG_USE_PREOPT_CACHES 1
+#else
+#define CONFIG_USE_PREOPT_CACHES 0
+#endif
+
+
+#if __OBJC2__
+// Helper function for objc4 tests only! Do not call this yourself
+// for any reason ever.
+OBJC_EXPORT void _method_setImplementationRawUnsafe(Method _Nonnull m, IMP _Nonnull imp)
+    OBJC_AVAILABLE(10.16, 14.0, 14.0, 7.0, 5.0);
+#endif
+
 // API to only be called by classes that provide their own reference count storage
 
 OBJC_EXPORT void
 _objc_deallocOnMainThreadHelper(void * _Nullable context)
     OBJC_AVAILABLE(10.7, 5.0, 9.0, 1.0, 2.0);
+
+#if __OBJC__
+// Declarations for internal methods used for custom weak reference
+// implementations. These declarations ensure that the compiler knows
+// to exclude these methods from NS_DIRECT_MEMBERS. Do NOT implement
+// these methods unless you really know what you're doing.
+@interface NSObject ()
+- (BOOL)_tryRetain;
+- (BOOL)_isDeallocating;
+@end
+#endif
 
 // On async versus sync deallocation and the _dealloc2main flag
 //
@@ -982,6 +1158,25 @@ typedef enum {
 
 #define _OBJC_SUPPORTED_INLINE_REFCNT(_rc_ivar) _OBJC_SUPPORTED_INLINE_REFCNT_LOGIC(_rc_ivar, 0)
 #define _OBJC_SUPPORTED_INLINE_REFCNT_WITH_DEALLOC2MAIN(_rc_ivar) _OBJC_SUPPORTED_INLINE_REFCNT_LOGIC(_rc_ivar, 1)
+
+
+// C cache_t wrappers for objcdt and the IMP caches test tool
+struct cache_t;
+struct bucket_t;
+struct preopt_cache_t;
+OBJC_EXPORT struct bucket_t * _Nonnull objc_cache_buckets(const struct cache_t * _Nonnull cache);
+OBJC_EXPORT size_t objc_cache_bytesForCapacity(uint32_t cap);
+OBJC_EXPORT uint32_t objc_cache_occupied(const struct cache_t * _Nonnull cache);
+OBJC_EXPORT unsigned objc_cache_capacity(const struct cache_t * _Nonnull cache);
+
+#if CONFIG_USE_PREOPT_CACHES
+
+OBJC_EXPORT bool objc_cache_isConstantOptimizedCache(const struct cache_t * _Nonnull cache, bool strict, uintptr_t empty_addr);
+OBJC_EXPORT unsigned objc_cache_preoptCapacity(const struct cache_t * _Nonnull cache);
+OBJC_EXPORT Class _Nonnull objc_cache_preoptFallbackClass(const struct cache_t * _Nonnull cache);
+OBJC_EXPORT const struct preopt_cache_t * _Nonnull objc_cache_preoptCache(const struct cache_t * _Nonnull cache);
+
+#endif
 
 __END_DECLS
 

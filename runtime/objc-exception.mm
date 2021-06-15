@@ -440,7 +440,7 @@ static int _objc_default_exception_matcher(Class catch_cls, id exception)
     Class cls;
     for (cls = exception->getIsa();
          cls != nil; 
-         cls = cls->superclass)
+         cls = cls->getSuperclass())
     {
         if (cls == catch_cls) return 1;
     }

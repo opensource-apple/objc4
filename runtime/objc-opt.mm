@@ -515,7 +515,7 @@ void preopt_init(void)
     const uintptr_t start = (uintptr_t)_dyld_get_shared_cache_range(&length);
 
     if (start) {
-        objc::dataSegmentsRanges.add(start, start + length);
+        objc::dataSegmentsRanges.setSharedCacheRange(start, start + length);
     }
     
     // `opt` not set at compile time in order to detect too-early usage

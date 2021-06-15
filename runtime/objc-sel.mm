@@ -24,9 +24,7 @@
 #if __OBJC2__
 
 #include "objc-private.h"
-#include "objc-cache.h"
 #include "DenseMapExtras.h"
-
 
 static objc::ExplicitInitDenseSet<const char *> namedSelectors;
 static SEL search_builtins(const char *key);
@@ -66,6 +64,16 @@ const char *sel_getName(SEL sel)
 {
     if (!sel) return "<null selector>";
     return (const char *)(const void*)sel;
+}
+
+
+unsigned long sel_hash(SEL sel)
+{
+    unsigned long selAddr = (unsigned long)sel;
+#if CONFIG_USE_PREOPT_CACHES
+    selAddr ^= (selAddr >> 7);
+#endif
+    return selAddr;
 }
 
 

@@ -93,6 +93,16 @@ struct explicit_atomic : public std::atomic<T> {
     }
 };
 
+namespace objc {
+static inline uintptr_t mask16ShiftBits(uint16_t mask)
+{
+    // returns by how much 0xffff must be shifted "right" to return mask
+    uintptr_t maskShift = __builtin_clz(mask) - 16;
+    ASSERT((0xffff >> maskShift) == mask);
+    return maskShift;
+}
+}
+
 #if TARGET_OS_MAC
 
 #   define OS_UNFAIR_LOCK_INLINE 1
@@ -175,17 +185,25 @@ LoadExclusive(uintptr_t *src)
 
 static ALWAYS_INLINE
 bool
-StoreExclusive(uintptr_t *dst, uintptr_t oldvalue __unused, uintptr_t value)
+StoreExclusive(uintptr_t *dst, uintptr_t *oldvalue, uintptr_t value)
 {
-    return !__builtin_arm_strex(value, dst);
+    if (slowpath(__builtin_arm_strex(value, dst))) {
+        *oldvalue = LoadExclusive(dst);
+        return false;
+    }
+    return true;
 }
 
 
 static ALWAYS_INLINE
 bool
-StoreReleaseExclusive(uintptr_t *dst, uintptr_t oldvalue __unused, uintptr_t value)
+StoreReleaseExclusive(uintptr_t *dst, uintptr_t *oldvalue, uintptr_t value)
 {
-    return !__builtin_arm_stlex(value, dst);
+    if (slowpath(__builtin_arm_stlex(value, dst))) {
+        *oldvalue = LoadExclusive(dst);
+        return false;
+    }
+    return true;
 }
 
 static ALWAYS_INLINE
@@ -206,17 +224,17 @@ LoadExclusive(uintptr_t *src)
 
 static ALWAYS_INLINE
 bool
-StoreExclusive(uintptr_t *dst, uintptr_t oldvalue, uintptr_t value)
+StoreExclusive(uintptr_t *dst, uintptr_t *oldvalue, uintptr_t value)
 {
-    return __c11_atomic_compare_exchange_weak((_Atomic(uintptr_t) *)dst, &oldvalue, value, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+    return __c11_atomic_compare_exchange_weak((_Atomic(uintptr_t) *)dst, oldvalue, value, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
 }
 
 
 static ALWAYS_INLINE
 bool
-StoreReleaseExclusive(uintptr_t *dst, uintptr_t oldvalue, uintptr_t value)
+StoreReleaseExclusive(uintptr_t *dst, uintptr_t *oldvalue, uintptr_t value)
 {
-    return __c11_atomic_compare_exchange_weak((_Atomic(uintptr_t) *)dst, &oldvalue, value, __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+    return __c11_atomic_compare_exchange_weak((_Atomic(uintptr_t) *)dst, oldvalue, value, __ATOMIC_RELEASE, __ATOMIC_RELAXED);
 }
 
 static ALWAYS_INLINE
@@ -726,7 +744,7 @@ class mutex_tt : nocopy_t {
         lockdebug_remember_mutex(this);
     }
 
-    constexpr mutex_tt(const fork_unsafe_lock_t unsafe) : mLock(OS_UNFAIR_LOCK_INIT) { }
+    constexpr mutex_tt(__unused const fork_unsafe_lock_t unsafe) : mLock(OS_UNFAIR_LOCK_INIT) { }
 
     void lock() {
         lockdebug_mutex_lock(this);
@@ -762,7 +780,7 @@ class mutex_tt : nocopy_t {
     // Address-ordered lock discipline for a pair of locks.
 
     static void lockTwo(mutex_tt *lock1, mutex_tt *lock2) {
-        if (lock1 < lock2) {
+        if ((uintptr_t)lock1 < (uintptr_t)lock2) {
             lock1->lock();
             lock2->lock();
         } else {
@@ -812,7 +830,7 @@ class recursive_mutex_tt : nocopy_t {
         lockdebug_remember_recursive_mutex(this);
     }
 
-    constexpr recursive_mutex_tt(const fork_unsafe_lock_t unsafe)
+    constexpr recursive_mutex_tt(__unused const fork_unsafe_lock_t unsafe)
         : mLock(OS_UNFAIR_RECURSIVE_LOCK_INIT)
     { }
 
@@ -877,7 +895,7 @@ class monitor_tt {
         lockdebug_remember_monitor(this);
     }
 
-    monitor_tt(const fork_unsafe_lock_t unsafe) 
+    monitor_tt(__unused const fork_unsafe_lock_t unsafe)
         : mutex(PTHREAD_MUTEX_INITIALIZER), cond(PTHREAD_COND_INITIALIZER)
     { }
 
@@ -1019,62 +1037,18 @@ ustrdupMaybeNil(const uint8_t *str)
 
 // OS version checking:
 //
-// sdkVersion()
-// DYLD_OS_VERSION(mac, ios, tv, watch, bridge)
-// sdkIsOlderThan(mac, ios, tv, watch, bridge)
 // sdkIsAtLeast(mac, ios, tv, watch, bridge)
-// 
+//
 // This version order matches OBJC_AVAILABLE.
+//
+// NOTE: prefer dyld_program_sdk_at_least when possible
+#define sdkIsAtLeast(x, i, t, w, b)                                    \
+    (dyld_program_sdk_at_least(dyld_platform_version_macOS_ ## x)   || \
+     dyld_program_sdk_at_least(dyld_platform_version_iOS_ ## i)     || \
+     dyld_program_sdk_at_least(dyld_platform_version_tvOS_ ## t)    || \
+     dyld_program_sdk_at_least(dyld_platform_version_watchOS_ ## w) || \
+     dyld_program_sdk_at_least(dyld_platform_version_bridgeOS_ ## b))
 
-#if TARGET_OS_OSX
-#   define DYLD_OS_VERSION(x, i, t, w, b) DYLD_MACOSX_VERSION_##x
-#   define sdkVersion() dyld_get_program_sdk_version()
-
-#elif TARGET_OS_IOS
-#   define DYLD_OS_VERSION(x, i, t, w, b) DYLD_IOS_VERSION_##i
-#   define sdkVersion() dyld_get_program_sdk_version()
-
-#elif TARGET_OS_TV
-    // dyld does not currently have distinct constants for tvOS
-#   define DYLD_OS_VERSION(x, i, t, w, b) DYLD_IOS_VERSION_##t
-#   define sdkVersion() dyld_get_program_sdk_version()
-
-#elif TARGET_OS_BRIDGE
-#   if TARGET_OS_WATCH
-#       error bridgeOS 1.0 not supported
-#   endif
-    // fixme don't need bridgeOS versioning yet
-#   define DYLD_OS_VERSION(x, i, t, w, b) DYLD_IOS_VERSION_##t
-#   define sdkVersion() dyld_get_program_sdk_bridge_os_version()
-
-#elif TARGET_OS_WATCH
-#   define DYLD_OS_VERSION(x, i, t, w, b) DYLD_WATCHOS_VERSION_##w
-    // watchOS has its own API for compatibility reasons
-#   define sdkVersion() dyld_get_program_sdk_watch_os_version()
-
-#else
-#   error unknown OS
-#endif
-
-
-#define sdkIsOlderThan(x, i, t, w, b)                           \
-            (sdkVersion() < DYLD_OS_VERSION(x, i, t, w, b))
-#define sdkIsAtLeast(x, i, t, w, b)                             \
-            (sdkVersion() >= DYLD_OS_VERSION(x, i, t, w, b))
-
-// Allow bare 0 to be used in DYLD_OS_VERSION() and sdkIsOlderThan()
-#define DYLD_MACOSX_VERSION_0 0
-#define DYLD_IOS_VERSION_0 0
-#define DYLD_TVOS_VERSION_0 0
-#define DYLD_WATCHOS_VERSION_0 0
-#define DYLD_BRIDGEOS_VERSION_0 0
-
-// Pretty-print a DYLD_*_VERSION_* constant.
-#define SDK_FORMAT "%hu.%hhu.%hhu"
-#define FORMAT_SDK(v) \
-    (unsigned short)(((uint32_t)(v))>>16),  \
-    (unsigned  char)(((uint32_t)(v))>>8),   \
-    (unsigned  char)(((uint32_t)(v))>>0)
 
 #ifndef __BUILDING_OBJCDT__
 // fork() safety requires careful tracking of all locks.
