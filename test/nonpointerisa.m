@@ -130,7 +130,7 @@ void check_nonpointer(id obj, Class cls)
     if (!initialized) {
         initialized = true;
         testprintf("Nonpointer during +initialize\n");
-        testassert(NONPOINTER(self));
+        testassert(!NONPOINTER(self));
         id o = [Fake_OS_object new];
         check_nonpointer(o, self);
         [o release];

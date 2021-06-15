@@ -104,6 +104,9 @@ my $RUN;
 my $VERBOSE;
 my $BATS;
 
+my $HOST;
+my $PORT;
+
 my @TESTLIBNAMES = ("libobjc.A.dylib", "libobjc-trampolines.dylib");
 my $TESTLIBDIR = "/usr/lib";
 
@@ -879,11 +882,25 @@ sub build_simple {
     $output =~ s/^warning:     key: [^\n]+\n//g;
     $output =~ s/^warning:     discriminator: [^\n]+\n//g;
     $output =~ s/^warning:     callee: [^\n]+\n//g;
+    # rdar://38710948
+    $output =~ s/ld: warning: ignoring file [^\n]*libclang_rt\.bridgeos\.a[^\n]*\n//g;
+    # ignore compiler logging of CCC_OVERRIDE_OPTIONS effects
+    if (defined $ENV{CCC_OVERRIDE_OPTIONS}) {
+        $output =~ s/### (CCC_OVERRIDE_OPTIONS:|Adding argument|Deleting argument|Replacing) [^\n]*\n//g;
+    }
 
     my $ok;
     if (my $builderror = $T{TEST_BUILD_OUTPUT}) {
         # check for expected output and ignore $?
         if ($output =~ /$builderror/) {
+            $ok = 1;
+        } elsif (defined $ENV{CCC_OVERRIDE_OPTIONS} && $builderror =~ /warning:/) {
+            # CCC_OVERRIDE_OPTIONS manipulates compiler diagnostics.
+            # Don't enforce any TEST_BUILD_OUTPUT that looks for warnings.
+            colorprint  $yellow, "WARN: /// test '$name' \\\\\\";
+            colorprefix $yellow, $output;
+            colorprint  $yellow, "WARN: \\\\\\ test '$name' ///";
+            colorprint  $yellow, "WARN: $name (build output does not match TEST_BUILD_OUTPUT; not fatal because CCC_OVERRIDE_OPTIONS is set)";
             $ok = 1;
         } else {
             colorprint  $red, "FAIL: /// test '$name' \\\\\\";
@@ -964,7 +981,7 @@ sub run_simple {
             $env .= " DYLD_INSERT_LIBRARIES=$remotedir/libcrashcatch.dylib";
         }
 
-        my $cmd = "ssh iphone 'cd $remotedir && env $env ./$name.exe'";
+        my $cmd = "ssh -p $PORT $HOST 'cd $remotedir && env $env ./$name.exe'";
         $output = make("$cmd");
     }
     elsif ($C{OS} =~ /simulator/) {
@@ -972,7 +989,7 @@ sub run_simple {
         # fixme selection of simulated OS version
         my $simdevice;
         if ($C{OS} =~ /iphonesimulator/) {
-            $simdevice = 'iPhone 6';
+            $simdevice = 'iPhone X';
         } elsif ($C{OS} =~ /watchsimulator/) {
             $simdevice = 'Apple Watch Series 4 - 40mm';
         } elsif ($C{OS} =~ /tvsimulator/) {
@@ -1228,6 +1245,9 @@ sub make_one_config {
         # libarclite no longer available on i386
         # fixme need an archived copy for bincompat testing
         $C{FORCE_LOAD_ARCLITE} = "";
+    } elsif ($C{OS} eq "bridgeos") {
+        # no libarclite on bridgeOS
+        $C{FORCE_LOAD_ARCLITE} = "";
     } else {
         $C{FORCE_LOAD_ARCLITE} = "-Xlinker -force_load -Xlinker " . dirname($C{CC}) . "/../lib/arc/libarclite_$C{OS}.a";
     }
@@ -1430,7 +1450,7 @@ sub config_name {
 sub rsync_ios {
     my ($src, $timeout) = @_;
     for (my $i = 0; $i < 10; $i++) {
-        make("$DIR/timeout.pl $timeout env RSYNC_PASSWORD=alpine rsync -av $src rsync://root\@localhost:10873/root/$REMOTEBASE/");
+        make("$DIR/timeout.pl $timeout rsync -e 'ssh -p $PORT' -av $src $HOST:/$REMOTEBASE/");
         return if $? == 0;
         colorprint $yellow, "WARN: RETRY\n"  if $VERBOSE;
     }
@@ -1611,10 +1631,13 @@ $args{ARCH} = getargs("ARCHS", $default_arch)  if !@{$args{ARCH}}[0];
 
 $args{OSVERSION} = getargs("OS", "macosx-default-default");
 
-$args{MEM} = getargs("MEM", "mrc");
-$args{LANGUAGE} = [ map { lc($_) } @{getargs("LANGUAGE", "objective-c")} ];
+$args{MEM} = getargs("MEM", "mrc,arc");
+$args{LANGUAGE} = [ map { lc($_) } @{getargs("LANGUAGE", "c,objective-c,c++,objective-c++")} ];
 
 $args{CC} = getargs("CC", "clang");
+
+$HOST = getarg("HOST", "iphone");
+$PORT = getarg("PORT", "10022");
 
 {
     my $guardmalloc = getargs("GUARDMALLOC", 0);    
