@@ -4,8 +4,15 @@
 TEST_BUILD
     $C{COMPILE}   $DIR/unload4.m -o unload4.dylib -dynamiclib
     $C{COMPILE_C} $DIR/unload3.c -o unload3.dylib -dynamiclib
-    $C{COMPILE}   $DIR/unload2.m -o unload2.bundle -bundle
-    $C{COMPILE}   $DIR/unload.m -o unload.out
+    $C{COMPILE}   $DIR/unload2.m -o unload2.bundle -bundle $C{FORCE_LOAD_ARCLITE} -Xlinker -undefined -Xlinker dynamic_lookup
+    $C{COMPILE}   $DIR/unload.m -o unload.exe -framework Foundation
+END
+*/
+
+/*
+TEST_BUILD_OUTPUT
+ld: warning: -undefined dynamic_lookup is deprecated on .*
+OR
 END
  */
 
@@ -64,8 +71,10 @@ void cycle(void)
 
     Class small = objc_getClass("SmallClass");
     Class big = objc_getClass("BigClass");
+    Class missing = objc_getClass("SubclassOfMissingWeakImport");
     testassert(small);
     testassert(big);
+    testassert(!missing);
 
     name = class_getImageName(small);
     testassert(name);
@@ -104,7 +113,9 @@ void cycle(void)
     testassert(err == 0);
     err = dlclose(bundle);
     testassert(err == -1);  // already closed
-    
+
+    _objc_flush_caches(nil);
+
     testassert(objc_getClass("SmallClass") == NULL);
     testassert(objc_getClass("BigClass") == NULL);
 
@@ -127,8 +138,8 @@ void cycle(void)
 
 int main()
 {
-    // fixme object_dispose() not aggressive enough?
-    if (objc_collectingEnabled()) succeed(__FILE__);
+    char *useClosures = getenv("DYLD_USE_CLOSURES");
+    int dyld3 = useClosures != NULL && useClosures[0] != '0';
 
     objc_setForwardHandler((void*)&forward_handler, (void*)&forward_handler);
 
@@ -145,10 +156,11 @@ int main()
 #endif
 
     leak_mark();
-    while (count--) {
+    for (int i = 0; i < count; i++) {
         cycle();
     }
-    leak_check(0);
+    // dyld3 currently leaks 8 bytes for each dlopen/dlclose pair, so accommodate it. rdar://problem/53769254
+    leak_check(dyld3 ? (count * sizeof(void *)) : 0);
 
     // 5359412 Make sure dylibs with nothing other than image_info can close
     void *dylib = dlopen("unload3.dylib", RTLD_LAZY);
@@ -156,7 +168,9 @@ int main()
     int err = dlclose(dylib);
     testassert(err == 0);
     err = dlclose(dylib);
-    testassert(err == -1);  // already closed
+    // dyld3 doesn't error when dlclosing the dylib twice. This is probably expected. rdar://problem/53769374
+    if (!dyld3)
+        testassert(err == -1);  // already closed
 
     // Make sure dylibs with real objc content cannot close
     dylib = dlopen("unload4.dylib", RTLD_LAZY);
@@ -164,9 +178,9 @@ int main()
     err = dlclose(dylib);
     testassert(err == 0);
     err = dlclose(dylib);
-    testassert(err == 0);   // dlopen from libobjc itself
-    err = dlclose(dylib);
-    testassert(err == -1);  // already closed
+    // dyld3 doesn't error when dlclosing the dylib twice. This is probably expected. rdar://problem/53769374
+    if (!dyld3)
+        testassert(err == -1);  // already closed
 
     succeed(__FILE__);
 }

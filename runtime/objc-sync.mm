@@ -30,7 +30,7 @@
 //
 
 
-typedef struct SyncData {
+typedef struct alignas(CacheLineSize) SyncData {
     struct SyncData* nextData;
     DisguisedPtr<objc_object> object;
     int32_t threadCount;  // number of THREADS using this block
@@ -60,7 +60,7 @@ struct SyncList {
     SyncData *data;
     spinlock_t lock;
 
-    SyncList() : data(nil) { }
+    constexpr SyncList() : data(nil), lock(fork_unsafe_lock) { }
 };
 
 // Use multiple parallel lists to decrease contention among unrelated objects.
@@ -228,14 +228,14 @@ static SyncData* id2data(id object, enum usage why)
         }
     }
 
-    // malloc a new SyncData and add to list.
-    // XXX calling malloc with a global lock held is bad practice,
-    // might be worth releasing the lock, mallocing, and searching again.
-    // But since we never free these guys we won't be stuck in malloc very often.
-    result = (SyncData*)calloc(sizeof(SyncData), 1);
+    // Allocate a new SyncData and add to list.
+    // XXX allocating memory with a global lock held is bad practice,
+    // might be worth releasing the lock, allocating, and searching again.
+    // But since we never free these guys we won't be stuck in allocation very often.
+    posix_memalign((void **)&result, alignof(SyncData), sizeof(SyncData));
     result->object = (objc_object *)object;
     result->threadCount = 1;
-    new (&result->mutex) recursive_mutex_t();
+    new (&result->mutex) recursive_mutex_t(fork_unsafe_lock);
     result->nextData = *listp;
     *listp = result;
     
@@ -287,8 +287,27 @@ int objc_sync_enter(id obj)
 
     if (obj) {
         SyncData* data = id2data(obj, ACQUIRE);
-        assert(data);
+        ASSERT(data);
         data->mutex.lock();
+    } else {
+        // @synchronized(nil) does nothing
+        if (DebugNilSync) {
+            _objc_inform("NIL SYNC DEBUG: @synchronized(nil); set a breakpoint on objc_sync_nil to debug");
+        }
+        objc_sync_nil();
+    }
+
+    return result;
+}
+
+BOOL objc_sync_try_enter(id obj)
+{
+    BOOL result = YES;
+
+    if (obj) {
+        SyncData* data = id2data(obj, ACQUIRE);
+        ASSERT(data);
+        result = data->mutex.tryLock();
     } else {
         // @synchronized(nil) does nothing
         if (DebugNilSync) {

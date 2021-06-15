@@ -133,8 +133,8 @@ typedef struct _threadChain {
 static ThreadChainLink_t ThreadChainLink;
 
 static ThreadChainLink_t *getChainLink() {
-    // follow links until thread_self() found (someday) XXX
-    objc_thread_t self = thread_self();
+    // follow links until objc_thread_self() found (someday) XXX
+    objc_thread_t self = objc_thread_self();
     ThreadChainLink_t *walker = &ThreadChainLink;
     while (walker->perThreadID != self) {
         if (walker->next != nil) {
@@ -238,6 +238,7 @@ void _destroyAltHandlerList(struct alt_handler_list *list)
 **********************************************************************/
 
 #include "objc-private.h"
+#include <objc/objc-abi.h>
 #include <objc/objc-exception.h>
 #include <objc/NSObject.h>
 #include <execinfo.h>
@@ -310,7 +311,7 @@ CXX_PERSONALITY(int version,
 
 struct objc_typeinfo {
     // Position of vtable and name fields must match C++ typeinfo object
-    const void **vtable;  // always objc_ehtype_vtable+2
+    const void ** __ptrauth_cxx_vtable_pointer vtable;  // objc_ehtype_vtable+2
     const char *name;     // c++ typeinfo string
 
     Class cls_unremapped;
@@ -321,54 +322,97 @@ struct objc_exception {
     struct objc_typeinfo tinfo;
 };
 
+extern "C" {
 
-static void _objc_exception_noop(void) { } 
-static bool _objc_exception_false(void) { return 0; } 
-// static bool _objc_exception_true(void) { return 1; } 
-static void _objc_exception_abort1(void) { 
-    _objc_fatal("unexpected call into objc exception typeinfo vtable %d", 1); 
-} 
-static void _objc_exception_abort2(void) { 
-    _objc_fatal("unexpected call into objc exception typeinfo vtable %d", 2); 
-} 
-static void _objc_exception_abort3(void) { 
-    _objc_fatal("unexpected call into objc exception typeinfo vtable %d", 3); 
-} 
-static void _objc_exception_abort4(void) { 
-    _objc_fatal("unexpected call into objc exception typeinfo vtable %d", 4); 
-} 
+__attribute__((used))
+void _objc_exception_noop(void) { }
+__attribute__((used))
+bool _objc_exception_false(void) { return 0; }
+// bool _objc_exception_true(void) { return 1; }
+__attribute__((used))
+void _objc_exception_abort1(void) {
+    _objc_fatal("unexpected call into objc exception typeinfo vtable %d", 1);
+}
+__attribute__((used))
+void _objc_exception_abort2(void) {
+    _objc_fatal("unexpected call into objc exception typeinfo vtable %d", 2);
+}
+__attribute__((used))
+void _objc_exception_abort3(void) {
+    _objc_fatal("unexpected call into objc exception typeinfo vtable %d", 3);
+}
+__attribute__((used))
+void _objc_exception_abort4(void) {
+    _objc_fatal("unexpected call into objc exception typeinfo vtable %d", 4);
+}
+__attribute__((used))
+bool _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo,
+                              struct objc_typeinfo *throw_tinfo,
+                              void **throw_obj_p,
+                              unsigned outer);
+}
 
-static bool _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo, 
-                                     struct objc_typeinfo *throw_tinfo, 
-                                     void **throw_obj_p, 
-                                     unsigned outer);
+// C++ pointers to vtables are signed with no extra data.
+// C++ vtable entries are signed with a number derived from the function name.
+// For this fake vtable, we hardcode number as deciphered from the
+// assembly output during libc++abi's build.
+#if __has_feature(ptrauth_calls)
+#   define VTABLE_PTR_AUTH      "@AUTH(da, 0)"
+#   define VTABLE_ENTRY_AUTH(x) "@AUTH(ia," #x ",addr)"
+#else
+#   define VTABLE_PTR_AUTH      ""
+#   define VTABLE_ENTRY_AUTH(x) ""
+#endif
 
-// forward declaration
-OBJC_EXPORT struct objc_typeinfo OBJC_EHTYPE_id;
+#if __LP64__
+#   define PTR ".quad "
+#   define TWOPTRSIZE "16"
+#else
+#   define PTR ".long "
+#   define TWOPTRSIZE "8"
+#endif
 
-OBJC_EXPORT
-const void *objc_ehtype_vtable[] = {
-    nil,  // typeinfo's vtable? - fixme 
-    (void*)&OBJC_EHTYPE_id,  // typeinfo's typeinfo - hack
-    (void*)_objc_exception_noop,      // in-place destructor?
-    (void*)_objc_exception_noop,      // destructor?
-    (void*)_objc_exception_false,     // OLD __is_pointer_p
-    (void*)_objc_exception_false,     // OLD __is_function_p
-    (void*)_objc_exception_do_catch,  // OLD __do_catch,  NEW can_catch
-    (void*)_objc_exception_false,     // OLD __do_upcast, NEW search_above_dst
-    (void*)_objc_exception_false,     //                  NEW search_below_dst
-    (void*)_objc_exception_abort1,    // paranoia: blow up if libc++abi
-    (void*)_objc_exception_abort2,    //           adds something new
-    (void*)_objc_exception_abort3,
-    (void*)_objc_exception_abort4,
-};
+// Hand-built vtable for objc exception typeinfo.
+// "OLD" is GNU libcpp, "NEW" is libc++abi.
 
-OBJC_EXPORT
-struct objc_typeinfo OBJC_EHTYPE_id = {
-    objc_ehtype_vtable+2, 
-    "id", 
-    nil
-};
+asm(
+    "\n .cstring"
+    "\n l_.id_str: .asciz \"id\""
+
+    "\n .section __DATA,__const"
+    "\n .globl _OBJC_EHTYPE_id"
+    "\n .globl _objc_ehtype_vtable"
+    "\n .p2align 4"
+
+    "\n _OBJC_EHTYPE_id:"
+    "\n  " PTR "(_objc_ehtype_vtable+" TWOPTRSIZE ") "      VTABLE_PTR_AUTH
+    "\n  " PTR "l_.id_str"
+    "\n  " PTR "0"
+
+    "\n _objc_ehtype_vtable:"
+    "\n  " PTR "0"
+    // typeinfo's typeinfo - fixme hack
+    "\n  " PTR "_OBJC_EHTYPE_id"
+    // destructor and in-place destructor
+    "\n  " PTR "__objc_exception_noop"      VTABLE_ENTRY_AUTH(52634)
+    "\n  " PTR "__objc_exception_noop"      VTABLE_ENTRY_AUTH(10344)
+    // OLD __is_pointer_p
+    "\n  " PTR "__objc_exception_noop"      VTABLE_ENTRY_AUTH(6889)
+    // OLD __is_function_p
+    "\n  " PTR "__objc_exception_noop"      VTABLE_ENTRY_AUTH(23080)
+    // OLD __do_catch,  NEW can_catch
+    "\n  " PTR "__objc_exception_do_catch"  VTABLE_ENTRY_AUTH(27434)
+    // OLD __do_upcast, NEW search_above_dst
+    "\n  " PTR "__objc_exception_false"     VTABLE_ENTRY_AUTH(48481)
+    //                  NEW search_below_dst
+    "\n  " PTR "__objc_exception_false"     VTABLE_ENTRY_AUTH(41165)
+    // NEW has_unambiguous_public_base (fixme need this?)
+    "\n  " PTR "__objc_exception_abort1"    VTABLE_ENTRY_AUTH(14357)
+    // paranoia: die if libcxxabi adds anything else
+    "\n  " PTR "__objc_exception_abort2"
+    "\n  " PTR "__objc_exception_abort3"
+    "\n  " PTR "__objc_exception_abort4"
+    );
 
 
 
@@ -396,7 +440,7 @@ static int _objc_default_exception_matcher(Class catch_cls, id exception)
     Class cls;
     for (cls = exception->getIsa();
          cls != nil; 
-         cls = cls->superclass)
+         cls = cls->getSuperclass())
     {
         if (cls == catch_cls) return 1;
     }
@@ -509,17 +553,7 @@ static void _objc_exception_destructor(void *exc_gen)
                      exc, obj, object_getClassName(obj));
     }
 
-#if SUPPORT_GC
-    if (UseGC) {
-        if (auto_zone_is_valid_pointer(gc_zone, obj)) {
-            auto_zone_release(gc_zone, exc->obj);
-        }
-    }
-    else 
-#endif
-    {
-        [obj release];
-    }
+    [obj release];
 }
 
 
@@ -530,20 +564,9 @@ void objc_exception_throw(id obj)
 
     obj = (*exception_preprocessor)(obj);
 
-    // Retain the exception object during unwinding.
-    // GC: because `exc` is unscanned memory
-    // Non-GC: because otherwise an autorelease pool pop can cause a crash
-#if SUPPORT_GC
-    if (UseGC) {
-        if (auto_zone_is_valid_pointer(gc_zone, obj)) {
-            auto_zone_retain(gc_zone, obj);
-        }
-    }
-    else 
-#endif
-    {
-        [obj retain];
-    }
+    // Retain the exception object during unwinding
+    // because otherwise an autorelease pool pop can cause a crash
+    [obj retain];
 
     exc->obj = obj;
     exc->tinfo.vtable = objc_ehtype_vtable+2;
@@ -604,10 +627,10 @@ void objc_end_catch(void)
 
 
 // `outer` is not passed by the new libcxxabi
-static bool _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo, 
-                                     struct objc_typeinfo *throw_tinfo, 
-                                     void **throw_obj_p, 
-                                     unsigned outer UNAVAILABLE_ATTRIBUTE)
+bool _objc_exception_do_catch(struct objc_typeinfo *catch_tinfo, 
+                              struct objc_typeinfo *throw_tinfo, 
+                              void **throw_obj_p, 
+                              unsigned outer UNAVAILABLE_ATTRIBUTE)
 {
     id exception;
 
@@ -1080,11 +1103,11 @@ struct alt_handler_list {
     struct alt_handler_list *next_DEBUGONLY;
 };
 
-static mutex_t DebugLock;
 static struct alt_handler_list *DebugLists;
 static uintptr_t DebugCounter;
 
-void alt_handler_error(uintptr_t token) __attribute__((noinline));
+__attribute__((noinline, noreturn))
+void alt_handler_error(uintptr_t token);
 
 static struct alt_handler_list *
 fetch_handler_list(bool create)
@@ -1100,7 +1123,7 @@ fetch_handler_list(bool create)
 
         if (DebugAltHandlers) {
             // Save this list so the debug code can find it from other threads
-            mutex_locker_t lock(DebugLock);
+            mutex_locker_t lock(AltHandlerDebugLock);
             list->next_DEBUGONLY = DebugLists;
             DebugLists = list;
         }
@@ -1115,7 +1138,7 @@ void _destroyAltHandlerList(struct alt_handler_list *list)
     if (list) {
         if (DebugAltHandlers) {
             // Detach from the list-of-lists.
-            mutex_locker_t lock(DebugLock);
+            mutex_locker_t lock(AltHandlerDebugLock);
             struct alt_handler_list **listp = &DebugLists;
             while (*listp && *listp != list) listp = &(*listp)->next_DEBUGONLY;
             if (*listp) *listp = (*listp)->next_DEBUGONLY;
@@ -1180,7 +1203,7 @@ uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
 
     if (DebugAltHandlers) {
         // Record backtrace in case this handler is misused later.
-        mutex_locker_t lock(DebugLock);
+        mutex_locker_t lock(AltHandlerDebugLock);
 
         token = DebugCounter++;
         if (token == 0) token = DebugCounter++;
@@ -1192,9 +1215,9 @@ uintptr_t objc_addExceptionHandler(objc_exception_handler fn, void *context)
             bzero(data->debug, sizeof(*data->debug));
         }
 
-        pthread_getname_np(pthread_self(), data->debug->thread, THREADNAME_COUNT);
-        strlcpy(data->debug->queue, 
-                dispatch_queue_get_label(dispatch_get_current_queue()), 
+        pthread_getname_np(objc_thread_self(), data->debug->thread, THREADNAME_COUNT);
+        strlcpy(data->debug->queue,
+                dispatch_queue_get_label(DISPATCH_CURRENT_QUEUE_LABEL),
                 THREADNAME_COUNT);
         data->debug->backtraceSize = 
             backtrace(data->debug->backtrace, BACKTRACE_COUNT);
@@ -1243,7 +1266,6 @@ void objc_removeExceptionHandler(uintptr_t token)
     if (!list  ||  !list->handlers) {
         // no alt handlers active
         alt_handler_error(token);
-        __builtin_trap();
     }
 
     uintptr_t i = token-1;
@@ -1259,7 +1281,6 @@ void objc_removeExceptionHandler(uintptr_t token)
     if (i >= list->allocated) {
         // token out of range
         alt_handler_error(token);
-        __builtin_trap();
     }
 
     struct alt_handler_data *data = &list->handlers[i];
@@ -1267,7 +1288,6 @@ void objc_removeExceptionHandler(uintptr_t token)
     if (data->frame.ip_start == 0  &&  data->frame.ip_end == 0  &&  data->frame.cfa == 0) {
         // token in range, but invalid
         alt_handler_error(token);
-        __builtin_trap();
     }
 
     if (PrintAltHandlers) {
@@ -1283,77 +1303,69 @@ void objc_removeExceptionHandler(uintptr_t token)
     list->used--;
 }
 
-void objc_alt_handler_error(void) __attribute__((noinline));
 
+BREAKPOINT_FUNCTION(
+void objc_alt_handler_error(void));
+
+__attribute__((noinline, noreturn))
 void alt_handler_error(uintptr_t token)
 {
-    if (!DebugAltHandlers) {
-        _objc_inform_now_and_on_crash
-            ("objc_removeExceptionHandler() called with unknown alt handler; "
-             "this is probably a bug in multithreaded AppKit use. "
-             "Set environment variable OBJC_DEBUG_ALT_HANDLERS=YES "
-             "or break in objc_alt_handler_error() to debug.");
-        objc_alt_handler_error();
-    }
+    _objc_inform
+        ("objc_removeExceptionHandler() called with unknown alt handler; "
+         "this is probably a bug in multithreaded AppKit use. "
+         "Set environment variable OBJC_DEBUG_ALT_HANDLERS=YES "
+         "or break in objc_alt_handler_error() to debug.");
 
-    DebugLock.lock();
+    if (DebugAltHandlers) {
+        AltHandlerDebugLock.lock();
+        
+        // Search other threads' alt handler lists for this handler.
+        struct alt_handler_list *list;
+        for (list = DebugLists; list; list = list->next_DEBUGONLY) {
+            unsigned h;
+            for (h = 0; h < list->allocated; h++) {
+                struct alt_handler_data *data = &list->handlers[h];
+                if (data->debug  &&  data->debug->token == token) {
+                    // found it
+                    int i;
+                    
+                    // Build a string from the recorded backtrace
+                    char *symbolString;
+                    char **symbols = 
+                        backtrace_symbols(data->debug->backtrace, 
+                                          data->debug->backtraceSize);
+                    size_t len = 1;
+                    for (i = 0; i < data->debug->backtraceSize; i++){
+                        len += 4 + strlen(symbols[i]) + 1;
+                    }
+                    symbolString = (char *)calloc(len, 1);
+                    for (i = 0; i < data->debug->backtraceSize; i++){
+                        strcat(symbolString, "    ");
+                        strcat(symbolString, symbols[i]);
+                        strcat(symbolString, "\n");
+                    }
+                    
+                    free(symbols);
+                    
+                    _objc_inform_now_and_on_crash
+                        ("The matching objc_addExceptionHandler() was called "
+                         "by:\nThread '%s': Dispatch queue: '%s': \n%s", 
+                         data->debug->thread, data->debug->queue, symbolString);
 
-    // Search other threads' alt handler lists for this handler.
-    struct alt_handler_list *list;
-    for (list = DebugLists; list; list = list->next_DEBUGONLY) {
-        unsigned h;
-        for (h = 0; h < list->allocated; h++) {
-            struct alt_handler_data *data = &list->handlers[h];
-            if (data->debug  &&  data->debug->token == token) {
-                // found it
-                int i;
-
-                // Build a string from the recorded backtrace
-                char *symbolString;
-                char **symbols = 
-                    backtrace_symbols(data->debug->backtrace, 
-                                      data->debug->backtraceSize);
-                size_t len = 1;
-                for (i = 0; i < data->debug->backtraceSize; i++){
-                    len += 4 + strlen(symbols[i]) + 1;
+                    goto done;
                 }
-                symbolString = (char *)calloc(len, 1);
-                for (i = 0; i < data->debug->backtraceSize; i++){
-                    strcat(symbolString, "    ");
-                    strcat(symbolString, symbols[i]);
-                    strcat(symbolString, "\n");
-                }
-
-                free(symbols);
-
-                _objc_inform_now_and_on_crash
-                    ("objc_removeExceptionHandler() called with "
-                     "unknown alt handler; this is probably a bug in "
-                     "multithreaded AppKit use. \n"
-                     "The matching objc_addExceptionHandler() was called by:\n"
-                     "Thread '%s': Dispatch queue: '%s': \n%s", 
-                     data->debug->thread, data->debug->queue, symbolString);
-
-                DebugLock.unlock();
-                free(symbolString);
-                
-                objc_alt_handler_error();
             }
         }
+    done:   
+        AltHandlerDebugLock.unlock();
     }
 
-    DebugLock.unlock();
 
-    // not found
-    _objc_inform_now_and_on_crash
-        ("objc_removeExceptionHandler() called with unknown alt handler; "
-         "this is probably a bug in multithreaded AppKit use");
     objc_alt_handler_error();
-}
-
-void objc_alt_handler_error(void)
-{
-    __builtin_trap();
+    
+    _objc_fatal
+        ("objc_removeExceptionHandler() called with unknown alt handler; "
+         "this is probably a bug in multithreaded AppKit use. ");
 }
 
 // called in order registered, to match 32-bit _NSAddAltHandler2
@@ -1425,3 +1437,6 @@ void exception_init(void)
 
 // __OBJC2__
 #endif
+
+// Define this everywhere even if it isn't used, to simplify fork() safety code
+mutex_t AltHandlerDebugLock;

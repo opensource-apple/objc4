@@ -36,22 +36,29 @@
 #include <mach-o/ldsyms.h>
 
 #include "Protocol.h"
+#include "NSObject.h"
 
-#if __OBJC2__
-@interface __IncompleteProtocol : NSObject @end
-@implementation __IncompleteProtocol 
-// fixme hack - make __IncompleteProtocol a non-lazy class
-+ (void) load { } 
+// __IncompleteProtocol is used as the return type of objc_allocateProtocol().
+
+// Old ABI uses NSObject as the superclass even though Protocol uses Object
+// because the R/R implementation for class Protocol is added at runtime
+// by CF, so __IncompleteProtocol would be left without an R/R implementation 
+// otherwise, which would break ARC.
+
+@interface __IncompleteProtocol : NSObject
 @end
-#endif
-
-@implementation Protocol 
 
 #if __OBJC2__
-// fixme hack - make Protocol a non-lazy class
-+ (void) load { } 
+__attribute__((objc_nonlazy_class))
 #endif
+@implementation __IncompleteProtocol
+@end
 
+
+#if __OBJC2__
+__attribute__((objc_nonlazy_class))
+#endif
+@implementation Protocol
 
 - (BOOL) conformsTo: (Protocol *)aProtocolObj
 {
@@ -93,7 +100,7 @@
     // check isKindOf:
     Class cls;
     Class protoClass = objc_getClass("Protocol");
-    for (cls = object_getClass(other); cls; cls = cls->superclass) {
+    for (cls = object_getClass(other); cls; cls = cls->getSuperclass()) {
         if (cls == protoClass) break;
     }
     if (!cls) return NO;

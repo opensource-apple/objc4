@@ -135,11 +135,6 @@ OBJC_EXPORT __declspec(naked) id objc_msgSend(id a, SEL b, ...)
         mov ecx, SELECTOR
         mov eax, SELF
 
-#if SUPPORT_GC
-        // check whether selector is ignored
-#error oops
-#endif
-
         // check whether receiver is nil
         test eax, eax
         je NIL
@@ -180,10 +175,11 @@ MISS:
         mov eax, isa[edx]
 
         // MethodTableLookup WORD_RETURN, MSG_SEND
+        push $3
         push eax
         push ecx
         push edx
-        call _class_lookupMethodAndLoadCache3
+        call lookUpImpOrFoward
 
         mov edx, kFwdMsgSend
         leave
@@ -209,11 +205,6 @@ OBJC_EXPORT __declspec(naked) double objc_msgSend_fpret(id a, SEL b, ...)
         mov ecx, SELECTOR
         mov eax, SELF
 
-#if SUPPORT_GC
-        // check whether selector is ignored
-#error oops
-#endif
-
         // check whether receiver is nil
         test eax, eax
         je NIL
@@ -254,10 +245,11 @@ MISS:
         mov eax, isa[edx]
 
         // MethodTableLookup WORD_RETURN, MSG_SEND
+        push $3
         push eax
         push ecx
         push edx
-        call _class_lookupMethodAndLoadCache3
+        call lookUpImpOrFoward
 
         mov edx, kFwdMsgSend
         leave
@@ -282,11 +274,6 @@ OBJC_EXPORT __declspec(naked) id objc_msgSendSuper(struct objc_super *a, SEL b, 
         mov eax, SUPER
         mov ecx, SELECTOR
         mov edx, super_class[eax]
-
-#if SUPPORT_GC
-        // check whether selector is ignored
-#error oops
-#endif
 
         // search the cache (class in edx)
         // CacheLookup WORD_RETURN, MSG_SENDSUPER
@@ -328,10 +315,11 @@ MISS:
         mov eax, super_class[eax]
 
         // MethodTableLookup WORD_RETURN, MSG_SENDSUPER
+        push $3
         push eax
         push ecx
         push edx
-        call _class_lookupMethodAndLoadCache3
+        call lookUpImpOrFoward
 
         mov edx, kFwdMsgSend
         leave
@@ -349,11 +337,6 @@ OBJC_EXPORT __declspec(naked) void objc_msgSend_stret(void)
         // load receiver and selector
         mov ecx, SELECTOR_STRET
         mov eax, SELF_STRET
-
-#if SUPPORT_GC
-        // check whether selector is ignored
-#error oops
-#endif
 
         // check whether receiver is nil
         test eax, eax
@@ -395,10 +378,11 @@ MISS:
         mov eax, isa[edx]
 
         // MethodTableLookup WORD_RETURN, MSG_SEND
+        push $3
         push eax
         push ecx
         push edx
-        call _class_lookupMethodAndLoadCache3
+        call lookUpImpOrFoward
 
         mov edx, kFwdMsgSendStret
         leave
@@ -424,11 +408,6 @@ OBJC_EXPORT __declspec(naked) id objc_msgSendSuper_stret(struct objc_super *a, S
         mov eax, SUPER_STRET
         mov ecx, SELECTOR_STRET
         mov edx, super_class[eax]
-
-#if SUPPORT_GC
-        // check whether selector is ignored
-#error oops
-#endif
 
         // search the cache (class in edx)
         // CacheLookup WORD_RETURN, MSG_SENDSUPER
@@ -470,10 +449,11 @@ MISS:
         mov eax, super_class[eax]
 
         // MethodTableLookup WORD_RETURN, MSG_SENDSUPER
+        push $3
         push eax
         push ecx
         push edx
-        call _class_lookupMethodAndLoadCache3
+        call lookUpImpOrFoward
 
         mov edx, kFwdMsgSendStret
         leave
@@ -542,10 +522,4 @@ OBJC_EXPORT __declspec(naked) void method_invoke_stret(void)
         leave
         jmp eax
     }
-}
-
-
-__declspec(naked) id _objc_ignored_method(id obj, SEL sel)
-{
-    return obj;
 }

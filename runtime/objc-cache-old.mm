@@ -577,58 +577,6 @@ void _cache_addForwardEntry(Class cls, SEL sel)
 
 
 /***********************************************************************
-* _cache_addIgnoredEntry
-* Add an entry for the ignored selector to cls's method cache.
-* Does nothing if the cache addition fails for any reason.
-* Returns the ignored IMP.
-* Cache locks: cacheUpdateLock must not be held.
-**********************************************************************/
-#if SUPPORT_GC  &&  !SUPPORT_IGNORED_SELECTOR_CONSTANT
-static cache_entry *alloc_ignored_entries(void)
-{
-    cache_entry *e = (cache_entry *)malloc(5 * sizeof(cache_entry));
-    e[0] = (cache_entry){ @selector(retain),     0,(IMP)&_objc_ignored_method};
-    e[1] = (cache_entry){ @selector(release),    0,(IMP)&_objc_ignored_method};
-    e[2] = (cache_entry){ @selector(autorelease),0,(IMP)&_objc_ignored_method};
-    e[3] = (cache_entry){ @selector(retainCount),0,(IMP)&_objc_ignored_method};
-    e[4] = (cache_entry){ @selector(dealloc),    0,(IMP)&_objc_ignored_method};
-    return e;
-}
-#endif
-
-IMP _cache_addIgnoredEntry(Class cls, SEL sel)
-{
-    cache_entry *entryp = NULL;
-
-#if !SUPPORT_GC
-    _objc_fatal("selector ignored with GC off");
-#elif SUPPORT_IGNORED_SELECTOR_CONSTANT
-    static cache_entry entry = { (SEL)kIgnore, 0, (IMP)&_objc_ignored_method };
-    entryp = &entry;
-    assert(sel == (SEL)kIgnore);
-#else
-    // hack
-    int i;
-    static cache_entry *entries;
-    INIT_ONCE_PTR(entries, alloc_ignored_entries(), free(v));
-
-    assert(ignoreSelector(sel));
-    for (i = 0; i < 5; i++) {
-        if (sel == entries[i].name) { 
-            entryp = &entries[i];
-            break;
-        }
-    }
-    if (!entryp) _objc_fatal("selector %s (%p) is not ignored", 
-                             sel_getName(sel), sel);
-#endif
-
-    _cache_fill(cls, (Method)entryp, sel);
-    return entryp->imp;
-}
-
-
-/***********************************************************************
 * _cache_flush.  Invalidate all valid entries in the given class' cache.
 *
 * Called from flush_caches() and _cache_fill()
@@ -745,8 +693,14 @@ static uintptr_t _get_pc_for_thread(thread_t thread)
 * reading function is in progress because it might still be using 
 * the garbage memory.
 **********************************************************************/
-OBJC_EXPORT uintptr_t objc_entryPoints[];
-OBJC_EXPORT uintptr_t objc_exitPoints[];
+typedef struct {
+    uint64_t          location;
+    unsigned short    length;
+    unsigned short    recovery_offs;
+    unsigned int      flags;
+} task_restartable_range_t;
+
+extern "C" task_restartable_range_t objc_restartableRanges[];
 
 static int _collecting_in_critical(void)
 {
@@ -759,7 +713,7 @@ static int _collecting_in_critical(void)
     kern_return_t ret;
     int result;
 
-    mach_port_t mythread = pthread_mach_thread_np(pthread_self());
+    mach_port_t mythread = pthread_mach_thread_np(objc_thread_self());
 
     // Get a list of all the threads in the current task
     ret = task_threads (mach_task_self (), &threads, &number);
@@ -790,10 +744,11 @@ static int _collecting_in_critical(void)
         }
         
         // Check whether it is in the cache lookup code
-        for (region = 0; objc_entryPoints[region] != 0; region++)
+        for (region = 0; objc_restartableRanges[region].location != 0; region++)
         {
-            if ((pc >= objc_entryPoints[region]) &&
-                (pc <= objc_exitPoints[region])) 
+            uint32_t loc = (uint32_t)objc_restartableRanges[region].location;
+            if ((pc > loc) &&
+                (pc - loc) < objc_restartableRanges[region].length)
             {
                 result = TRUE;
                 goto done;
@@ -1839,7 +1794,6 @@ void _class_printMethodCacheStatistics(void)
 }
 
 #endif
-
 
 // !__OBJC2__
 #endif

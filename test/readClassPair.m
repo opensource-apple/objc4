@@ -1,16 +1,11 @@
-// TEST_CONFIG 
+/*
+TEST_RUN_OUTPUT
+objc\[\d+\]: Class Sub is implemented in both [^\s]+ \(0x[0-9a-f]+\) and [^\s]+ \(0x[0-9a-f]+\)\. One of the two will be used\. Which one is undefined\.
+OK: readClassPair.m
+END
+ */
 
 #include "test.h"
-
-#if !__OBJC2__
-
-int main()
-{
-    succeed(__FILE__);
-}
-
-#else
-
 #include <objc/objc-internal.h>
 
 // Reuse evil-class-def.m as a non-evil class definition.
@@ -53,9 +48,16 @@ int main()
     // Read a non-root class.
     testassert(!objc_getClass("Sub"));
 
-    extern intptr_t OBJC_CLASS_$_Sub[OBJC_MAX_CLASS_SIZE/sizeof(void*)];
+    // Clang assumes too much alignment on this by default (rdar://problem/60881608),
+    // so tell it that it's only as aligned as an intptr_t.
+    extern _Alignas(intptr_t) intptr_t OBJC_CLASS_$_Sub[OBJC_MAX_CLASS_SIZE/sizeof(void*)];
+    // Make a duplicate of class Sub for use later.
     intptr_t Sub2_buf[OBJC_MAX_CLASS_SIZE/sizeof(void*)];
     memcpy(Sub2_buf, &OBJC_CLASS_$_Sub, sizeof(Sub2_buf));
+    // Re-sign the isa and super pointers in the new location.
+    ((Class __ptrauth_objc_isa_pointer *)(void *)Sub2_buf)[0] = ((Class __ptrauth_objc_isa_pointer *)(void *)&OBJC_CLASS_$_Sub)[0];
+    ((Class __ptrauth_objc_super_pointer *)(void *)Sub2_buf)[1] = ((Class __ptrauth_objc_super_pointer *)(void *)&OBJC_CLASS_$_Sub)[1];
+    
     Class Sub = objc_readClassPair((__bridge Class)(void*)&OBJC_CLASS_$_Sub, &ii);
     testassert(Sub);
 
@@ -68,10 +70,19 @@ int main()
     testassert(class_getInstanceSize(Sub) == 2*sizeof(void*));
     [Sub load];
 
-    // Reading a class whose name already exists fails.
-    testassert(! objc_readClassPair((__bridge Class)(void*)Sub2_buf, &ii));
+    // Reading a class whose name already exists succeeds
+    // with a duplicate warning.
+    Class Sub2 = objc_readClassPair((__bridge Class)(void*)Sub2_buf, &ii);
+    testassert(Sub2);
+    testassert(Sub2 != Sub);
+    testassert(objc_getClass("Sub") == Sub);  // didn't change
+    testassert(0 == strcmp(class_getName(Sub2), "Sub"));
+    testassert(class_getSuperclass(Sub2) == Super);
+    testassert(class_getClassMethod(Sub2, @selector(load)));
+    testassert(class_getInstanceMethod(Sub2, @selector(load)));
+    testassert(class_getInstanceVariable(Sub2, "sub_ivar"));
+    testassert(class_getInstanceSize(Sub2) == 2*sizeof(void*));
+    [Sub2 load];
 
     succeed(__FILE__);
 }
-
-#endif

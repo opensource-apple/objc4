@@ -7,6 +7,28 @@
 	objects = {
 
 /* Begin PBXAggregateTarget section */
+		6EF877EF23263D7000963DBB /* objc_executables */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = 6EF877F223263D7000963DBB /* Build configuration list for PBXAggregateTarget "objc_executables" */;
+			buildPhases = (
+			);
+			dependencies = (
+				6EF877F423263D8000963DBB /* PBXTargetDependency */,
+			);
+			name = objc_executables;
+			productName = "objc-executables";
+		};
+		834F9B01212E560100F95A54 /* objc4_tests */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = 834F9B04212E560200F95A54 /* Build configuration list for PBXAggregateTarget "objc4_tests" */;
+			buildPhases = (
+				834F9B05212E561400F95A54 /* Run Script (build tests) */,
+			);
+			dependencies = (
+			);
+			name = objc4_tests;
+			productName = objc4_tests;
+		};
 		837F67A81A771F63004D34FA /* objc-simulator */ = {
 			isa = PBXAggregateTarget;
 			buildConfigurationList = 837F67A91A771F63004D34FA /* Build configuration list for PBXAggregateTarget "objc-simulator" */;
@@ -23,13 +45,33 @@
 /* Begin PBXBuildFile section */
 		393CEAC00DC69E3E000B69DE /* objc-references.mm in Sources */ = {isa = PBXBuildFile; fileRef = 393CEABF0DC69E3E000B69DE /* objc-references.mm */; };
 		393CEAC60DC69E67000B69DE /* objc-references.h in Headers */ = {isa = PBXBuildFile; fileRef = 393CEAC50DC69E67000B69DE /* objc-references.h */; };
-		399BC72E1224831B007FBDF0 /* objc-externalref.mm in Sources */ = {isa = PBXBuildFile; fileRef = 399BC72D1224831B007FBDF0 /* objc-externalref.mm */; };
 		39ABD72312F0B61800D1054C /* objc-weak.h in Headers */ = {isa = PBXBuildFile; fileRef = 39ABD71F12F0B61800D1054C /* objc-weak.h */; };
 		39ABD72412F0B61800D1054C /* objc-weak.mm in Sources */ = {isa = PBXBuildFile; fileRef = 39ABD72012F0B61800D1054C /* objc-weak.mm */; };
+		6E1475EA21DFDB1B001357EA /* llvm-AlignOf.h in Headers */ = {isa = PBXBuildFile; fileRef = 6E1475E521DFDB1A001357EA /* llvm-AlignOf.h */; };
+		6E1475EB21DFDB1B001357EA /* llvm-DenseMap.h in Headers */ = {isa = PBXBuildFile; fileRef = 6E1475E621DFDB1B001357EA /* llvm-DenseMap.h */; };
+		6E1475EC21DFDB1B001357EA /* llvm-DenseMapInfo.h in Headers */ = {isa = PBXBuildFile; fileRef = 6E1475E721DFDB1B001357EA /* llvm-DenseMapInfo.h */; };
+		6E1475ED21DFDB1B001357EA /* llvm-type_traits.h in Headers */ = {isa = PBXBuildFile; fileRef = 6E1475E821DFDB1B001357EA /* llvm-type_traits.h */; };
+		6E1475EE21DFDB1B001357EA /* llvm-MathExtras.h in Headers */ = {isa = PBXBuildFile; fileRef = 6E1475E921DFDB1B001357EA /* llvm-MathExtras.h */; };
+		6E7B0862232DE7CA00689009 /* PointerUnion.h in Headers */ = {isa = PBXBuildFile; fileRef = 6E7B0861232DE7CA00689009 /* PointerUnion.h */; };
+		6EACB842232C97A400CE9176 /* objc-zalloc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6EACB841232C97A400CE9176 /* objc-zalloc.h */; };
+		6EACB844232C97B900CE9176 /* objc-zalloc.mm in Sources */ = {isa = PBXBuildFile; fileRef = 6EACB843232C97B900CE9176 /* objc-zalloc.mm */; };
+		6ECD0B1F2244999E00910D88 /* llvm-DenseSet.h in Headers */ = {isa = PBXBuildFile; fileRef = 6ECD0B1E2244999E00910D88 /* llvm-DenseSet.h */; };
+		6EF877DA2325D62600963DBB /* objcdt.mm in Sources */ = {isa = PBXBuildFile; fileRef = 6EF877D92325D62600963DBB /* objcdt.mm */; };
+		6EF877DE2325D79000963DBB /* objc-probes.d in Sources */ = {isa = PBXBuildFile; fileRef = 87BB4E900EC39633005D08E1 /* objc-probes.d */; };
+		6EF877E02325D92E00963DBB /* CoreSymbolication.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6EF877DF2325D92E00963DBB /* CoreSymbolication.framework */; };
+		6EF877E22325D93200963DBB /* Symbolication.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6EF877E12325D93200963DBB /* Symbolication.framework */; };
+		6EF877E52325FAC400963DBB /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6EF877E42325FAC400963DBB /* Foundation.framework */; };
+		6EF877E82326184000963DBB /* json.mm in Sources */ = {isa = PBXBuildFile; fileRef = 6EF877E72326184000963DBB /* json.mm */; };
+		6EF877EC232635A700963DBB /* objcdt.1 in Install Manpages */ = {isa = PBXBuildFile; fileRef = 6EF877EA232633CC00963DBB /* objcdt.1 */; };
+		7213C36321FA7C730090A271 /* NSObject-internal.h in Headers */ = {isa = PBXBuildFile; fileRef = 7213C36221FA7C730090A271 /* NSObject-internal.h */; settings = {ATTRIBUTES = (Private, ); }; };
+		7593EC58202248E50046AB96 /* objc-object.h in Headers */ = {isa = PBXBuildFile; fileRef = 7593EC57202248DF0046AB96 /* objc-object.h */; };
+		75A9504F202BAA0600D7D56F /* objc-locks-new.h in Headers */ = {isa = PBXBuildFile; fileRef = 75A9504E202BAA0300D7D56F /* objc-locks-new.h */; };
+		75A95051202BAA9A00D7D56F /* objc-locks.h in Headers */ = {isa = PBXBuildFile; fileRef = 75A95050202BAA9A00D7D56F /* objc-locks.h */; };
+		75A95053202BAC4100D7D56F /* objc-lockdebug.h in Headers */ = {isa = PBXBuildFile; fileRef = 75A95052202BAC4100D7D56F /* objc-lockdebug.h */; };
+		8306440920D24A5D00E356D2 /* objc-block-trampolines.h in Headers */ = {isa = PBXBuildFile; fileRef = 8306440620D24A3E00E356D2 /* objc-block-trampolines.h */; settings = {ATTRIBUTES = (Private, ); }; };
 		830F2A740D737FB800392440 /* objc-msg-arm.s in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A690D737FB800392440 /* objc-msg-arm.s */; };
 		830F2A750D737FB900392440 /* objc-msg-i386.s in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A6A0D737FB800392440 /* objc-msg-i386.s */; };
 		830F2A7D0D737FBB00392440 /* objc-msg-x86_64.s in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A720D737FB800392440 /* objc-msg-x86_64.s */; };
-		830F2A940D73876100392440 /* objc-accessors.h in Headers */ = {isa = PBXBuildFile; fileRef = 830F2A920D73876100392440 /* objc-accessors.h */; };
 		830F2A950D73876100392440 /* objc-accessors.mm in Sources */ = {isa = PBXBuildFile; fileRef = 830F2A930D73876100392440 /* objc-accessors.mm */; };
 		830F2A980D738DC200392440 /* hashtable.h in Headers */ = {isa = PBXBuildFile; fileRef = 830F2A970D738DC200392440 /* hashtable.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		83112ED40F00599600A5FBAF /* objc-internal.h in Headers */ = {isa = PBXBuildFile; fileRef = 83112ED30F00599600A5FBAF /* objc-internal.h */; settings = {ATTRIBUTES = (Private, ); }; };
@@ -39,9 +81,6 @@
 		834DF8B715993EE1002F2BC9 /* objc-sel-old.mm in Sources */ = {isa = PBXBuildFile; fileRef = 834DF8B615993EE1002F2BC9 /* objc-sel-old.mm */; };
 		834EC0A411614167009B2563 /* objc-abi.h in Headers */ = {isa = PBXBuildFile; fileRef = 834EC0A311614167009B2563 /* objc-abi.h */; settings = {ATTRIBUTES = (Private, ); }; };
 		83725F4A14CA5BFA0014370E /* objc-opt.mm in Sources */ = {isa = PBXBuildFile; fileRef = 83725F4914CA5BFA0014370E /* objc-opt.mm */; };
-		8379996E13CBAF6F007C2B5F /* a1a2-blocktramps-arm64.s in Sources */ = {isa = PBXBuildFile; fileRef = 8379996D13CBAF6F007C2B5F /* a1a2-blocktramps-arm64.s */; };
-		8383A3A3122600E9009290B8 /* a1a2-blocktramps-arm.s in Sources */ = {isa = PBXBuildFile; fileRef = 8383A3A1122600E9009290B8 /* a1a2-blocktramps-arm.s */; };
-		8383A3A4122600E9009290B8 /* a2a3-blocktramps-arm.s in Sources */ = {isa = PBXBuildFile; fileRef = 8383A3A2122600E9009290B8 /* a2a3-blocktramps-arm.s */; };
 		838485BF0D6D687300CEA253 /* hashtable2.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485B70D6D687300CEA253 /* hashtable2.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		838485C00D6D687300CEA253 /* hashtable2.mm in Sources */ = {isa = PBXBuildFile; fileRef = 838485B80D6D687300CEA253 /* hashtable2.mm */; };
 		838485C30D6D687300CEA253 /* maptable.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485BB0D6D687300CEA253 /* maptable.h */; settings = {ATTRIBUTES = (Private, ); }; };
@@ -65,7 +104,7 @@
 		838485FF0D6D68A200CEA253 /* objc-load.mm in Sources */ = {isa = PBXBuildFile; fileRef = 838485D80D6D68A200CEA253 /* objc-load.mm */; };
 		838486000D6D68A200CEA253 /* objc-loadmethod.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485D90D6D68A200CEA253 /* objc-loadmethod.h */; };
 		838486010D6D68A200CEA253 /* objc-loadmethod.mm in Sources */ = {isa = PBXBuildFile; fileRef = 838485DA0D6D68A200CEA253 /* objc-loadmethod.mm */; };
-		838486020D6D68A200CEA253 /* objc-lockdebug.mm in Sources */ = {isa = PBXBuildFile; fileRef = 838485DB0D6D68A200CEA253 /* objc-lockdebug.mm */; };
+		838486020D6D68A200CEA253 /* objc-lockdebug.mm in Sources */ = {isa = PBXBuildFile; fileRef = 838485DB0D6D68A200CEA253 /* objc-lockdebug.mm */; settings = {COMPILER_FLAGS = "-Os"; }; };
 		838486030D6D68A200CEA253 /* objc-private.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485DC0D6D68A200CEA253 /* objc-private.h */; };
 		838486070D6D68A200CEA253 /* objc-runtime-new.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485E00D6D68A200CEA253 /* objc-runtime-new.h */; };
 		838486080D6D68A200CEA253 /* objc-runtime-new.mm in Sources */ = {isa = PBXBuildFile; fileRef = 838485E10D6D68A200CEA253 /* objc-runtime-new.mm */; };
@@ -87,6 +126,8 @@
 		838486250D6D68F000CEA253 /* List.m in Sources */ = {isa = PBXBuildFile; fileRef = 838486230D6D68F000CEA253 /* List.m */; };
 		838486260D6D68F000CEA253 /* List.h in Headers */ = {isa = PBXBuildFile; fileRef = 838486240D6D68F000CEA253 /* List.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		838486280D6D6A2400CEA253 /* message.h in Headers */ = {isa = PBXBuildFile; fileRef = 838485BD0D6D687300CEA253 /* message.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		83A4AEDC1EA0840800ACADDE /* module.modulemap in Headers */ = {isa = PBXBuildFile; fileRef = 83A4AED71EA06D9D00ACADDE /* module.modulemap */; settings = {ATTRIBUTES = (Public, ); }; };
+		83A4AEDE1EA08C7200ACADDE /* ObjectiveC.apinotes in Headers */ = {isa = PBXBuildFile; fileRef = 83A4AEDD1EA08C5700ACADDE /* ObjectiveC.apinotes */; settings = {ATTRIBUTES = (Public, ); }; };
 		83B1A8BE0FF1AC0D0019EA5B /* objc-msg-simulator-i386.s in Sources */ = {isa = PBXBuildFile; fileRef = 83B1A8BC0FF1AC0D0019EA5B /* objc-msg-simulator-i386.s */; };
 		83BE02E40FCCB23400661494 /* objc-file-old.mm in Sources */ = {isa = PBXBuildFile; fileRef = 83BE02E30FCCB23400661494 /* objc-file-old.mm */; };
 		83BE02E80FCCB24D00661494 /* objc-file-old.h in Headers */ = {isa = PBXBuildFile; fileRef = 83BE02E50FCCB24D00661494 /* objc-file-old.h */; };
@@ -94,22 +135,33 @@
 		83BE02EA0FCCB24D00661494 /* objc-runtime-old.h in Headers */ = {isa = PBXBuildFile; fileRef = 83BE02E70FCCB24D00661494 /* objc-runtime-old.h */; };
 		83C9C3391668B50E00F4E544 /* objc-msg-simulator-x86_64.s in Sources */ = {isa = PBXBuildFile; fileRef = 83C9C3381668B50E00F4E544 /* objc-msg-simulator-x86_64.s */; };
 		83D49E4F13C7C84F0057F1DD /* objc-msg-arm64.s in Sources */ = {isa = PBXBuildFile; fileRef = 83D49E4E13C7C84F0057F1DD /* objc-msg-arm64.s */; };
+		83D92696212254CF00299F69 /* isa.h in Headers */ = {isa = PBXBuildFile; fileRef = 83D92695212254CF00299F69 /* isa.h */; };
+		83D9269821225A7400299F69 /* arm64-asm.h in Headers */ = {isa = PBXBuildFile; fileRef = 83D9269721225A7400299F69 /* arm64-asm.h */; };
 		83EB007B121C9EC200B92C16 /* objc-sel-table.s in Sources */ = {isa = PBXBuildFile; fileRef = 83EB007A121C9EC200B92C16 /* objc-sel-table.s */; };
+		83EF5E9820D2298400F486A4 /* objc-blocktramps-i386.s in Sources */ = {isa = PBXBuildFile; fileRef = E8923D9C116AB2820071B552 /* objc-blocktramps-i386.s */; };
+		83EF5E9920D2298400F486A4 /* objc-blocktramps-x86_64.s in Sources */ = {isa = PBXBuildFile; fileRef = E8923D9D116AB2820071B552 /* objc-blocktramps-x86_64.s */; };
+		83EF5E9C20D2299E00F486A4 /* objc-blocktramps-arm.s in Sources */ = {isa = PBXBuildFile; fileRef = 8383A3A1122600E9009290B8 /* objc-blocktramps-arm.s */; };
 		83F4B52815E843B100E0926F /* NSObjCRuntime.h in Headers */ = {isa = PBXBuildFile; fileRef = 83F4B52615E843B100E0926F /* NSObjCRuntime.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		83F4B52915E843B100E0926F /* NSObject.h in Headers */ = {isa = PBXBuildFile; fileRef = 83F4B52715E843B100E0926F /* NSObject.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		83F550E0155E030800E95D3B /* objc-cache-old.mm in Sources */ = {isa = PBXBuildFile; fileRef = 83F550DF155E030800E95D3B /* objc-cache-old.mm */; };
 		87BB4EA70EC39854005D08E1 /* objc-probes.d in Sources */ = {isa = PBXBuildFile; fileRef = 87BB4E900EC39633005D08E1 /* objc-probes.d */; };
 		9672F7EE14D5F488007CEC96 /* NSObject.mm in Sources */ = {isa = PBXBuildFile; fileRef = 9672F7ED14D5F488007CEC96 /* NSObject.mm */; };
-		BC07A00C0EF72D360014EC61 /* objc-auto-dump.h in Headers */ = {isa = PBXBuildFile; fileRef = BC07A00B0EF72D360014EC61 /* objc-auto-dump.h */; settings = {ATTRIBUTES = (Private, ); }; };
-		BC07A0110EF72D9C0014EC61 /* objc-auto-dump.mm in Sources */ = {isa = PBXBuildFile; fileRef = BC07A0100EF72D9C0014EC61 /* objc-auto-dump.mm */; };
-		E8923DA1116AB2820071B552 /* a1a2-blocktramps-i386.s in Sources */ = {isa = PBXBuildFile; fileRef = E8923D9C116AB2820071B552 /* a1a2-blocktramps-i386.s */; };
-		E8923DA2116AB2820071B552 /* a1a2-blocktramps-x86_64.s in Sources */ = {isa = PBXBuildFile; fileRef = E8923D9D116AB2820071B552 /* a1a2-blocktramps-x86_64.s */; };
-		E8923DA3116AB2820071B552 /* a2a3-blocktramps-i386.s in Sources */ = {isa = PBXBuildFile; fileRef = E8923D9E116AB2820071B552 /* a2a3-blocktramps-i386.s */; };
-		E8923DA4116AB2820071B552 /* a2a3-blocktramps-x86_64.s in Sources */ = {isa = PBXBuildFile; fileRef = E8923D9F116AB2820071B552 /* a2a3-blocktramps-x86_64.s */; };
+		C22F5208230EF38B001BFE14 /* objc-ptrauth.h in Headers */ = {isa = PBXBuildFile; fileRef = C22F5207230EF38B001BFE14 /* objc-ptrauth.h */; };
+		C2E6D3FC2225DCF00059DFAA /* DenseMapExtras.h in Headers */ = {isa = PBXBuildFile; fileRef = C2E6D3FB2225DCF00059DFAA /* DenseMapExtras.h */; };
+		C2EB731D23D8A38A0040672B /* dummy-library-mac-i386.c in Sources */ = {isa = PBXBuildFile; fileRef = C2EB731C23D8A38A0040672B /* dummy-library-mac-i386.c */; };
 		E8923DA5116AB2820071B552 /* objc-block-trampolines.mm in Sources */ = {isa = PBXBuildFile; fileRef = E8923DA0116AB2820071B552 /* objc-block-trampolines.mm */; };
+		E934A9F123E996D00088F26F /* objc4.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = E934A9EF23E9967D0088F26F /* objc4.plist */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		F9BCC71B205C68E800DD9AFC /* objc-blocktramps-arm64.s in Sources */ = {isa = PBXBuildFile; fileRef = 8379996D13CBAF6F007C2B5F /* objc-blocktramps-arm64.s */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		6EF877F323263D8000963DBB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6EF877D62325D62600963DBB;
+			remoteInfo = objcdt;
+		};
 		837F67AC1A771F6E004D34FA /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
@@ -117,18 +169,71 @@
 			remoteGlobalIDString = D2AAC0620554660B00DB518D;
 			remoteInfo = objc;
 		};
+		F9BCC728205C6A0900DD9AFC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 08FB7793FE84155DC02AAC07 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F9BCC6CA205C68E800DD9AFC;
+			remoteInfo = "objc-trampolines";
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		6EF877D52325D62600963DBB /* Install Manpages */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/local/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+				6EF877EC232635A700963DBB /* objcdt.1 in Install Manpages */,
+			);
+			name = "Install Manpages";
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+		E934A9F023E996CC0088F26F /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 8;
+			dstPath = /System/Library/FeatureFlags/Domain;
+			dstSubfolderSpec = 0;
+			files = (
+				E934A9F123E996D00088F26F /* objc4.plist in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		393CEABF0DC69E3E000B69DE /* objc-references.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-references.mm"; path = "runtime/objc-references.mm"; sourceTree = "<group>"; };
 		393CEAC50DC69E67000B69DE /* objc-references.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-references.h"; path = "runtime/objc-references.h"; sourceTree = "<group>"; };
-		399BC72D1224831B007FBDF0 /* objc-externalref.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-externalref.mm"; path = "runtime/objc-externalref.mm"; sourceTree = "<group>"; };
 		39ABD71F12F0B61800D1054C /* objc-weak.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-weak.h"; path = "runtime/objc-weak.h"; sourceTree = "<group>"; };
 		39ABD72012F0B61800D1054C /* objc-weak.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-weak.mm"; path = "runtime/objc-weak.mm"; sourceTree = "<group>"; };
+		6E1475E521DFDB1A001357EA /* llvm-AlignOf.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 2; lastKnownFileType = sourcecode.c.h; name = "llvm-AlignOf.h"; path = "runtime/llvm-AlignOf.h"; sourceTree = "<group>"; tabWidth = 2; };
+		6E1475E621DFDB1B001357EA /* llvm-DenseMap.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 2; lastKnownFileType = sourcecode.c.h; name = "llvm-DenseMap.h"; path = "runtime/llvm-DenseMap.h"; sourceTree = "<group>"; tabWidth = 2; };
+		6E1475E721DFDB1B001357EA /* llvm-DenseMapInfo.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 2; lastKnownFileType = sourcecode.c.h; name = "llvm-DenseMapInfo.h"; path = "runtime/llvm-DenseMapInfo.h"; sourceTree = "<group>"; tabWidth = 2; };
+		6E1475E821DFDB1B001357EA /* llvm-type_traits.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 2; lastKnownFileType = sourcecode.c.h; name = "llvm-type_traits.h"; path = "runtime/llvm-type_traits.h"; sourceTree = "<group>"; tabWidth = 2; };
+		6E1475E921DFDB1B001357EA /* llvm-MathExtras.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 2; lastKnownFileType = sourcecode.c.h; name = "llvm-MathExtras.h"; path = "runtime/llvm-MathExtras.h"; sourceTree = "<group>"; tabWidth = 2; };
+		6E7B0861232DE7CA00689009 /* PointerUnion.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = PointerUnion.h; path = runtime/PointerUnion.h; sourceTree = "<group>"; };
+		6EACB841232C97A400CE9176 /* objc-zalloc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-zalloc.h"; path = "runtime/objc-zalloc.h"; sourceTree = "<group>"; };
+		6EACB843232C97B900CE9176 /* objc-zalloc.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-zalloc.mm"; path = "runtime/objc-zalloc.mm"; sourceTree = "<group>"; };
+		6ECD0B1E2244999E00910D88 /* llvm-DenseSet.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "llvm-DenseSet.h"; path = "runtime/llvm-DenseSet.h"; sourceTree = "<group>"; };
+		6EF877D72325D62600963DBB /* objcdt */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = objcdt; sourceTree = BUILT_PRODUCTS_DIR; };
+		6EF877D92325D62600963DBB /* objcdt.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = objcdt.mm; sourceTree = "<group>"; usesTabs = 0; };
+		6EF877DF2325D92E00963DBB /* CoreSymbolication.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreSymbolication.framework; path = System/Library/PrivateFrameworks/CoreSymbolication.framework; sourceTree = SDKROOT; };
+		6EF877E12325D93200963DBB /* Symbolication.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Symbolication.framework; path = System/Library/PrivateFrameworks/Symbolication.framework; sourceTree = SDKROOT; };
+		6EF877E32325D95300963DBB /* objcdt-entitlements.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = "objcdt-entitlements.plist"; sourceTree = "<group>"; };
+		6EF877E42325FAC400963DBB /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
+		6EF877E62326184000963DBB /* json.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = json.h; sourceTree = "<group>"; usesTabs = 1; };
+		6EF877E72326184000963DBB /* json.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = json.mm; sourceTree = "<group>"; usesTabs = 1; };
+		6EF877EA232633CC00963DBB /* objcdt.1 */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.man; path = objcdt.1; sourceTree = "<group>"; };
+		7213C36221FA7C730090A271 /* NSObject-internal.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "NSObject-internal.h"; path = "runtime/NSObject-internal.h"; sourceTree = "<group>"; };
+		7593EC57202248DF0046AB96 /* objc-object.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "objc-object.h"; path = "runtime/objc-object.h"; sourceTree = "<group>"; };
+		75A9504E202BAA0300D7D56F /* objc-locks-new.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "objc-locks-new.h"; path = "runtime/objc-locks-new.h"; sourceTree = "<group>"; };
+		75A95050202BAA9A00D7D56F /* objc-locks.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-locks.h"; path = "runtime/objc-locks.h"; sourceTree = "<group>"; };
+		75A95052202BAC4100D7D56F /* objc-lockdebug.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-lockdebug.h"; path = "runtime/objc-lockdebug.h"; sourceTree = "<group>"; };
+		8306440620D24A3E00E356D2 /* objc-block-trampolines.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "objc-block-trampolines.h"; path = "runtime/objc-block-trampolines.h"; sourceTree = "<group>"; };
 		830F2A690D737FB800392440 /* objc-msg-arm.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-arm.s"; path = "runtime/Messengers.subproj/objc-msg-arm.s"; sourceTree = "<group>"; };
 		830F2A6A0D737FB800392440 /* objc-msg-i386.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-i386.s"; path = "runtime/Messengers.subproj/objc-msg-i386.s"; sourceTree = "<group>"; };
 		830F2A720D737FB800392440 /* objc-msg-x86_64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-x86_64.s"; path = "runtime/Messengers.subproj/objc-msg-x86_64.s"; sourceTree = "<group>"; tabWidth = 8; usesTabs = 1; };
-		830F2A920D73876100392440 /* objc-accessors.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-accessors.h"; path = "runtime/objc-accessors.h"; sourceTree = "<group>"; };
 		830F2A930D73876100392440 /* objc-accessors.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-accessors.mm"; path = "runtime/objc-accessors.mm"; sourceTree = "<group>"; };
 		830F2A970D738DC200392440 /* hashtable.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = hashtable.h; path = runtime/hashtable.h; sourceTree = "<group>"; };
 		830F2AA50D7394C200392440 /* markgc.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = markgc.cpp; sourceTree = "<group>"; };
@@ -139,9 +244,8 @@
 		834DF8B615993EE1002F2BC9 /* objc-sel-old.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-sel-old.mm"; path = "runtime/objc-sel-old.mm"; sourceTree = "<group>"; };
 		834EC0A311614167009B2563 /* objc-abi.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-abi.h"; path = "runtime/objc-abi.h"; sourceTree = "<group>"; };
 		83725F4914CA5BFA0014370E /* objc-opt.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-opt.mm"; path = "runtime/objc-opt.mm"; sourceTree = "<group>"; };
-		8379996D13CBAF6F007C2B5F /* a1a2-blocktramps-arm64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "a1a2-blocktramps-arm64.s"; path = "runtime/a1a2-blocktramps-arm64.s"; sourceTree = "<group>"; };
-		8383A3A1122600E9009290B8 /* a1a2-blocktramps-arm.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "a1a2-blocktramps-arm.s"; path = "runtime/a1a2-blocktramps-arm.s"; sourceTree = "<group>"; };
-		8383A3A2122600E9009290B8 /* a2a3-blocktramps-arm.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "a2a3-blocktramps-arm.s"; path = "runtime/a2a3-blocktramps-arm.s"; sourceTree = "<group>"; };
+		8379996D13CBAF6F007C2B5F /* objc-blocktramps-arm64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-blocktramps-arm64.s"; path = "runtime/objc-blocktramps-arm64.s"; sourceTree = "<group>"; };
+		8383A3A1122600E9009290B8 /* objc-blocktramps-arm.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-blocktramps-arm.s"; path = "runtime/objc-blocktramps-arm.s"; sourceTree = "<group>"; };
 		838485B30D6D682B00CEA253 /* libobjc.order */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = libobjc.order; sourceTree = "<group>"; };
 		838485B40D6D683300CEA253 /* APPLE_LICENSE */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = APPLE_LICENSE; sourceTree = "<group>"; };
 		838485B50D6D683300CEA253 /* ReleaseNotes.rtf */ = {isa = PBXFileReference; lastKnownFileType = text.rtf; path = ReleaseNotes.rtf; sourceTree = "<group>"; };
@@ -190,32 +294,59 @@
 		8384861A0D6D68A800CEA253 /* runtime.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = runtime.h; path = runtime/runtime.h; sourceTree = "<group>"; };
 		838486230D6D68F000CEA253 /* List.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = List.m; path = runtime/OldClasses.subproj/List.m; sourceTree = "<group>"; };
 		838486240D6D68F000CEA253 /* List.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = List.h; path = runtime/OldClasses.subproj/List.h; sourceTree = "<group>"; };
+		83A4AED71EA06D9D00ACADDE /* module.modulemap */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = "sourcecode.module-map"; name = module.modulemap; path = runtime/Module/module.modulemap; sourceTree = "<group>"; };
+		83A4AEDD1EA08C5700ACADDE /* ObjectiveC.apinotes */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = ObjectiveC.apinotes; path = runtime/Module/ObjectiveC.apinotes; sourceTree = "<group>"; };
 		83B1A8BC0FF1AC0D0019EA5B /* objc-msg-simulator-i386.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-simulator-i386.s"; path = "runtime/Messengers.subproj/objc-msg-simulator-i386.s"; sourceTree = "<group>"; };
 		83BE02E30FCCB23400661494 /* objc-file-old.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-file-old.mm"; path = "runtime/objc-file-old.mm"; sourceTree = "<group>"; };
 		83BE02E50FCCB24D00661494 /* objc-file-old.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-file-old.h"; path = "runtime/objc-file-old.h"; sourceTree = "<group>"; };
 		83BE02E60FCCB24D00661494 /* objc-file.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-file.h"; path = "runtime/objc-file.h"; sourceTree = "<group>"; };
 		83BE02E70FCCB24D00661494 /* objc-runtime-old.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-runtime-old.h"; path = "runtime/objc-runtime-old.h"; sourceTree = "<group>"; };
 		83C9C3381668B50E00F4E544 /* objc-msg-simulator-x86_64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-simulator-x86_64.s"; path = "runtime/Messengers.subproj/objc-msg-simulator-x86_64.s"; sourceTree = "<group>"; };
+		83CE671D1E6E76B60095A33E /* interposable.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = interposable.txt; sourceTree = "<group>"; };
 		83D49E4E13C7C84F0057F1DD /* objc-msg-arm64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-msg-arm64.s"; path = "runtime/Messengers.subproj/objc-msg-arm64.s"; sourceTree = "<group>"; };
+		83D92695212254CF00299F69 /* isa.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = isa.h; path = runtime/isa.h; sourceTree = "<group>"; };
+		83D9269721225A7400299F69 /* arm64-asm.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "arm64-asm.h"; path = "runtime/arm64-asm.h"; sourceTree = "<group>"; };
 		83EB007A121C9EC200B92C16 /* objc-sel-table.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-sel-table.s"; path = "runtime/objc-sel-table.s"; sourceTree = "<group>"; };
 		83F4B52615E843B100E0926F /* NSObjCRuntime.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = NSObjCRuntime.h; path = runtime/NSObjCRuntime.h; sourceTree = "<group>"; };
 		83F4B52715E843B100E0926F /* NSObject.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = NSObject.h; path = runtime/NSObject.h; sourceTree = "<group>"; };
 		83F550DF155E030800E95D3B /* objc-cache-old.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-cache-old.mm"; path = "runtime/objc-cache-old.mm"; sourceTree = "<group>"; };
 		87BB4E900EC39633005D08E1 /* objc-probes.d */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.dtrace; name = "objc-probes.d"; path = "runtime/objc-probes.d"; sourceTree = "<group>"; };
 		9672F7ED14D5F488007CEC96 /* NSObject.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = NSObject.mm; path = runtime/NSObject.mm; sourceTree = "<group>"; };
-		BC07A00B0EF72D360014EC61 /* objc-auto-dump.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-auto-dump.h"; path = "runtime/objc-auto-dump.h"; sourceTree = "<group>"; };
-		BC07A0100EF72D9C0014EC61 /* objc-auto-dump.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-auto-dump.mm"; path = "runtime/objc-auto-dump.mm"; sourceTree = "<group>"; };
 		BC8B5D1212D3D48100C78A5B /* libauto.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libauto.dylib; path = /usr/lib/libauto.dylib; sourceTree = "<absolute>"; };
+		C217B55222DE556D004369BA /* objc-env.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "objc-env.h"; path = "runtime/objc-env.h"; sourceTree = "<group>"; };
+		C2296C682457336C003FAE61 /* objc-bp-assist.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "objc-bp-assist.h"; path = "runtime/objc-bp-assist.h"; sourceTree = "<group>"; };
+		C22F5207230EF38B001BFE14 /* objc-ptrauth.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "objc-ptrauth.h"; path = "runtime/objc-ptrauth.h"; sourceTree = "<group>"; };
+		C2E6D3FB2225DCF00059DFAA /* DenseMapExtras.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = DenseMapExtras.h; path = runtime/DenseMapExtras.h; sourceTree = "<group>"; };
+		C2EB731C23D8A38A0040672B /* dummy-library-mac-i386.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = "dummy-library-mac-i386.c"; path = "runtime/dummy-library-mac-i386.c"; sourceTree = "<group>"; };
 		D2AAC0630554660B00DB518D /* libobjc.A.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = libobjc.A.dylib; sourceTree = BUILT_PRODUCTS_DIR; };
-		E8923D9C116AB2820071B552 /* a1a2-blocktramps-i386.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "a1a2-blocktramps-i386.s"; path = "runtime/a1a2-blocktramps-i386.s"; sourceTree = "<group>"; };
-		E8923D9D116AB2820071B552 /* a1a2-blocktramps-x86_64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "a1a2-blocktramps-x86_64.s"; path = "runtime/a1a2-blocktramps-x86_64.s"; sourceTree = "<group>"; };
-		E8923D9E116AB2820071B552 /* a2a3-blocktramps-i386.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "a2a3-blocktramps-i386.s"; path = "runtime/a2a3-blocktramps-i386.s"; sourceTree = "<group>"; };
-		E8923D9F116AB2820071B552 /* a2a3-blocktramps-x86_64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "a2a3-blocktramps-x86_64.s"; path = "runtime/a2a3-blocktramps-x86_64.s"; sourceTree = "<group>"; };
+		E8923D9C116AB2820071B552 /* objc-blocktramps-i386.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-blocktramps-i386.s"; path = "runtime/objc-blocktramps-i386.s"; sourceTree = "<group>"; };
+		E8923D9D116AB2820071B552 /* objc-blocktramps-x86_64.s */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.asm; name = "objc-blocktramps-x86_64.s"; path = "runtime/objc-blocktramps-x86_64.s"; sourceTree = "<group>"; };
 		E8923DA0116AB2820071B552 /* objc-block-trampolines.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "objc-block-trampolines.mm"; path = "runtime/objc-block-trampolines.mm"; sourceTree = "<group>"; };
+		E934A9EF23E9967D0088F26F /* objc4.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = objc4.plist; sourceTree = "<group>"; };
+		E97047552497CC5300781D29 /* check_preopt_caches.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = check_preopt_caches.entitlements; sourceTree = "<group>"; };
+		E9AD465924925261002AF1DB /* check_preopt_caches.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = check_preopt_caches.mm; sourceTree = "<group>"; };
+		F9BCC727205C68E800DD9AFC /* libobjc-trampolines.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = "libobjc-trampolines.dylib"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		6EF877D42325D62600963DBB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6EF877E22325D93200963DBB /* Symbolication.framework in Frameworks */,
+				6EF877E52325FAC400963DBB /* Foundation.framework in Frameworks */,
+				6EF877E02325D92E00963DBB /* CoreSymbolication.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D289988505E68E00004EDB86 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F9BCC721205C68E800DD9AFC /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -236,7 +367,10 @@
 				838486270D6D690F00CEA253 /* Obsolete Source */,
 				08FB7795FE84155DC02AAC07 /* Source */,
 				838485B20D6D67F900CEA253 /* Other */,
+				6EF877D82325D62600963DBB /* objcdt */,
+				E9AD465824925261002AF1DB /* check-preopt-caches */,
 				1AB674ADFE9D54B511CA2CBB /* Products */,
+				F9BCC72A205C6A1600DD9AFC /* Frameworks */,
 			);
 			name = objc;
 			sourceTree = "<group>";
@@ -244,16 +378,15 @@
 		08FB7795FE84155DC02AAC07 /* Source */ = {
 			isa = PBXGroup;
 			children = (
-				8383A3A1122600E9009290B8 /* a1a2-blocktramps-arm.s */,
-				8383A3A2122600E9009290B8 /* a2a3-blocktramps-arm.s */,
+				C2EB731C23D8A38A0040672B /* dummy-library-mac-i386.c */,
 				838485B80D6D687300CEA253 /* hashtable2.mm */,
 				838485BC0D6D687300CEA253 /* maptable.mm */,
 				9672F7ED14D5F488007CEC96 /* NSObject.mm */,
 				838486190D6D68A800CEA253 /* Protocol.mm */,
 				830F2A930D73876100392440 /* objc-accessors.mm */,
 				838485CA0D6D68A200CEA253 /* objc-auto.mm */,
-				BC07A0100EF72D9C0014EC61 /* objc-auto-dump.mm */,
 				39ABD72012F0B61800D1054C /* objc-weak.mm */,
+				6EACB843232C97B900CE9176 /* objc-zalloc.mm */,
 				E8923DA0116AB2820071B552 /* objc-block-trampolines.mm */,
 				838485CB0D6D68A200CEA253 /* objc-cache.mm */,
 				83F550DF155E030800E95D3B /* objc-cache-old.mm */,
@@ -261,7 +394,6 @@
 				838485CE0D6D68A200CEA253 /* objc-class.mm */,
 				838485D00D6D68A200CEA253 /* objc-errors.mm */,
 				838485D20D6D68A200CEA253 /* objc-exception.mm */,
-				399BC72D1224831B007FBDF0 /* objc-externalref.mm */,
 				838485D30D6D68A200CEA253 /* objc-file.mm */,
 				83BE02E30FCCB23400661494 /* objc-file-old.mm */,
 				838485D50D6D68A200CEA253 /* objc-initialize.mm */,
@@ -281,11 +413,10 @@
 				834DF8B615993EE1002F2BC9 /* objc-sel-old.mm */,
 				838485EA0D6D68A200CEA253 /* objc-sync.mm */,
 				838485EB0D6D68A200CEA253 /* objc-typeencoding.mm */,
-				8379996D13CBAF6F007C2B5F /* a1a2-blocktramps-arm64.s */,
-				E8923D9C116AB2820071B552 /* a1a2-blocktramps-i386.s */,
-				E8923D9D116AB2820071B552 /* a1a2-blocktramps-x86_64.s */,
-				E8923D9E116AB2820071B552 /* a2a3-blocktramps-i386.s */,
-				E8923D9F116AB2820071B552 /* a2a3-blocktramps-x86_64.s */,
+				8383A3A1122600E9009290B8 /* objc-blocktramps-arm.s */,
+				8379996D13CBAF6F007C2B5F /* objc-blocktramps-arm64.s */,
+				E8923D9C116AB2820071B552 /* objc-blocktramps-i386.s */,
+				E8923D9D116AB2820071B552 /* objc-blocktramps-x86_64.s */,
 				830F2A690D737FB800392440 /* objc-msg-arm.s */,
 				83D49E4E13C7C84F0057F1DD /* objc-msg-arm64.s */,
 				830F2A6A0D737FB800392440 /* objc-msg-i386.s */,
@@ -301,8 +432,22 @@
 			isa = PBXGroup;
 			children = (
 				D2AAC0630554660B00DB518D /* libobjc.A.dylib */,
+				F9BCC727205C68E800DD9AFC /* libobjc-trampolines.dylib */,
+				6EF877D72325D62600963DBB /* objcdt */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		6EF877D82325D62600963DBB /* objcdt */ = {
+			isa = PBXGroup;
+			children = (
+				6EF877EA232633CC00963DBB /* objcdt.1 */,
+				6EF877E62326184000963DBB /* json.h */,
+				6EF877E72326184000963DBB /* json.mm */,
+				6EF877D92325D62600963DBB /* objcdt.mm */,
+				6EF877E32325D95300963DBB /* objcdt-entitlements.plist */,
+			);
+			path = objcdt;
 			sourceTree = "<group>";
 		};
 		838485B20D6D67F900CEA253 /* Other */ = {
@@ -311,6 +456,8 @@
 				830F2AA50D7394C200392440 /* markgc.cpp */,
 				838485B40D6D683300CEA253 /* APPLE_LICENSE */,
 				838485B50D6D683300CEA253 /* ReleaseNotes.rtf */,
+				83CE671D1E6E76B60095A33E /* interposable.txt */,
+				E934A9EF23E9967D0088F26F /* objc4.plist */,
 				838485B30D6D682B00CEA253 /* libobjc.order */,
 			);
 			name = Other;
@@ -319,6 +466,8 @@
 		838485C60D6D687700CEA253 /* Public Headers */ = {
 			isa = PBXGroup;
 			children = (
+				83A4AEDD1EA08C5700ACADDE /* ObjectiveC.apinotes */,
+				83A4AED71EA06D9D00ACADDE /* module.modulemap */,
 				83F4B52615E843B100E0926F /* NSObjCRuntime.h */,
 				83F4B52715E843B100E0926F /* NSObject.h */,
 				838485BD0D6D687300CEA253 /* message.h */,
@@ -335,11 +484,13 @@
 		838485C70D6D688200CEA253 /* Private Headers */ = {
 			isa = PBXGroup;
 			children = (
-				83112ED30F00599600A5FBAF /* objc-internal.h */,
-				834EC0A311614167009B2563 /* objc-abi.h */,
 				838485BB0D6D687300CEA253 /* maptable.h */,
-				BC07A00B0EF72D360014EC61 /* objc-auto-dump.h */,
+				7213C36221FA7C730090A271 /* NSObject-internal.h */,
+				834EC0A311614167009B2563 /* objc-abi.h */,
+				8306440620D24A3E00E356D2 /* objc-block-trampolines.h */,
 				834266D70E665A8B002E4DA2 /* objc-gdb.h */,
+				83112ED30F00599600A5FBAF /* objc-internal.h */,
+				C22F5207230EF38B001BFE14 /* objc-ptrauth.h */,
 			);
 			name = "Private Headers";
 			sourceTree = "<group>";
@@ -371,12 +522,27 @@
 		8384862A0D6D6ABC00CEA253 /* Project Headers */ = {
 			isa = PBXGroup;
 			children = (
-				830F2A920D73876100392440 /* objc-accessors.h */,
+				6E1475E521DFDB1A001357EA /* llvm-AlignOf.h */,
+				6E1475E621DFDB1B001357EA /* llvm-DenseMap.h */,
+				6E1475E721DFDB1B001357EA /* llvm-DenseMapInfo.h */,
+				6ECD0B1E2244999E00910D88 /* llvm-DenseSet.h */,
+				6E1475E921DFDB1B001357EA /* llvm-MathExtras.h */,
+				6E1475E821DFDB1B001357EA /* llvm-type_traits.h */,
+				C2E6D3FB2225DCF00059DFAA /* DenseMapExtras.h */,
+				6E7B0861232DE7CA00689009 /* PointerUnion.h */,
+				83D9269721225A7400299F69 /* arm64-asm.h */,
+				83D92695212254CF00299F69 /* isa.h */,
 				838485CF0D6D68A200CEA253 /* objc-config.h */,
-				83BE02E60FCCB24D00661494 /* objc-file.h */,
+				C2296C682457336C003FAE61 /* objc-bp-assist.h */,
+				C217B55222DE556D004369BA /* objc-env.h */,
 				83BE02E50FCCB24D00661494 /* objc-file-old.h */,
+				83BE02E60FCCB24D00661494 /* objc-file.h */,
 				838485D40D6D68A200CEA253 /* objc-initialize.h */,
 				838485D90D6D68A200CEA253 /* objc-loadmethod.h */,
+				75A9504E202BAA0300D7D56F /* objc-locks-new.h */,
+				75A95052202BAC4100D7D56F /* objc-lockdebug.h */,
+				75A95050202BAA9A00D7D56F /* objc-locks.h */,
+				7593EC57202248DF0046AB96 /* objc-object.h */,
 				831C85D30E10CF850066E64C /* objc-os.h */,
 				838485DC0D6D68A200CEA253 /* objc-private.h */,
 				393CEAC50DC69E67000B69DE /* objc-references.h */,
@@ -384,51 +550,96 @@
 				83BE02E70FCCB24D00661494 /* objc-runtime-old.h */,
 				838485E50D6D68A200CEA253 /* objc-sel-set.h */,
 				39ABD71F12F0B61800D1054C /* objc-weak.h */,
+				6EACB841232C97A400CE9176 /* objc-zalloc.h */,
 			);
 			name = "Project Headers";
+			sourceTree = "<group>";
+		};
+		E9AD465824925261002AF1DB /* check-preopt-caches */ = {
+			isa = PBXGroup;
+			children = (
+				E97047552497CC5300781D29 /* check_preopt_caches.entitlements */,
+				E9AD465924925261002AF1DB /* check_preopt_caches.mm */,
+			);
+			path = "check-preopt-caches";
+			sourceTree = "<group>";
+		};
+		F9BCC72A205C6A1600DD9AFC /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				6EF877E42325FAC400963DBB /* Foundation.framework */,
+				6EF877E12325D93200963DBB /* Symbolication.framework */,
+				6EF877DF2325D92E00963DBB /* CoreSymbolication.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXHeadersBuildPhase section */
+		8306440820D24A5300E356D2 /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8306440920D24A5D00E356D2 /* objc-block-trampolines.h in Headers */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D2AAC0600554660B00DB518D /* Headers */ = {
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				83A4AEDE1EA08C7200ACADDE /* ObjectiveC.apinotes in Headers */,
+				75A95051202BAA9A00D7D56F /* objc-locks.h in Headers */,
+				6E1475ED21DFDB1B001357EA /* llvm-type_traits.h in Headers */,
+				83A4AEDC1EA0840800ACADDE /* module.modulemap in Headers */,
 				830F2A980D738DC200392440 /* hashtable.h in Headers */,
+				6EACB842232C97A400CE9176 /* objc-zalloc.h in Headers */,
+				6E1475EA21DFDB1B001357EA /* llvm-AlignOf.h in Headers */,
 				838485BF0D6D687300CEA253 /* hashtable2.h in Headers */,
+				6E1475EC21DFDB1B001357EA /* llvm-DenseMapInfo.h in Headers */,
+				C2E6D3FC2225DCF00059DFAA /* DenseMapExtras.h in Headers */,
 				838486260D6D68F000CEA253 /* List.h in Headers */,
 				838485C30D6D687300CEA253 /* maptable.h in Headers */,
 				838486280D6D6A2400CEA253 /* message.h in Headers */,
 				834EC0A411614167009B2563 /* objc-abi.h in Headers */,
-				830F2A940D73876100392440 /* objc-accessors.h in Headers */,
 				838485EF0D6D68A200CEA253 /* objc-api.h in Headers */,
-				BC07A00C0EF72D360014EC61 /* objc-auto-dump.h in Headers */,
 				838485F00D6D68A200CEA253 /* objc-auto.h in Headers */,
 				838485F40D6D68A200CEA253 /* objc-class.h in Headers */,
 				838485F60D6D68A200CEA253 /* objc-config.h in Headers */,
+				6E1475EE21DFDB1B001357EA /* llvm-MathExtras.h in Headers */,
 				838485F80D6D68A200CEA253 /* objc-exception.h in Headers */,
 				83BE02E80FCCB24D00661494 /* objc-file-old.h in Headers */,
 				83BE02E90FCCB24D00661494 /* objc-file.h in Headers */,
+				75A9504F202BAA0600D7D56F /* objc-locks-new.h in Headers */,
 				834266D80E665A8B002E4DA2 /* objc-gdb.h in Headers */,
 				838485FB0D6D68A200CEA253 /* objc-initialize.h in Headers */,
+				7593EC58202248E50046AB96 /* objc-object.h in Headers */,
 				83112ED40F00599600A5FBAF /* objc-internal.h in Headers */,
 				838485FE0D6D68A200CEA253 /* objc-load.h in Headers */,
 				838486000D6D68A200CEA253 /* objc-loadmethod.h in Headers */,
+				75A95053202BAC4100D7D56F /* objc-lockdebug.h in Headers */,
 				831C85D50E10CF850066E64C /* objc-os.h in Headers */,
 				838486030D6D68A200CEA253 /* objc-private.h in Headers */,
 				393CEAC60DC69E67000B69DE /* objc-references.h in Headers */,
+				6E1475EB21DFDB1B001357EA /* llvm-DenseMap.h in Headers */,
 				838486070D6D68A200CEA253 /* objc-runtime-new.h in Headers */,
 				83BE02EA0FCCB24D00661494 /* objc-runtime-old.h in Headers */,
 				8384860A0D6D68A200CEA253 /* objc-runtime.h in Headers */,
 				8384860C0D6D68A200CEA253 /* objc-sel-set.h in Headers */,
+				6E7B0862232DE7CA00689009 /* PointerUnion.h in Headers */,
+				7213C36321FA7C730090A271 /* NSObject-internal.h in Headers */,
 				838486100D6D68A200CEA253 /* objc-sync.h in Headers */,
+				83D92696212254CF00299F69 /* isa.h in Headers */,
 				838486130D6D68A200CEA253 /* objc.h in Headers */,
+				83D9269821225A7400299F69 /* arm64-asm.h in Headers */,
 				838486140D6D68A200CEA253 /* Object.h in Headers */,
 				8384861E0D6D68A800CEA253 /* Protocol.h in Headers */,
 				838486200D6D68A800CEA253 /* runtime.h in Headers */,
 				39ABD72312F0B61800D1054C /* objc-weak.h in Headers */,
 				83F4B52815E843B100E0926F /* NSObjCRuntime.h in Headers */,
+				C22F5208230EF38B001BFE14 /* objc-ptrauth.h in Headers */,
+				6ECD0B1F2244999E00910D88 /* llvm-DenseSet.h in Headers */,
 				83F4B52915E843B100E0926F /* NSObject.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -436,6 +647,23 @@
 /* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
+		6EF877D62325D62600963DBB /* objcdt */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6EF877DD2325D62600963DBB /* Build configuration list for PBXNativeTarget "objcdt" */;
+			buildPhases = (
+				6EF877D32325D62600963DBB /* Sources */,
+				6EF877D42325D62600963DBB /* Frameworks */,
+				6EF877D52325D62600963DBB /* Install Manpages */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = objcdt;
+			productName = objcdt;
+			productReference = 6EF877D72325D62600963DBB /* objcdt */;
+			productType = "com.apple.product-type.tool";
+		};
 		D2AAC0620554660B00DB518D /* objc */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1DEB914A08733D8E0010E9CD /* Build configuration list for PBXNativeTarget "objc" */;
@@ -445,14 +673,33 @@
 				D289988505E68E00004EDB86 /* Frameworks */,
 				830F2AB60D739AB600392440 /* Run Script (markgc) */,
 				830F2AFA0D73BC5800392440 /* Run Script (symlink) */,
+				E934A9F023E996CC0088F26F /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F9BCC729205C6A0900DD9AFC /* PBXTargetDependency */,
+			);
+			name = objc;
+			productName = objc;
+			productReference = D2AAC0630554660B00DB518D /* libobjc.A.dylib */;
+			productType = "com.apple.product-type.library.dynamic";
+		};
+		F9BCC6CA205C68E800DD9AFC /* objc-trampolines */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F9BCC724205C68E800DD9AFC /* Build configuration list for PBXNativeTarget "objc-trampolines" */;
+			buildPhases = (
+				8306440820D24A5300E356D2 /* Headers */,
+				F9BCC6EF205C68E800DD9AFC /* Sources */,
+				F9BCC721205C68E800DD9AFC /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = objc;
+			name = "objc-trampolines";
 			productName = objc;
-			productReference = D2AAC0630554660B00DB518D /* libobjc.A.dylib */;
+			productReference = F9BCC727205C68E800DD9AFC /* libobjc-trampolines.dylib */;
 			productType = "com.apple.product-type.library.dynamic";
 		};
 /* End PBXNativeTarget section */
@@ -461,9 +708,20 @@
 		08FB7793FE84155DC02AAC07 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				BuildIndependentTargetsInParallel = NO;
 				LastUpgradeCheck = 0440;
 				TargetAttributes = {
+					6EF877D62325D62600963DBB = {
+						CreatedOnToolsVersion = 11.0;
+					};
+					6EF877EF23263D7000963DBB = {
+						CreatedOnToolsVersion = 11.0;
+						ProvisioningStyle = Automatic;
+					};
+					834F9B01212E560100F95A54 = {
+						CreatedOnToolsVersion = 10.0;
+						DevelopmentTeam = 59GAB85EFG;
+						ProvisioningStyle = Automatic;
+					};
 					837F67A81A771F63004D34FA = {
 						CreatedOnToolsVersion = 6.3;
 					};
@@ -485,6 +743,10 @@
 			targets = (
 				D2AAC0620554660B00DB518D /* objc */,
 				837F67A81A771F63004D34FA /* objc-simulator */,
+				F9BCC6CA205C68E800DD9AFC /* objc-trampolines */,
+				834F9B01212E560100F95A54 /* objc4_tests */,
+				6EF877EF23263D7000963DBB /* objc_executables */,
+				6EF877D62325D62600963DBB /* objcdt */,
 			);
 		};
 /* End PBXProject section */
@@ -493,7 +755,7 @@
 		830F2AB60D739AB600392440 /* Run Script (markgc) */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
-			comments = "Set the GC-supported bit in libobjc itself.\n\nlibobjc cannot be built with -fobjc-gc, because it needs more precise control over write-barrier use.\n\nThis is done on all architectures and platforms, even though some don't actually support GC. In those cases, a program that actually tries to use GC will fail with link errors.";
+			comments = "Modify the built dylib (mod_init_funcs and mod_term_funcs).";
 			files = (
 			);
 			inputPaths = (
@@ -503,7 +765,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -x\n/usr/bin/xcrun -toolchain XcodeDefault -sdk macosx clang++ -Wall -mmacosx-version-min=10.9 -arch x86_64 -std=c++11 \"${SRCROOT}/markgc.cpp\" -o \"${BUILT_PRODUCTS_DIR}/markgc\"\n\"${BUILT_PRODUCTS_DIR}/markgc\" \"${BUILT_PRODUCTS_DIR}/libobjc.A.dylib\"";
+			shellScript = "set -x\n/usr/bin/xcrun -sdk macosx.internal clang++ -Wall -mmacosx-version-min=10.12 -arch x86_64 -std=c++11 \"${SRCROOT}/markgc.cpp\" -o \"${BUILT_PRODUCTS_DIR}/markgc\"\n\"${BUILT_PRODUCTS_DIR}/markgc\" \"${BUILT_PRODUCTS_DIR}/libobjc.A.dylib\"";
 		};
 		830F2AFA0D73BC5800392440 /* Run Script (symlink) */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -517,11 +779,39 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/sh;
-			shellScript = "cd \"${INSTALL_DIR}\"\n/bin/ln -s libobjc.A.dylib libobjc.dylib\n";
+			shellScript = "cd \"${INSTALL_DIR}\"\n/bin/ln -s libobjc.A.dylib libobjc.dylib\n\nTBD_UPPER=`echo ${GENERATE_TEXT_BASED_STUBS} | tr a-z A-Z`\n\nif [ ${TBD_UPPER} = \"YES\" ] || [ ${TBD_UPPER} = \"TRUE\" ] || [ ${TBD_UPPER} = \"1\" ]; then\nGENERATE_TBD=1\nfi\n\nif [ ${GENERATE_TBD} ]; then\n    /bin/ln -s libobjc.A.tbd libobjc.tbd\nfi\n";
+		};
+		834F9B05212E561400F95A54 /* Run Script (build tests) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Run Script (build tests)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -x\nset -e\n\n# Set this to empty, or a space-separated list of tests to run.\ntestfiles=\"\"\n\n# Location inside DSTROOT of our test files and our BATS config file.\ntestdir=/AppleInternal/CoreOS/tests/objc4\nconfigdir=/AppleInternal/CoreOS/BATS/unit_tests\n\nmkdir -p ${DSTROOT}${testdir}\nmkdir -p ${DSTROOT}${configdir}\n\n# Common test.pl args for building and running.\ntestargs=\"ARCH=`echo ${ARCHS} | tr ' ' ','` OS=${PLATFORM_NAME} MEM=mrc,arc LANGUAGE=c,c++,objc,objc++ RUN=0 VERBOSE=1 BATS=1 ${testfiles}\"\n\n# Build the tests and BATS plist into DSTROOT.\nperl ${SRCROOT}/test/test.pl $testargs BUILD=1 RUN=0\n\n# Move the BATS plist where BATS expects it, and convert it to binary format.\nmv ${DSTROOT}${testdir}/objc4.plist ${DSTROOT}${configdir}\nplutil -convert binary1 ${DSTROOT}${configdir}/objc4.plist\n\n# Copy test sources to DSTROOT; running the test requires reading them again.\ncp -R ${SRCROOT}/test ${DSTROOT}${testdir}/test\n\n# Don't copy gcfiles because XBS chokes on them.\n# Don't copy other cruft because verifiers dislike them. (This doesn't matter for submissions but does affect local buildit builds.)\nrm -rf ${DSTROOT}${testdir}/test/gcfiles\nrm -rf ${DSTROOT}${testdir}/test/*~\nrm -rf ${DSTROOT}${testdir}/test/\\#*\\#\nrm -rf ${DSTROOT}${testdir}/test/.\\#*\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		6EF877D32325D62600963DBB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6EF877E82326184000963DBB /* json.mm in Sources */,
+				6EF877DA2325D62600963DBB /* objcdt.mm in Sources */,
+				6EF877DE2325D79000963DBB /* objc-probes.d in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D2AAC0610554660B00DB518D /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -557,36 +847,50 @@
 				393CEAC00DC69E3E000B69DE /* objc-references.mm in Sources */,
 				831C85D60E10CF850066E64C /* objc-os.mm in Sources */,
 				87BB4EA70EC39854005D08E1 /* objc-probes.d in Sources */,
-				BC07A0110EF72D9C0014EC61 /* objc-auto-dump.mm in Sources */,
 				83BE02E40FCCB23400661494 /* objc-file-old.mm in Sources */,
-				E8923DA1116AB2820071B552 /* a1a2-blocktramps-i386.s in Sources */,
-				E8923DA2116AB2820071B552 /* a1a2-blocktramps-x86_64.s in Sources */,
-				E8923DA3116AB2820071B552 /* a2a3-blocktramps-i386.s in Sources */,
-				E8923DA4116AB2820071B552 /* a2a3-blocktramps-x86_64.s in Sources */,
 				E8923DA5116AB2820071B552 /* objc-block-trampolines.mm in Sources */,
 				83B1A8BE0FF1AC0D0019EA5B /* objc-msg-simulator-i386.s in Sources */,
 				83EB007B121C9EC200B92C16 /* objc-sel-table.s in Sources */,
-				8383A3A3122600E9009290B8 /* a1a2-blocktramps-arm.s in Sources */,
-				8383A3A4122600E9009290B8 /* a2a3-blocktramps-arm.s in Sources */,
-				399BC72E1224831B007FBDF0 /* objc-externalref.mm in Sources */,
 				39ABD72412F0B61800D1054C /* objc-weak.mm in Sources */,
+				C2EB731D23D8A38A0040672B /* dummy-library-mac-i386.c in Sources */,
 				83D49E4F13C7C84F0057F1DD /* objc-msg-arm64.s in Sources */,
-				8379996E13CBAF6F007C2B5F /* a1a2-blocktramps-arm64.s in Sources */,
 				9672F7EE14D5F488007CEC96 /* NSObject.mm in Sources */,
 				83725F4A14CA5BFA0014370E /* objc-opt.mm in Sources */,
+				6EACB844232C97B900CE9176 /* objc-zalloc.mm in Sources */,
 				83F550E0155E030800E95D3B /* objc-cache-old.mm in Sources */,
 				834DF8B715993EE1002F2BC9 /* objc-sel-old.mm in Sources */,
 				83C9C3391668B50E00F4E544 /* objc-msg-simulator-x86_64.s in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F9BCC6EF205C68E800DD9AFC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				83EF5E9C20D2299E00F486A4 /* objc-blocktramps-arm.s in Sources */,
+				83EF5E9820D2298400F486A4 /* objc-blocktramps-i386.s in Sources */,
+				83EF5E9920D2298400F486A4 /* objc-blocktramps-x86_64.s in Sources */,
+				F9BCC71B205C68E800DD9AFC /* objc-blocktramps-arm64.s in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		6EF877F423263D8000963DBB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6EF877D62325D62600963DBB /* objcdt */;
+			targetProxy = 6EF877F323263D8000963DBB /* PBXContainerItemProxy */;
+		};
 		837F67AD1A771F6E004D34FA /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = D2AAC0620554660B00DB518D /* objc */;
 			targetProxy = 837F67AC1A771F6E004D34FA /* PBXContainerItemProxy */;
+		};
+		F9BCC729205C6A0900DD9AFC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F9BCC6CA205C68E800DD9AFC /* objc-trampolines */;
+			targetProxy = F9BCC728205C6A0900DD9AFC /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -594,25 +898,34 @@
 		1DEB914B08733D8E0010E9CD /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				COPY_HEADERS_RUN_UNIFDEF = YES;
+				COPY_HEADERS_UNIFDEF_FLAGS = "-UBUILD_FOR_OSX";
+				"COPY_HEADERS_UNIFDEF_FLAGS[sdk=macosx*]" = "-DBUILD_FOR_OSX";
 				COPY_PHASE_STRIP = NO;
+				DEPLOYMENT_LOCATION = YES;
 				DYLIB_CURRENT_VERSION = 228;
+				EXCLUDED_SOURCE_FILE_NAMES = "dummy-library-mac-i386.c";
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*][arch=i386]" = "*";
 				EXECUTABLE_PREFIX = lib;
 				GCC_CW_ASM_SYNTAX = NO;
 				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_THREADSAFE_STATICS = NO;
 				GCC_WARN_ABOUT_DEPRECATED_FUNCTIONS = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(DSTROOT)/usr/include/**",
 					"$(DSTROOT)/usr/local/include/**",
 					"$(CONFIGURATION_BUILD_DIR)/usr/include/**",
 					"$(CONFIGURATION_BUILD_DIR)/usr/local/include/**",
+					/System/Library/Frameworks/System.framework/PrivateHeaders,
 				);
+				"INCLUDED_SOURCE_FILE_NAMES[sdk=macosx*][arch=i386]" = "dummy-library-mac-i386.c";
 				INSTALL_PATH = /usr/lib;
+				IS_ZIPPERED = YES;
+				LLVM_LTO = NO;
 				ORDER_FILE = "$(SDKROOT)/AppleInternal/OrderFiles/libobjc.order";
 				"ORDER_FILE[sdk=iphonesimulator*]" = "";
 				OTHER_CFLAGS = (
 					"-fdollars-in-identifiers",
+					"-fno-objc-convert-messages-to-runtime-calls",
 					"$(OTHER_CFLAGS)",
 				);
 				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = (
@@ -626,11 +939,24 @@
 					__objc_data,
 					"-Xlinker",
 					0x1000,
+					"-Xlinker",
+					"-interposable_list",
+					"-Xlinker",
+					interposable.txt,
+					"-Xlinker",
+					"-headerpad",
+					"-Xlinker",
+					0x100,
 				);
-				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=*]" = "-lc++abi";
+				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=*]" = (
+					"-lc++abi",
+					"-Xlinker",
+					"-interposable_list",
+					"-Xlinker",
+					interposable.txt,
+				);
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"-lCrashReporterClient",
-					"-lauto",
 					"-lc++abi",
 					"-Xlinker",
 					"-sectalign",
@@ -640,10 +966,19 @@
 					__objc_data,
 					"-Xlinker",
 					0x1000,
+					"-Xlinker",
+					"-interposable_list",
+					"-Xlinker",
+					interposable.txt,
+					"-loah",
 				);
+				"OTHER_LDFLAGS[sdk=macosx*][arch=i386]" = "-nodefaultlibs";
+				OTHER_TAPI_FLAGS = "-exclude-public-header $(DSTROOT)/usr/include/objc/ObjectiveC.apinotes -exclude-public-header $(DSTROOT)/usr/include/objc/module.modulemap -Xparser -Wno-deprecated-declarations -Xparser -Wno-unavailable-declarations -Xparser -D_OBJC_PRIVATE_H_=1 -DOBJC_DECLARE_SYMBOLS=1";
 				PRIVATE_HEADERS_FOLDER_PATH = /usr/local/include/objc;
 				PRODUCT_NAME = objc.A;
 				PUBLIC_HEADERS_FOLDER_PATH = /usr/include/objc;
+				SUPPORTS_TEXT_BASED_API = YES;
+				TAPI_VERIFY_MODE = Pedantic;
 				UNEXPORTED_SYMBOLS_FILE = unexported_symbols;
 			};
 			name = Debug;
@@ -651,22 +986,31 @@
 		1DEB914C08733D8E0010E9CD /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				COPY_HEADERS_RUN_UNIFDEF = YES;
+				COPY_HEADERS_UNIFDEF_FLAGS = "-UBUILD_FOR_OSX";
+				"COPY_HEADERS_UNIFDEF_FLAGS[sdk=macosx*]" = "-DBUILD_FOR_OSX";
+				DEPLOYMENT_LOCATION = YES;
 				DYLIB_CURRENT_VERSION = 228;
+				EXCLUDED_SOURCE_FILE_NAMES = "dummy-library-mac-i386.c";
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*][arch=i386]" = "*";
 				EXECUTABLE_PREFIX = lib;
 				GCC_CW_ASM_SYNTAX = NO;
-				GCC_THREADSAFE_STATICS = NO;
 				GCC_WARN_ABOUT_DEPRECATED_FUNCTIONS = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(DSTROOT)/usr/include/**",
 					"$(DSTROOT)/usr/local/include/**",
 					"$(CONFIGURATION_BUILD_DIR)/usr/include/**",
 					"$(CONFIGURATION_BUILD_DIR)/usr/local/include/**",
+					/System/Library/Frameworks/System.framework/PrivateHeaders,
 				);
+				"INCLUDED_SOURCE_FILE_NAMES[sdk=macosx*][arch=i386]" = "dummy-library-mac-i386.c";
 				INSTALL_PATH = /usr/lib;
+				IS_ZIPPERED = YES;
 				ORDER_FILE = "$(SDKROOT)/AppleInternal/OrderFiles/libobjc.order";
 				"ORDER_FILE[sdk=iphonesimulator*]" = "";
 				OTHER_CFLAGS = (
 					"-fdollars-in-identifiers",
+					"-fno-objc-convert-messages-to-runtime-calls",
 					"$(OTHER_CFLAGS)",
 				);
 				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = (
@@ -680,11 +1024,24 @@
 					__objc_data,
 					"-Xlinker",
 					0x1000,
+					"-Xlinker",
+					"-interposable_list",
+					"-Xlinker",
+					interposable.txt,
+					"-Xlinker",
+					"-headerpad",
+					"-Xlinker",
+					0x100,
 				);
-				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=*]" = "-lc++abi";
+				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=*]" = (
+					"-lc++abi",
+					"-Xlinker",
+					"-interposable_list",
+					"-Xlinker",
+					interposable.txt,
+				);
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"-lCrashReporterClient",
-					"-lauto",
 					"-lc++abi",
 					"-Xlinker",
 					"-sectalign",
@@ -694,27 +1051,44 @@
 					__objc_data,
 					"-Xlinker",
 					0x1000,
+					"-Xlinker",
+					"-interposable_list",
+					"-Xlinker",
+					interposable.txt,
+					"-loah",
 				);
+				"OTHER_LDFLAGS[sdk=macosx*][arch=i386]" = "-nodefaultlibs";
+				OTHER_TAPI_FLAGS = "-exclude-public-header $(DSTROOT)/usr/include/objc/ObjectiveC.apinotes -exclude-public-header $(DSTROOT)/usr/include/objc/module.modulemap -Xparser -Wno-deprecated-declarations -Xparser -Wno-unavailable-declarations -Xparser -D_OBJC_PRIVATE_H_=1 -DOBJC_DECLARE_SYMBOLS=1";
 				PRIVATE_HEADERS_FOLDER_PATH = /usr/local/include/objc;
 				PRODUCT_NAME = objc.A;
 				PUBLIC_HEADERS_FOLDER_PATH = /usr/include/objc;
+				SUPPORTS_TEXT_BASED_API = YES;
+				TAPI_VERIFY_MODE = Pedantic;
 				UNEXPORTED_SYMBOLS_FILE = unexported_symbols;
+				WARNING_CFLAGS = (
+					"$(inherited)",
+					"-Wglobal-constructors",
+				);
 			};
 			name = Release;
 		};
 		1DEB914F08733D8E0010E9CD /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_LINK_OBJC_RUNTIME = NO;
 				CLANG_OBJC_RUNTIME = NO;
+				CODE_SIGN_IDENTITY = "-";
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_ENABLE_CPP_EXCEPTIONS = NO;
 				GCC_ENABLE_CPP_RTTI = NO;
 				GCC_INLINES_ARE_PRIVATE_EXTERN = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = "OS_OBJECT_USE_OBJC=0";
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"OS_OBJECT_USE_OBJC=0",
+					"OBJC_IS_DEBUG_BUILD=1",
+				);
 				GCC_STRICT_ALIASING = YES;
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
@@ -724,12 +1098,15 @@
 				GCC_WARN_ABOUT_RETURN_TYPE = YES;
 				GCC_WARN_SHADOW = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				LLVM_LTO = YES;
 				OTHER_CFLAGS = "";
 				"OTHER_CFLAGS[arch=x86_64]" = "-fobjc-legacy-dispatch";
 				OTHER_CPLUSPLUSFLAGS = (
 					"$(OTHER_CFLAGS)",
 					"-D_LIBCPP_VISIBLE=\"\"",
 				);
+				SDKROOT = macosx.internal;
+				SUPPORTED_PLATFORMS = "macosx iphoneos appletvos watchos";
 				WARNING_CFLAGS = (
 					"-Wall",
 					"-Wextra",
@@ -745,10 +1122,11 @@
 		1DEB915008733D8E0010E9CD /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_LINK_OBJC_RUNTIME = NO;
 				CLANG_OBJC_RUNTIME = NO;
+				CODE_SIGN_IDENTITY = "-";
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_ENABLE_CPP_EXCEPTIONS = NO;
 				GCC_ENABLE_CPP_RTTI = NO;
@@ -766,7 +1144,8 @@
 				GCC_WARN_ABOUT_RETURN_TYPE = YES;
 				GCC_WARN_SHADOW = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				"OTHER_CFLAGS[arch=i386]" = "-momit-leaf-frame-pointer";
+				LLVM_LTO = YES;
+				OTHER_CFLAGS = "-momit-leaf-frame-pointer";
 				"OTHER_CFLAGS[arch=x86_64]" = (
 					"-momit-leaf-frame-pointer",
 					"-fobjc-legacy-dispatch",
@@ -775,6 +1154,8 @@
 					"$(OTHER_CFLAGS)",
 					"-D_LIBCPP_VISIBLE=\"\"",
 				);
+				SDKROOT = macosx.internal;
+				SUPPORTED_PLATFORMS = "macosx iphoneos appletvos watchos";
 				WARNING_CFLAGS = (
 					"-Wall",
 					"-Wextra",
@@ -784,6 +1165,77 @@
 					"-Wno-deprecated-objc-isa-usage",
 					"-Wno-cast-of-sel-type",
 				);
+			};
+			name = Release;
+		};
+		6EF877DB2325D62600963DBB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "objcdt/objcdt-entitlements.plist";
+				CODE_SIGN_IDENTITY = "-";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"__BUILDING_OBJCDT__=1",
+					"$(inherited)",
+				);
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/runtime",
+					/System/Library/Frameworks/System.framework/PrivateHeaders,
+				);
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYSTEM_FRAMEWORK_SEARCH_PATHS = "$(inherited) $(SDKROOT)$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks";
+			};
+			name = Debug;
+		};
+		6EF877DC2325D62600963DBB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "objcdt/objcdt-entitlements.plist";
+				CODE_SIGN_IDENTITY = "-";
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"__BUILDING_OBJCDT__=1",
+					"$(inherited)",
+				);
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/runtime",
+					/System/Library/Frameworks/System.framework/PrivateHeaders,
+				);
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYSTEM_FRAMEWORK_SEARCH_PATHS = "$(inherited) $(SDKROOT)$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks";
+			};
+			name = Release;
+		};
+		6EF877F023263D7000963DBB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		6EF877F123263D7000963DBB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+		834F9B02212E560200F95A54 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 59GAB85EFG;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		834F9B03212E560200F95A54 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 59GAB85EFG;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
 		};
@@ -798,6 +1250,82 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+		F9BCC725205C68E800DD9AFC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COPY_HEADERS_RUN_UNIFDEF = YES;
+				COPY_HEADERS_UNIFDEF_FLAGS = "-UBUILD_FOR_OSX";
+				"COPY_HEADERS_UNIFDEF_FLAGS[sdk=macosx*]" = "-DBUILD_FOR_OSX";
+				COPY_PHASE_STRIP = NO;
+				DEPLOYMENT_LOCATION = YES;
+				DYLIB_CURRENT_VERSION = 228;
+				EXECUTABLE_PREFIX = lib;
+				GCC_CW_ASM_SYNTAX = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_WARN_ABOUT_DEPRECATED_FUNCTIONS = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(DSTROOT)/usr/include/**",
+					"$(DSTROOT)/usr/local/include/**",
+					"$(CONFIGURATION_BUILD_DIR)/usr/include/**",
+					"$(CONFIGURATION_BUILD_DIR)/usr/local/include/**",
+					/System/Library/Frameworks/System.framework/PrivateHeaders,
+				);
+				INSTALL_PATH = /usr/lib;
+				IS_ZIPPERED = YES;
+				OTHER_CFLAGS = (
+					"-fdollars-in-identifiers",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = (
+					"-Xlinker",
+					"-not_for_dyld_shared_cache",
+					"-nodefaultlibs",
+				);
+				PRIVATE_HEADERS_FOLDER_PATH = /usr/local/include/objc;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PUBLIC_HEADERS_FOLDER_PATH = /usr/include/objc;
+				SUPPORTS_TEXT_BASED_API = YES;
+				TAPI_VERIFY_MODE = Pedantic;
+			};
+			name = Debug;
+		};
+		F9BCC726205C68E800DD9AFC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COPY_HEADERS_RUN_UNIFDEF = YES;
+				COPY_HEADERS_UNIFDEF_FLAGS = "-UBUILD_FOR_OSX";
+				"COPY_HEADERS_UNIFDEF_FLAGS[sdk=macosx*]" = "-DBUILD_FOR_OSX";
+				DEPLOYMENT_LOCATION = YES;
+				DYLIB_CURRENT_VERSION = 228;
+				EXECUTABLE_PREFIX = lib;
+				GCC_CW_ASM_SYNTAX = NO;
+				GCC_WARN_ABOUT_DEPRECATED_FUNCTIONS = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(DSTROOT)/usr/include/**",
+					"$(DSTROOT)/usr/local/include/**",
+					"$(CONFIGURATION_BUILD_DIR)/usr/include/**",
+					"$(CONFIGURATION_BUILD_DIR)/usr/local/include/**",
+					/System/Library/Frameworks/System.framework/PrivateHeaders,
+				);
+				INSTALL_PATH = /usr/lib;
+				IS_ZIPPERED = YES;
+				OTHER_CFLAGS = (
+					"-fdollars-in-identifiers",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = (
+					"-Xlinker",
+					"-not_for_dyld_shared_cache",
+					"-nodefaultlibs",
+				);
+				PRIVATE_HEADERS_FOLDER_PATH = /usr/local/include/objc;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PUBLIC_HEADERS_FOLDER_PATH = /usr/include/objc;
+				SUPPORTS_TEXT_BASED_API = YES;
+				TAPI_VERIFY_MODE = Pedantic;
 			};
 			name = Release;
 		};
@@ -822,11 +1350,47 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		6EF877DD2325D62600963DBB /* Build configuration list for PBXNativeTarget "objcdt" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6EF877DB2325D62600963DBB /* Debug */,
+				6EF877DC2325D62600963DBB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6EF877F223263D7000963DBB /* Build configuration list for PBXAggregateTarget "objc_executables" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6EF877F023263D7000963DBB /* Debug */,
+				6EF877F123263D7000963DBB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		834F9B04212E560200F95A54 /* Build configuration list for PBXAggregateTarget "objc4_tests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				834F9B02212E560200F95A54 /* Debug */,
+				834F9B03212E560200F95A54 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		837F67A91A771F63004D34FA /* Build configuration list for PBXAggregateTarget "objc-simulator" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				837F67AA1A771F63004D34FA /* Debug */,
 				837F67AB1A771F63004D34FA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F9BCC724205C68E800DD9AFC /* Build configuration list for PBXNativeTarget "objc-trampolines" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F9BCC725205C68E800DD9AFC /* Debug */,
+				F9BCC726205C68E800DD9AFC /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

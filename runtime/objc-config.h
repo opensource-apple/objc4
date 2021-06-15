@@ -33,16 +33,16 @@
 #   define DEBUG 0
 #endif
 
-// Define SUPPORT_GC=1 to enable garbage collection.
-// Be sure to edit OBJC_NO_GC and OBJC_NO_GC_API in objc-api.h as well.
-#if TARGET_OS_EMBEDDED  ||  TARGET_OS_IPHONE  ||  TARGET_OS_WIN32  ||  (TARGET_OS_MAC && __x86_64h__)
-#   define SUPPORT_GC 0
+// Define SUPPORT_GC_COMPAT=1 to enable compatibility where GC once was.
+// OBJC_NO_GC and OBJC_NO_GC_API in objc-api.h mean something else.
+#if !TARGET_OS_OSX
+#   define SUPPORT_GC_COMPAT 0
 #else
-#   define SUPPORT_GC 1
+#   define SUPPORT_GC_COMPAT 1
 #endif
 
 // Define SUPPORT_ZONES=1 to enable malloc zone support in NXHashTable.
-#if TARGET_OS_EMBEDDED  ||  TARGET_OS_IPHONE
+#if !(TARGET_OS_OSX || TARGET_OS_MACCATALYST)
 #   define SUPPORT_ZONES 0
 #else
 #   define SUPPORT_ZONES 1
@@ -56,7 +56,7 @@
 #endif
 
 // Define SUPPORT_PREOPT=1 to enable dyld shared cache optimizations
-#if TARGET_OS_WIN32  ||  TARGET_IPHONE_SIMULATOR
+#if TARGET_OS_WIN32
 #   define SUPPORT_PREOPT 0
 #else
 #   define SUPPORT_PREOPT 1
@@ -64,7 +64,7 @@
 
 // Define SUPPORT_TAGGED_POINTERS=1 to enable tagged pointer objects
 // Be sure to edit tagged pointer SPI in objc-internal.h as well.
-#if !(__OBJC2__  &&  __LP64__)
+#if !__LP64__
 #   define SUPPORT_TAGGED_POINTERS 0
 #else
 #   define SUPPORT_TAGGED_POINTERS 1
@@ -73,14 +73,34 @@
 // Define SUPPORT_MSB_TAGGED_POINTERS to use the MSB 
 // as the tagged pointer marker instead of the LSB.
 // Be sure to edit tagged pointer SPI in objc-internal.h as well.
-#if !SUPPORT_TAGGED_POINTERS  ||  !TARGET_OS_IPHONE
+#if !SUPPORT_TAGGED_POINTERS  ||  ((TARGET_OS_OSX || TARGET_OS_MACCATALYST) && __x86_64__)
 #   define SUPPORT_MSB_TAGGED_POINTERS 0
 #else
 #   define SUPPORT_MSB_TAGGED_POINTERS 1
 #endif
 
-// Define SUPPORT_NONPOINTER_ISA=1 to enable extra data in the isa field.
-#if !__LP64__  ||  TARGET_OS_WIN32  ||  TARGET_IPHONE_SIMULATOR
+// Define SUPPORT_INDEXED_ISA=1 on platforms that store the class in the isa 
+// field as an index into a class table.
+// Note, keep this in sync with any .s files which also define it.
+// Be sure to edit objc-abi.h as well.
+#if __ARM_ARCH_7K__ >= 2  ||  (__arm64__ && !__LP64__)
+#   define SUPPORT_INDEXED_ISA 1
+#else
+#   define SUPPORT_INDEXED_ISA 0
+#endif
+
+// Define SUPPORT_PACKED_ISA=1 on platforms that store the class in the isa 
+// field as a maskable pointer with other data around it.
+#if (!__LP64__  ||  TARGET_OS_WIN32  ||  \
+     (TARGET_OS_SIMULATOR && !TARGET_OS_MACCATALYST && !__arm64__))
+#   define SUPPORT_PACKED_ISA 0
+#else
+#   define SUPPORT_PACKED_ISA 1
+#endif
+
+// Define SUPPORT_NONPOINTER_ISA=1 on any platform that may store something
+// in the isa field that is not a raw pointer.
+#if !SUPPORT_INDEXED_ISA  &&  !SUPPORT_PACKED_ISA
 #   define SUPPORT_NONPOINTER_ISA 0
 #else
 #   define SUPPORT_NONPOINTER_ISA 1
@@ -89,31 +109,15 @@
 // Define SUPPORT_FIXUP=1 to repair calls sites for fixup dispatch.
 // Fixup messaging itself is no longer supported.
 // Be sure to edit objc-abi.h as well (objc_msgSend*_fixup)
-// Note TARGET_OS_MAC is also set for iOS simulator.
-#if !__x86_64__  ||  !TARGET_OS_MAC
+#if !(defined(__x86_64__) && (TARGET_OS_OSX || TARGET_OS_SIMULATOR))
 #   define SUPPORT_FIXUP 0
 #else
 #   define SUPPORT_FIXUP 1
 #endif
 
-// Define SUPPORT_IGNORED_SELECTOR_CONSTANT to remap GC-ignored selectors.
-// Good: fast ignore in objc_msgSend. Bad: disable shared cache optimizations
-// Now used only for old-ABI GC.
-// This is required for binary compatibility on 32-bit Mac: rdar://13757938
-#if __OBJC2__  ||  !SUPPORT_GC
-#   define SUPPORT_IGNORED_SELECTOR_CONSTANT 0
-#else
-#   define SUPPORT_IGNORED_SELECTOR_CONSTANT 1
-#   if defined(__i386__)
-#       define kIgnore 0xfffeb010
-#   else
-#       error unknown architecture
-#   endif
-#endif
-
 // Define SUPPORT_ZEROCOST_EXCEPTIONS to use "zero-cost" exceptions for OBJC2.
 // Be sure to edit objc-exception.h as well (objc_add/removeExceptionHandler)
-#if !__OBJC2__  ||  (defined(__arm__)  &&  __USING_SJLJ_EXCEPTIONS__)
+#if defined(__arm__)  &&  __USING_SJLJ_EXCEPTIONS__
 #   define SUPPORT_ZEROCOST_EXCEPTIONS 0
 #else
 #   define SUPPORT_ZEROCOST_EXCEPTIONS 1
@@ -122,14 +126,14 @@
 // Define SUPPORT_ALT_HANDLERS if you're using zero-cost exceptions 
 // but also need to support AppKit's alt-handler scheme
 // Be sure to edit objc-exception.h as well (objc_add/removeExceptionHandler)
-#if !SUPPORT_ZEROCOST_EXCEPTIONS  ||  TARGET_OS_IPHONE  ||  TARGET_OS_EMBEDDED
+#if !SUPPORT_ZEROCOST_EXCEPTIONS  ||  !TARGET_OS_OSX
 #   define SUPPORT_ALT_HANDLERS 0
 #else
 #   define SUPPORT_ALT_HANDLERS 1
 #endif
 
 // Define SUPPORT_RETURN_AUTORELEASE to optimize autoreleased return values
-#if !__OBJC2__  ||  TARGET_OS_WIN32
+#if TARGET_OS_WIN32
 #   define SUPPORT_RETURN_AUTORELEASE 0
 #else
 #   define SUPPORT_RETURN_AUTORELEASE 1
@@ -143,17 +147,25 @@
 #endif
 
 // Define SUPPORT_MESSAGE_LOGGING to enable NSObjCMessageLoggingEnabled
-#if TARGET_OS_WIN32  ||  TARGET_OS_EMBEDDED
+#if !TARGET_OS_OSX
 #   define SUPPORT_MESSAGE_LOGGING 0
 #else
 #   define SUPPORT_MESSAGE_LOGGING 1
 #endif
 
-// Define SUPPORT_QOS_HACK to work around deadlocks due to QoS bugs.
-#if !__OBJC2__  ||  TARGET_OS_WIN32
-#   define SUPPORT_QOS_HACK 0
+// Define SUPPORT_AUTORELEASEPOOL_DEDDUP_PTRS to combine consecutive pointers to the same object in autorelease pools
+#if !__LP64__
+#   define SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS 0
 #else
-#   define SUPPORT_QOS_HACK 1
+#   define SUPPORT_AUTORELEASEPOOL_DEDUP_PTRS 1
+#endif
+
+// Define HAVE_TASK_RESTARTABLE_RANGES to enable usage of
+// task_restartable_ranges_synchronize()
+#if TARGET_OS_SIMULATOR || defined(__i386__) || defined(__arm__) || !TARGET_OS_MAC
+#   define HAVE_TASK_RESTARTABLE_RANGES 0
+#else
+#   define HAVE_TASK_RESTARTABLE_RANGES 1
 #endif
 
 // OBJC_INSTRUMENTED controls whether message dispatching is dynamically
@@ -163,5 +175,102 @@
 // condition, but objc-class.h can not #include this file (objc-config.h)
 // because objc-class.h is public and objc-config.h is not.
 //#define OBJC_INSTRUMENTED
+
+// The runtimeLock is a mutex always held hence the cache lock is
+// redundant and can be elided.
+//
+// If the runtime lock ever becomes a rwlock again,
+// the cache lock would need to be used again
+#define CONFIG_USE_CACHE_LOCK 0
+
+// Determine how the method cache stores IMPs.
+#define CACHE_IMP_ENCODING_NONE 1 // Method cache contains raw IMP.
+#define CACHE_IMP_ENCODING_ISA_XOR 2 // Method cache contains ISA ^ IMP.
+#define CACHE_IMP_ENCODING_PTRAUTH 3 // Method cache contains ptrauth'd IMP.
+
+#if __PTRAUTH_INTRINSICS__
+// Always use ptrauth when it's supported.
+#define CACHE_IMP_ENCODING CACHE_IMP_ENCODING_PTRAUTH
+#elif defined(__arm__)
+// 32-bit ARM uses no encoding.
+#define CACHE_IMP_ENCODING CACHE_IMP_ENCODING_NONE
+#else
+// Everything else uses ISA ^ IMP.
+#define CACHE_IMP_ENCODING CACHE_IMP_ENCODING_ISA_XOR
+#endif
+
+#define CACHE_MASK_STORAGE_OUTLINED 1
+#define CACHE_MASK_STORAGE_HIGH_16 2
+#define CACHE_MASK_STORAGE_LOW_4 3
+#define CACHE_MASK_STORAGE_HIGH_16_BIG_ADDRS 4
+
+#if defined(__arm64__) && __LP64__
+#if TARGET_OS_OSX || TARGET_OS_SIMULATOR
+#define CACHE_MASK_STORAGE CACHE_MASK_STORAGE_HIGH_16_BIG_ADDRS
+#else
+#define CACHE_MASK_STORAGE CACHE_MASK_STORAGE_HIGH_16
+#endif
+#elif defined(__arm64__) && !__LP64__
+#define CACHE_MASK_STORAGE CACHE_MASK_STORAGE_LOW_4
+#else
+#define CACHE_MASK_STORAGE CACHE_MASK_STORAGE_OUTLINED
+#endif
+
+// Constants used for signing/authing isas. This doesn't quite belong
+// here, but the asm files can't import other headers.
+#define ISA_SIGNING_DISCRIMINATOR 0x6AE1
+#define ISA_SIGNING_DISCRIMINATOR_CLASS_SUPERCLASS 0xB5AB
+
+#define ISA_SIGNING_KEY ptrauth_key_process_independent_data
+
+// ISA signing authentication modes. Set ISA_SIGNING_AUTH_MODE to one
+// of these to choose how ISAs are authenticated.
+#define ISA_SIGNING_STRIP 1 // Strip the signature whenever reading an ISA.
+#define ISA_SIGNING_AUTH  2 // Authenticate the signature on all ISAs.
+
+
+// ISA signing modes. Set ISA_SIGNING_SIGN_MODE to one of these to
+// choose how ISAs are signed.
+#define ISA_SIGNING_SIGN_NONE       1 // Sign no ISAs.
+#define ISA_SIGNING_SIGN_ONLY_SWIFT 2 // Only sign ISAs of Swift objects.
+#define ISA_SIGNING_SIGN_ALL        3 // Sign all ISAs.
+
+#if __has_feature(ptrauth_objc_isa_strips) || __has_feature(ptrauth_objc_isa_signs) || __has_feature(ptrauth_objc_isa_authenticates)
+#   if __has_feature(ptrauth_objc_isa_authenticates)
+#       define ISA_SIGNING_AUTH_MODE ISA_SIGNING_AUTH
+#   else
+#       define ISA_SIGNING_AUTH_MODE ISA_SIGNING_STRIP
+#   endif
+#   if __has_feature(ptrauth_objc_isa_signs)
+#       define ISA_SIGNING_SIGN_MODE ISA_SIGNING_SIGN_ALL
+#   else
+#       define ISA_SIGNING_SIGN_MODE ISA_SIGNING_SIGN_NONE
+#   endif
+#else
+#   if __has_feature(ptrauth_objc_isa)
+#       define ISA_SIGNING_AUTH_MODE ISA_SIGNING_AUTH
+#       define ISA_SIGNING_SIGN_MODE ISA_SIGNING_SIGN_ALL
+#   else
+#       define ISA_SIGNING_AUTH_MODE ISA_SIGNING_STRIP
+#       define ISA_SIGNING_SIGN_MODE ISA_SIGNING_SIGN_NONE
+#   endif
+#endif
+
+// When set, an unsigned superclass pointer is treated as Nil, which
+// will treat the class as if its superclass was weakly linked and
+// not loaded, and cause uses of the class to resolve to Nil.
+#define SUPERCLASS_SIGNING_TREAT_UNSIGNED_AS_NIL 0
+
+#if defined(__arm64__) && TARGET_OS_IOS && !TARGET_OS_SIMULATOR && !TARGET_OS_MACCATALYST
+#define CONFIG_USE_PREOPT_CACHES 1
+#else
+#define CONFIG_USE_PREOPT_CACHES 0
+#endif
+
+// When set to 1, small methods in the shared cache have a direct
+// offset to a selector. When set to 0, small methods in the shared
+// cache have the same format as other small methods, with an offset
+// to a selref.
+#define CONFIG_SHARED_CACHE_RELATIVE_DIRECT_SELECTORS 1
 
 #endif

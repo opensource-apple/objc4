@@ -26,23 +26,6 @@
 #include "objc-private.h"
 #include "objc-file.h"
 
-// Segment and section names are 16 bytes and may be un-terminated.
-bool segnameEquals(const char *lhs, const char *rhs) {
-    return 0 == strncmp(lhs, rhs, 16);
-}
-
-bool segnameStartsWith(const char *segname, const char *prefix) {
-    return 0 == strncmp(segname, prefix, strlen(prefix));
-}
-
-bool sectnameEquals(const char *lhs, const char *rhs) {
-    return segnameEquals(lhs, rhs);
-}
-
-bool sectnameStartsWith(const char *sectname, const char *prefix) {
-    return segnameStartsWith(sectname, prefix);
-}
-
 
 // Look for a __DATA or __DATA_CONST or __DATA_DIRTY section 
 // with the given name that stores an array of T.
@@ -68,7 +51,7 @@ T* getDataSection(const headerType *mhdr, const char *sectname,
         return getDataSection<type>(mhdr, sectname, nil, outCount);     \
     }                                                                   \
     type *name(const header_info *hi, size_t *outCount) {               \
-        return getDataSection<type>(hi->mhdr, sectname, nil, outCount); \
+        return getDataSection<type>(hi->mhdr(), sectname, nil, outCount); \
     }
 
 //      function name                 content type     section name
@@ -76,14 +59,21 @@ GETSECT(_getObjc2SelectorRefs,        SEL,             "__objc_selrefs");
 GETSECT(_getObjc2MessageRefs,         message_ref_t,   "__objc_msgrefs"); 
 GETSECT(_getObjc2ClassRefs,           Class,           "__objc_classrefs");
 GETSECT(_getObjc2SuperRefs,           Class,           "__objc_superrefs");
-GETSECT(_getObjc2ClassList,           classref_t,      "__objc_classlist");
-GETSECT(_getObjc2NonlazyClassList,    classref_t,      "__objc_nlclslist");
-GETSECT(_getObjc2CategoryList,        category_t *,    "__objc_catlist");
-GETSECT(_getObjc2NonlazyCategoryList, category_t *,    "__objc_nlcatlist");
-GETSECT(_getObjc2ProtocolList,        protocol_t *,    "__objc_protolist");
+GETSECT(_getObjc2ClassList,           classref_t const,      "__objc_classlist");
+GETSECT(_getObjc2NonlazyClassList,    classref_t const,      "__objc_nlclslist");
+GETSECT(_getObjc2CategoryList,        category_t * const,    "__objc_catlist");
+GETSECT(_getObjc2CategoryList2,       category_t * const,    "__objc_catlist2");
+GETSECT(_getObjc2NonlazyCategoryList, category_t * const,    "__objc_nlcatlist");
+GETSECT(_getObjc2ProtocolList,        protocol_t * const,    "__objc_protolist");
 GETSECT(_getObjc2ProtocolRefs,        protocol_t *,    "__objc_protorefs");
-GETSECT(getLibobjcInitializers,       Initializer,   "__objc_init_func");
+GETSECT(getLibobjcInitializers,       UnsignedInitializer, "__objc_init_func");
 
+uint32_t *getLibobjcInitializerOffsets(const headerType *mhdr, size_t *outCount) {
+    unsigned long byteCount = 0;
+    uint32_t *offsets = (uint32_t *)getsectiondata(mhdr, "__TEXT", "__objc_init_offs", &byteCount);
+    if (outCount) *outCount = byteCount / sizeof(uint32_t);
+    return offsets;
+}
 
 objc_image_info *
 _getObjcImageInfo(const headerType *mhdr, size_t *outBytes)
@@ -92,31 +82,15 @@ _getObjcImageInfo(const headerType *mhdr, size_t *outBytes)
                                            outBytes, nil);
 }
 
-
-static const segmentType *
-getsegbynamefromheader(const headerType *mhdr, const char *segname)
-{
-    const segmentType *seg = (const segmentType *) (mhdr + 1);
-    for (unsigned long i = 0; i < mhdr->ncmds; i++){
-        if (seg->cmd == SEGMENT_CMD  &&  segnameEquals(seg->segname, segname)) {
-            return seg;
-        }
-        seg = (const segmentType *)((char *)seg + seg->cmdsize);
-    }
-    return nil;
-}
-
 // Look for an __objc* section other than __objc_imageinfo
 static bool segmentHasObjcContents(const segmentType *seg)
 {
-    if (seg) {
-        for (uint32_t i = 0; i < seg->nsects; i++) {
-            const sectionType *sect = ((const sectionType *)(seg+1))+i;
-            if (sectnameStartsWith(sect->sectname, "__objc_")  &&  
-                !sectnameEquals(sect->sectname, "__objc_imageinfo")) 
-            {
-                return true;
-            }
+    for (uint32_t i = 0; i < seg->nsects; i++) {
+        const sectionType *sect = ((const sectionType *)(seg+1))+i;
+        if (sectnameStartsWith(sect->sectname, "__objc_")  &&
+            !sectnameEquals(sect->sectname, "__objc_imageinfo"))
+        {
+            return true;
         }
     }
 
@@ -127,16 +101,17 @@ static bool segmentHasObjcContents(const segmentType *seg)
 bool
 _hasObjcContents(const header_info *hi)
 {
-    const segmentType *data = 
-        getsegbynamefromheader(hi->mhdr, "__DATA");
-    const segmentType *data_const = 
-        getsegbynamefromheader(hi->mhdr, "__DATA_CONST");
-    const segmentType *data_dirty = 
-        getsegbynamefromheader(hi->mhdr, "__DATA_CONST");
+    bool foundObjC = false;
+
+    foreach_data_segment(hi->mhdr(), [&](const segmentType *seg, intptr_t slide)
+    {
+        if (segmentHasObjcContents(seg)) foundObjC = true;
+    });
+
+    return foundObjC;
     
-    return segmentHasObjcContents(data) 
-        || segmentHasObjcContents(data_const) 
-        || segmentHasObjcContents(data_dirty);
 }
 
+
+// OBJC2
 #endif

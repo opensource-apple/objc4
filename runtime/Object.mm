@@ -35,13 +35,6 @@ typedef struct objc_object *id;
 
 #if __OBJC2__
 
-__OSX_AVAILABLE_STARTING(__MAC_10_0, __IPHONE_NA)
-OBJC_ROOT_CLASS
-@interface Object { 
-    Class isa; 
-} 
-@end
-
 @implementation Object
 
 + (id)initialize
@@ -99,7 +92,6 @@ OBJC_ROOT_CLASS
 #include "Object.h"
 #include "Protocol.h"
 #include "objc-runtime.h"
-#include "objc-auto.h"
 
 
 // Error Messages

@@ -95,11 +95,19 @@
 #include "objc-private.h"
 #include "message.h"
 #include "objc-initialize.h"
+#include "DenseMapExtras.h"
 
 /* classInitLock protects CLS_INITIALIZED and CLS_INITIALIZING, and 
  * is signalled when any class is done initializing. 
  * Threads that are waiting for a class to finish initializing wait on this. */
-static monitor_t classInitLock;
+monitor_t classInitLock;
+
+
+struct _objc_willInitializeClassCallback {
+    _objc_func_willInitializeClass f;
+    void *context;
+};
+static GlobalSmallVector<_objc_willInitializeClassCallback, 1> willInitializeFuncs;
 
 
 /***********************************************************************
@@ -122,7 +130,7 @@ typedef struct _objc_initializing_classes {
 * If create == YES, create the list when no classes are being initialized by this thread.
 * If create == NO, return nil when no classes are being initialized by this thread.
 **********************************************************************/
-static _objc_initializing_classes *_fetchInitializingClassList(BOOL create)
+static _objc_initializing_classes *_fetchInitializingClassList(bool create)
 {
     _objc_pthread_data *data;
     _objc_initializing_classes *list;
@@ -178,7 +186,7 @@ void _destroyInitializingClassList(struct _objc_initializing_classes *list)
 * _thisThreadIsInitializingClass
 * Return TRUE if this thread is currently initializing the given class.
 **********************************************************************/
-static BOOL _thisThreadIsInitializingClass(Class cls)
+bool _thisThreadIsInitializingClass(Class cls)
 {
     int i;
 
@@ -262,9 +270,12 @@ static void _setThisThreadIsNotInitializingClass(Class cls)
 typedef struct PendingInitialize {
     Class subclass;
     struct PendingInitialize *next;
+
+    PendingInitialize(Class cls) : subclass(cls), next(nullptr) { }
 } PendingInitialize;
 
-static NXMapTable *pendingInitializeMap;
+typedef objc::DenseMap<Class, PendingInitialize *> PendingInitializeMap;
+static PendingInitializeMap *pendingInitializeMap;
 
 /***********************************************************************
 * _finishInitializing
@@ -277,16 +288,11 @@ static void _finishInitializing(Class cls, Class supercls)
     PendingInitialize *pending;
 
     classInitLock.assertLocked();
-    assert(!supercls  ||  supercls->isInitialized());
+    ASSERT(!supercls  ||  supercls->isInitialized());
 
     if (PrintInitializing) {
-        _objc_inform("INITIALIZE: %s is fully +initialized",
-                     cls->nameForLogging());
-    }
-
-    // propagate finalization affinity.
-    if (UseGC && supercls && supercls->shouldFinalizeOnMainThread()) {
-        cls->setShouldFinalizeOnMainThread();
+        _objc_inform("INITIALIZE: thread %p: %s is fully +initialized",
+                     objc_thread_self(), cls->nameForLogging());
     }
 
     // mark this class as fully +initialized
@@ -296,21 +302,23 @@ static void _finishInitializing(Class cls, Class supercls)
     
     // mark any subclasses that were merely waiting for this class
     if (!pendingInitializeMap) return;
-    pending = (PendingInitialize *)NXMapGet(pendingInitializeMap, cls);
-    if (!pending) return;
 
-    NXMapRemove(pendingInitializeMap, cls);
-    
+    auto it = pendingInitializeMap->find(cls);
+    if (it == pendingInitializeMap->end()) return;
+
+    pending = it->second;
+    pendingInitializeMap->erase(it);
+
     // Destroy the pending table if it's now empty, to save memory.
-    if (NXCountMapTable(pendingInitializeMap) == 0) {
-        NXFreeMapTable(pendingInitializeMap);
+    if (pendingInitializeMap->size() == 0) {
+        delete pendingInitializeMap;
         pendingInitializeMap = nil;
     }
 
     while (pending) {
         PendingInitialize *next = pending->next;
         if (pending->subclass) _finishInitializing(pending->subclass, cls);
-        free(pending);
+        delete pending;
         pending = next;
     }
 }
@@ -323,26 +331,159 @@ static void _finishInitializing(Class cls, Class supercls)
 **********************************************************************/
 static void _finishInitializingAfter(Class cls, Class supercls)
 {
-    PendingInitialize *pending;
 
     classInitLock.assertLocked();
 
     if (PrintInitializing) {
-        _objc_inform("INITIALIZE: %s waiting for superclass +[%s initialize]",
-                     cls->nameForLogging(), supercls->nameForLogging());
+        _objc_inform("INITIALIZE: thread %p: class %s will be marked as fully "
+                     "+initialized after superclass +[%s initialize] completes",
+                     objc_thread_self(), cls->nameForLogging(),
+                     supercls->nameForLogging());
     }
 
     if (!pendingInitializeMap) {
-        pendingInitializeMap = 
-            NXCreateMapTable(NXPtrValueMapPrototype, 10);
+        pendingInitializeMap = new PendingInitializeMap{10};
         // fixme pre-size this table for CF/NSObject +initialize
     }
 
-    pending = (PendingInitialize *)malloc(sizeof(*pending));
-    pending->subclass = cls;
-    pending->next = (PendingInitialize *)
-        NXMapGet(pendingInitializeMap, supercls);
-    NXMapInsert(pendingInitializeMap, supercls, pending);
+    PendingInitialize *pending = new PendingInitialize{cls};
+    auto result = pendingInitializeMap->try_emplace(supercls, pending);
+    if (!result.second) {
+        pending->next = result.first->second;
+        result.first->second = pending;
+    }
+}
+
+
+// Provide helpful messages in stack traces.
+OBJC_EXTERN __attribute__((noinline, used, visibility("hidden")))
+void waitForInitializeToComplete(Class cls)
+    asm("_WAITING_FOR_ANOTHER_THREAD_TO_FINISH_CALLING_+initialize");
+OBJC_EXTERN __attribute__((noinline, used, visibility("hidden")))
+void callInitialize(Class cls)
+    asm("_CALLING_SOME_+initialize_METHOD");
+
+
+void waitForInitializeToComplete(Class cls)
+{
+    if (PrintInitializing) {
+        _objc_inform("INITIALIZE: thread %p: blocking until +[%s initialize] "
+                     "completes", objc_thread_self(), cls->nameForLogging());
+    }
+
+    monitor_locker_t lock(classInitLock);
+    while (!cls->isInitialized()) {
+        classInitLock.wait();
+    }
+    asm("");
+}
+
+
+void callInitialize(Class cls)
+{
+    ((void(*)(Class, SEL))objc_msgSend)(cls, @selector(initialize));
+    asm("");
+}
+
+
+/***********************************************************************
+* classHasTrivialInitialize
+* Returns true if the class has no +initialize implementation or 
+* has a +initialize implementation that looks empty.
+* Any root class +initialize implemetation is assumed to be trivial.
+**********************************************************************/
+static bool classHasTrivialInitialize(Class cls)
+{
+    if (cls->isRootClass() || cls->isRootMetaclass()) return true;
+
+    Class rootCls = cls->ISA()->ISA()->getSuperclass();
+    
+    IMP rootImp = lookUpImpOrNilTryCache(rootCls, @selector(initialize), rootCls->ISA());
+    IMP imp = lookUpImpOrNilTryCache(cls, @selector(initialize), cls->ISA());
+    return (imp == nil  ||  imp == (IMP)&objc_noop_imp  ||  imp == rootImp);
+}
+
+
+/***********************************************************************
+* lockAndFinishInitializing
+* Mark a class as finished initializing and notify waiters, or queue for later.
+* If the superclass is also done initializing, then update 
+*   the info bits and notify waiting threads.
+* If not, update them later. (This can happen if this +initialize 
+*   was itself triggered from inside a superclass +initialize.)
+**********************************************************************/
+static void lockAndFinishInitializing(Class cls, Class supercls)
+{
+    monitor_locker_t lock(classInitLock);
+    if (!supercls  ||  supercls->isInitialized()) {
+        _finishInitializing(cls, supercls);
+    } else {
+        _finishInitializingAfter(cls, supercls);
+    }
+}
+
+
+/***********************************************************************
+* performForkChildInitialize
+* +initialize after fork() is problematic. It's possible for the 
+* fork child process to call some +initialize that would deadlock waiting 
+* for another +initialize in the parent process. 
+* We wouldn't know how much progress it made therein, so we can't
+* act as if +initialize completed nor can we restart +initialize
+* from scratch.
+*
+* Instead we proceed introspectively. If the class has some
+* +initialize implementation, we halt. If the class has no
+* +initialize implementation of its own, we continue. Root
+* class +initialize is assumed to be empty if it exists.
+*
+* We apply this rule even if the child's +initialize does not appear 
+* to be blocked by anything. This prevents races wherein the +initialize
+* deadlock only rarely hits. Instead we disallow it even when we "won" 
+* the race. 
+*
+* Exception: processes that are single-threaded when fork() is called 
+* have no restrictions on +initialize in the child. Examples: sshd and httpd.
+*
+* Classes that wish to implement +initialize and be callable after 
+* fork() must use an atfork() handler to provoke +initialize in fork prepare.
+**********************************************************************/
+
+// Called before halting when some +initialize 
+// method can't be called after fork().
+BREAKPOINT_FUNCTION(
+    void objc_initializeAfterForkError(Class cls)
+);
+
+void performForkChildInitialize(Class cls, Class supercls)
+{
+    if (classHasTrivialInitialize(cls)) {
+        if (PrintInitializing) {
+            _objc_inform("INITIALIZE: thread %p: skipping trivial +[%s "
+                         "initialize] in fork() child process",
+                         objc_thread_self(), cls->nameForLogging());
+        }
+        lockAndFinishInitializing(cls, supercls);
+    }
+    else {
+        if (PrintInitializing) {
+            _objc_inform("INITIALIZE: thread %p: refusing to call +[%s "
+                         "initialize] in fork() child process because "
+                         "it may have been in progress when fork() was called",
+                         objc_thread_self(), cls->nameForLogging());
+        }
+        _objc_inform_now_and_on_crash
+            ("+[%s initialize] may have been in progress in another thread "
+             "when fork() was called.",
+             cls->nameForLogging());
+        objc_initializeAfterForkError(cls);
+        _objc_fatal
+            ("+[%s initialize] may have been in progress in another thread "
+             "when fork() was called. We cannot safely call it or "
+             "ignore it in the fork() child process. Crashing instead. "
+             "Set a breakpoint on objc_initializeAfterForkError to debug.",
+             cls->nameForLogging());
+    }
 }
 
 
@@ -350,26 +491,30 @@ static void _finishInitializingAfter(Class cls, Class supercls)
 * class_initialize.  Send the '+initialize' message on demand to any
 * uninitialized class. Force initialization of superclasses first.
 **********************************************************************/
-void _class_initialize(Class cls)
+void initializeNonMetaClass(Class cls)
 {
-    assert(!cls->isMetaClass());
+    ASSERT(!cls->isMetaClass());
 
     Class supercls;
-    BOOL reallyInitialize = NO;
+    bool reallyInitialize = NO;
 
     // Make sure super is done initializing BEFORE beginning to initialize cls.
     // See note about deadlock above.
-    supercls = cls->superclass;
+    supercls = cls->getSuperclass();
     if (supercls  &&  !supercls->isInitialized()) {
-        _class_initialize(supercls);
+        initializeNonMetaClass(supercls);
     }
     
     // Try to atomically set CLS_INITIALIZING.
+    SmallVector<_objc_willInitializeClassCallback, 1> localWillInitializeFuncs;
     {
         monitor_locker_t lock(classInitLock);
         if (!cls->isInitialized() && !cls->isInitializing()) {
             cls->setInitializing();
             reallyInitialize = YES;
+
+            // Grab a copy of the will-initialize funcs with the lock held.
+            localWillInitializeFuncs.initFrom(willInitializeFuncs);
         }
     }
     
@@ -378,32 +523,55 @@ void _class_initialize(Class cls)
         
         // Record that we're initializing this class so we can message it.
         _setThisThreadIsInitializingClass(cls);
+
+        if (MultithreadedForkChild) {
+            // LOL JK we don't really call +initialize methods after fork().
+            performForkChildInitialize(cls, supercls);
+            return;
+        }
         
+        for (auto callback : localWillInitializeFuncs)
+            callback.f(callback.context, cls);
+
         // Send the +initialize message.
         // Note that +initialize is sent to the superclass (again) if 
         // this class doesn't implement +initialize. 2157218
         if (PrintInitializing) {
-            _objc_inform("INITIALIZE: calling +[%s initialize]",
-                         cls->nameForLogging());
+            _objc_inform("INITIALIZE: thread %p: calling +[%s initialize]",
+                         objc_thread_self(), cls->nameForLogging());
         }
 
-        ((void(*)(Class, SEL))objc_msgSend)(cls, SEL_initialize);
+        // Exceptions: A +initialize call that throws an exception 
+        // is deemed to be a complete and successful +initialize.
+        //
+        // Only __OBJC2__ adds these handlers. !__OBJC2__ has a
+        // bootstrapping problem of this versus CF's call to
+        // objc_exception_set_functions().
+#if __OBJC2__
+        @try
+#endif
+        {
+            callInitialize(cls);
 
-        if (PrintInitializing) {
-            _objc_inform("INITIALIZE: finished +[%s initialize]",
-                         cls->nameForLogging());
-        }        
-        
-        // Done initializing. 
-        // If the superclass is also done initializing, then update 
-        //   the info bits and notify waiting threads.
-        // If not, update them later. (This can happen if this +initialize 
-        //   was itself triggered from inside a superclass +initialize.)
-        monitor_locker_t lock(classInitLock);
-        if (!supercls  ||  supercls->isInitialized()) {
-            _finishInitializing(cls, supercls);
-        } else {
-            _finishInitializingAfter(cls, supercls);
+            if (PrintInitializing) {
+                _objc_inform("INITIALIZE: thread %p: finished +[%s initialize]",
+                             objc_thread_self(), cls->nameForLogging());
+            }
+        }
+#if __OBJC2__
+        @catch (...) {
+            if (PrintInitializing) {
+                _objc_inform("INITIALIZE: thread %p: +[%s initialize] "
+                             "threw an exception",
+                             objc_thread_self(), cls->nameForLogging());
+            }
+            @throw;
+        }
+        @finally
+#endif
+        {
+            // Done initializing.
+            lockAndFinishInitializing(cls, supercls);
         }
         return;
     }
@@ -417,12 +585,14 @@ void _class_initialize(Class cls)
         //   before blocking.
         if (_thisThreadIsInitializingClass(cls)) {
             return;
-        } else {
-            monitor_locker_t lock(classInitLock);
-            while (!cls->isInitialized()) {
-                classInitLock.wait();
-            }
+        } else if (!MultithreadedForkChild) {
+            waitForInitializeToComplete(cls);
             return;
+        } else {
+            // We're on the child side of fork(), facing a class that
+            // was initializing by some other thread when fork() was called.
+            _setThisThreadIsInitializingClass(cls);
+            performForkChildInitialize(cls, supercls);
         }
     }
     
@@ -441,4 +611,34 @@ void _class_initialize(Class cls)
         // We shouldn't be here. 
         _objc_fatal("thread-safe class init in objc runtime is buggy!");
     }
+}
+
+void _objc_addWillInitializeClassFunc(_objc_func_willInitializeClass _Nonnull func, void * _Nullable context) {
+#if __OBJC2__
+    unsigned count;
+    Class *realizedClasses;
+
+    // Fetch all currently initialized classes. Do this with classInitLock held
+    // so we don't race with setting those flags.
+    {
+        monitor_locker_t initLock(classInitLock);
+        realizedClasses = objc_copyRealizedClassList(&count);
+        for (unsigned i = 0; i < count; i++) {
+            // Remove uninitialized classes from the array.
+            if (!realizedClasses[i]->isInitializing() && !realizedClasses[i]->isInitialized())
+                realizedClasses[i] = Nil;
+        }
+
+        willInitializeFuncs.append({func, context});
+    }
+
+    // Invoke the callback for all realized classes that weren't cleared out.
+    for (unsigned i = 0; i < count; i++) {
+        if (Class cls = realizedClasses[i]) {
+            func(context, cls);
+        }
+    }
+
+    free(realizedClasses);
+#endif
 }

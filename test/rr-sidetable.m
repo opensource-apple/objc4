@@ -9,7 +9,7 @@
 #include "test.h"
 #import <Foundation/Foundation.h>
 
-#define OBJECTS 1
+#define OBJECTS 10
 #define LOOPS 256
 #define THREADS 16
 #if __x86_64__
